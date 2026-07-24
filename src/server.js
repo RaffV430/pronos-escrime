@@ -6,6 +6,8 @@ require('dotenv').config();
 const authRoutes = require('./routes/authRoutes');
 const matchRoutes = require('./routes/matchRoutes');
 const userRoutes = require('./routes/userRoutes'); // 👈 Placé ici avec les autres imports
+const podiumRoutes = require('./routes/podiumRoutes');
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -18,6 +20,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/matches', matchRoutes);
 app.use('/api/users', userRoutes); // 👈 Placé ici avec les autres routes
+app.use('/api/podium', podiumRoutes);
 
 // Route de test de santé
 app.get('/', (req, res) => {
