@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                Int                @id @default(autoincrement())
+  email             String             @unique
+  password          String
+  name              String
+  totalPoints       Int                @default(0)
+  isAdmin           Boolean            @default(false)
+  predictions       Prediction[]
+  podiumPredictions PodiumPrediction[] 
+  createdAt         DateTime           @default(now())
+}
+
+model Match {
+  id          Int          @id @default(autoincrement())
+  // La ligne ftlMatchId a été supprimée !
+  player1     String
+  player2     String
+  score1      Int?
+  score2      Int?
+  isFinished  Boolean      @default(false)
+  predictions Prediction[]
+}
+
+model Prediction {
+  id              Int      @id @default(autoincrement())
+  userId          Int 
+  matchId         Int 
+  predictedScore1 Int
+  predictedScore2 Int
+  pointsEarned    Int      @default(0)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match           Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+
+  @@unique([userId, matchId])
+}
+
+model Tournament {
+  id                Int                @id @default(autoincrement())
+  name              String
+  podiumPredictions PodiumPrediction[]
+  createdAt         DateTime           @default(now())
+}
+
+model PodiumPrediction {
+  id           Int        @id @default(autoincrement())
+  userId       Int 
+  tournamentId Int 
+  gold         String
+  silver       String
+  bronze1      String
+  bronze2      String
+  pointsEarned Int        @default(0)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([userId, tournamentId])
+}

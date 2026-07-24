@@ -1,0 +1,27 @@
+### 1. Test santé de l'API
+GET http://localhost:5000/
+
+### 2. Récupérer la liste des matchs (Matchs créés via le seed)
+GET http://localhost:5000/api/matches
+
+### 3. Inscription d'un nouvel utilisateur
+POST http://localhost:5000/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "fleurettiste_75",
+  "email": "fleuret@example.com",
+  "password": "MonMotDePasseSecurise123!"
+}
+
+### 4. Connexion d'un utilisateur
+POST http://localhost:5000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "fleuret@example.com",
+  "password": "MonMotDePasseSecurise123!"
+}
+
+### 5. Voir le classement des utilisateurs
+GET http://localhost:5000/api/matches/leaderboard
