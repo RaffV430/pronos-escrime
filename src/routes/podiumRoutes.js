@@ -119,4 +119,22 @@ router.get('/all/:tournamentId', authMiddleware, async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------
+// 4. GET : Récupérer le statut du tournoi (verrouillé ou non)
+// ---------------------------------------------------------
+router.get('/status/:tournamentId', authMiddleware, async (req, res) => {
+  try {
+    const tId = parseInt(req.params.tournamentId, 10);
+    const tournament = await prisma.tournament.findUnique({
+      where: { id: tId }
+    });
+    
+    // On renvoie l'état actuel (ou false si le tournoi n'existe pas encore)
+    res.json({ isLocked: tournament ? tournament.isPodiumLocked : false });
+  } catch (err) {
+    console.error("Erreur statut tournoi:", err);
+    res.status(500).json({ error: "Erreur lors de la récupération du statut." });
+  }
+});
+
 module.exports = router;
