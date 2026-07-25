@@ -5,20 +5,21 @@ const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// 1. Import du middleware d'authentification
 const authMiddleware = require('../middleware/auth');
 
 // ---------------------------------------------------------
-// 2. Route GET /api/auth/me (Vérification de la session active)
+// 2. Route GET /api/auth/me (Vérification de la session)
 // ---------------------------------------------------------
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, name: true, email: true, isAdmin: true, totalPoints: true }
+      select: { id: true, name: true, email: true, isAdmin: true, totalPoints: true } // On sélectionne bien 'name' ici
     });
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
-    res.json(user);
+    
+    // On renvoie 'username' pour le frontend qui attend cette variable
+    res.json({ ...user, username: user.name });
   } catch (err) {
     console.error('Erreur /me:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -40,7 +41,7 @@ router.post('/register', async (req, res) => {
 
     const existingUser = await prisma.user.findFirst({
       where: {
-        OR: [{ email: email }, { name: nameToSave }]
+        OR: [{ email: email }, { name: nameToSave }] // On cherche dans 'name'
       }
     });
 
@@ -53,12 +54,11 @@ router.post('/register', async (req, res) => {
     const newUser = await prisma.user.create({
       data: {
         email,
-        name: nameToSave,
+        name: nameToSave, // On enregistre dans la colonne 'name'
         password: hashedPassword,
       },
     });
 
-    // Validité réglée sur 24 heures pour éviter d'être déconnecté
     const token = jwt.sign(
       { userId: newUser.id, isAdmin: newUser.isAdmin },
       process.env.JWT_SECRET || 'supersecretkey',
@@ -67,7 +67,7 @@ router.post('/register', async (req, res) => {
 
     res.json({
       token,
-      user: { id: newUser.id, name: newUser.name, email: newUser.email, isAdmin: newUser.isAdmin },
+      user: { id: newUser.id, username: newUser.name, email: newUser.email, isAdmin: newUser.isAdmin },
     });
   } catch (err) {
     console.error('Erreur Register:', err);
@@ -86,9 +86,13 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Identifiant et mot de passe requis.' });
     }
 
+    // 🛡️ On cherche dans la colonne 'email' OU dans la colonne 'name' (selon pgAdmin)
     const user = await prisma.user.findFirst({
       where: {
-        OR: [{ email: email }, { name: email }]
+        OR: [
+          { email: email },
+          { name: email }
+        ]
       }
     });
 
@@ -101,7 +105,6 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Identifiant ou mot de passe incorrect.' });
     }
 
-    // Validité réglée sur 24 heures pour garder la session active
     const token = jwt.sign(
       { userId: user.id, isAdmin: user.isAdmin },
       process.env.JWT_SECRET || 'supersecretkey',
@@ -110,7 +113,7 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token,
-      user: { id: user.id, name: user.name, email: user.email, isAdmin: user.isAdmin },
+      user: { id: user.id, username: user.name, email: user.email, isAdmin: user.isAdmin },
     });
   } catch (err) {
     console.error('Erreur Login:', err);
