@@ -47,6 +47,7 @@ model Prediction {
 model Tournament {
   id                Int                @id @default(autoincrement())
   name              String
+  isPodiumLocked    Boolean            @default(false) // 🔒 L'interrupteur est ici (ouvert par défaut)
   podiumPredictions PodiumPrediction[]
   createdAt         DateTime           @default(now())
 }

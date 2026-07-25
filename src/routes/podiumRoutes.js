@@ -4,6 +4,9 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const authMiddleware = require('../middleware/auth');
 
+// ---------------------------------------------------------
+// 1. POST : Enregistrer un pronostic (avec blocage si fermé)
+// ---------------------------------------------------------
 router.post('/', authMiddleware, async (req, res) => {
   const { tournamentId, gold, silver, bronze1, bronze2 } = req.body;
   
@@ -14,8 +17,8 @@ router.post('/', authMiddleware, async (req, res) => {
   try {
     const tId = parseInt(tournamentId, 10);
 
-    // S'assurer que le tournoi existe en base
-    await prisma.tournament.upsert({
+    // S'assurer que le tournoi existe en base (et on récupère ses informations dans la constante 'tournament')
+    const tournament = await prisma.tournament.upsert({
       where: { id: tId },
       update: {},
       create: { 
@@ -23,6 +26,11 @@ router.post('/', authMiddleware, async (req, res) => {
         name: `Tournoi ${tId}` 
       }
     });
+
+    // 🔒 VÉRIFICATION DU VERROUILLAGE : On bloque si isPodiumLocked est sur true
+    if (tournament.isPodiumLocked) {
+      return res.status(403).json({ error: "Les pronostics sont verrouillés pour cette compétition." });
+    }
 
     // Enregistrer ou mettre à jour le pronostic
     const prediction = await prisma.podiumPrediction.upsert({
@@ -50,7 +58,45 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
-// Récupérer les pronostics de tous les utilisateurs pour un tournoi
+// ---------------------------------------------------------
+// 2. PUT : Verrouiller / Déverrouiller le tournoi (Admin)
+// ---------------------------------------------------------
+router.put('/:tournamentId/toggle-lock', authMiddleware, async (req, res) => {
+  try {
+    // Sécurité : on vérifie que l'utilisateur est bien admin
+    if (!req.user.isAdmin) {
+      return res.status(403).json({ error: "Accès non autorisé." });
+    }
+
+    const tId = parseInt(req.params.tournamentId, 10);
+    const { isLocked } = req.body; // Le frontend enverra { "isLocked": true } ou false
+
+    // On s'assure que le tournoi existe avant de le verrouiller
+    await prisma.tournament.upsert({
+      where: { id: tId },
+      update: {},
+      create: { id: tId, name: `Tournoi ${tId}` }
+    });
+
+    // On met à jour l'état de l'interrupteur
+    const updatedTournament = await prisma.tournament.update({
+      where: { id: tId },
+      data: { isPodiumLocked: isLocked }
+    });
+
+    res.json({ 
+      message: `Pronostics ${isLocked ? 'verrouillés' : 'ouverts'}.`, 
+      tournament: updatedTournament 
+    });
+  } catch (err) {
+    console.error('Erreur lors du verrouillage:', err);
+    res.status(500).json({ error: 'Erreur serveur lors de la modification du verrouillage' });
+  }
+});
+
+// ---------------------------------------------------------
+// 3. GET : Récupérer les pronostics de tous les utilisateurs
+// ---------------------------------------------------------
 router.get('/all/:tournamentId', authMiddleware, async (req, res) => {
   const { tournamentId } = req.params;
 
@@ -61,7 +107,7 @@ router.get('/all/:tournamentId', authMiddleware, async (req, res) => {
       where: { tournamentId: tId },
       include: {
         user: {
-          select: { username: true } // On récupère juste le nom d'utilisateur pour l'anonymat/affichage
+          select: { name: true } // Utilisation de 'name' basé sur ton schéma Prisma
         }
       }
     });
