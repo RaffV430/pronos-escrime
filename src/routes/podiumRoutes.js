@@ -5,6 +5,23 @@ const prisma = new PrismaClient();
 const authMiddleware = require('../middleware/auth');
 
 // ---------------------------------------------------------
+// 4. GET : Récupérer le statut du tournoi (PLACÉ EN PREMIER pour éviter les conflits)
+// ---------------------------------------------------------
+router.get('/tournament-status/:tournamentId', authMiddleware, async (req, res) => {
+  try {
+    const tId = parseInt(req.params.tournamentId, 10);
+    const tournament = await prisma.tournament.findUnique({
+      where: { id: tId }
+    });
+    
+    res.json({ isLocked: tournament ? tournament.isPodiumLocked : false });
+  } catch (err) {
+    console.error("Erreur statut tournoi:", err);
+    res.status(500).json({ error: "Erreur lors de la récupération du statut." });
+  }
+});
+
+// ---------------------------------------------------------
 // 1. POST : Enregistrer un pronostic (avec blocage si fermé)
 // ---------------------------------------------------------
 router.post('/', authMiddleware, async (req, res) => {
@@ -17,7 +34,6 @@ router.post('/', authMiddleware, async (req, res) => {
   try {
     const tId = parseInt(tournamentId, 10);
 
-    // S'assurer que le tournoi existe en base (et on récupère ses informations dans la constante 'tournament')
     const tournament = await prisma.tournament.upsert({
       where: { id: tId },
       update: {},
@@ -27,12 +43,10 @@ router.post('/', authMiddleware, async (req, res) => {
       }
     });
 
-    // 🔒 VÉRIFICATION DU VERROUILLAGE : On bloque si isPodiumLocked est sur true
     if (tournament.isPodiumLocked) {
       return res.status(403).json({ error: "Les pronostics sont verrouillés pour cette compétition." });
     }
 
-    // Enregistrer ou mettre à jour le pronostic
     const prediction = await prisma.podiumPrediction.upsert({
       where: {
         userId_tournamentId: {
@@ -63,22 +77,19 @@ router.post('/', authMiddleware, async (req, res) => {
 // ---------------------------------------------------------
 router.put('/:tournamentId/toggle-lock', authMiddleware, async (req, res) => {
   try {
-    // Sécurité : on vérifie que l'utilisateur est bien admin
     if (!req.user.isAdmin) {
       return res.status(403).json({ error: "Accès non autorisé." });
     }
 
     const tId = parseInt(req.params.tournamentId, 10);
-    const { isLocked } = req.body; // Le frontend enverra { "isLocked": true } ou false
+    const { isLocked } = req.body;
 
-    // On s'assure que le tournoi existe avant de le verrouiller
     await prisma.tournament.upsert({
       where: { id: tId },
       update: {},
       create: { id: tId, name: `Tournoi ${tId}` }
     });
 
-    // On met à jour l'état de l'interrupteur
     const updatedTournament = await prisma.tournament.update({
       where: { id: tId },
       data: { isPodiumLocked: isLocked }
@@ -107,7 +118,7 @@ router.get('/all/:tournamentId', authMiddleware, async (req, res) => {
       where: { tournamentId: tId },
       include: {
         user: {
-          select: { name: true } // Utilisation de 'name' basé sur ton schéma Prisma
+          select: { name: true }
         }
       }
     });
@@ -116,24 +127,6 @@ router.get('/all/:tournamentId', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error("Erreur GET all podiums:", error);
     res.status(500).json({ error: "Erreur lors de la récupération des pronostics." });
-  }
-});
-
-// ---------------------------------------------------------
-// 4. GET : Récupérer le statut du tournoi (verrouillé ou non)
-// ---------------------------------------------------------
-router.get('/status/:tournamentId', authMiddleware, async (req, res) => {
-  try {
-    const tId = parseInt(req.params.tournamentId, 10);
-    const tournament = await prisma.tournament.findUnique({
-      where: { id: tId }
-    });
-    
-    // On renvoie l'état actuel (ou false si le tournoi n'existe pas encore)
-    res.json({ isLocked: tournament ? tournament.isPodiumLocked : false });
-  } catch (err) {
-    console.error("Erreur statut tournoi:", err);
-    res.status(500).json({ error: "Erreur lors de la récupération du statut." });
   }
 });
 
