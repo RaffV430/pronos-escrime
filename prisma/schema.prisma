@@ -20,14 +20,15 @@ model User {
 }
 
 model Match {
-  id          Int          @id @default(autoincrement())
-  // La ligne ftlMatchId a été supprimée !
-  player1     String
-  player2     String
-  score1      Int?
-  score2      Int?
-  isFinished  Boolean      @default(false)
-  predictions Prediction[]
+  id            Int          @id @default(autoincrement())
+  competitionId Int?         
+  competition   Competition? @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  player1       String
+  player2       String
+  score1        Int?
+  score2        Int?
+  isFinished    Boolean      @default(false)
+  predictions   Prediction[]
 }
 
 model Prediction {
@@ -45,25 +46,37 @@ model Prediction {
 }
 
 model Tournament {
+  id           Int           @id @default(autoincrement())
+  name         String        
+  isLocked     Boolean       @default(false) 
+  competitions Competition[]
+  createdAt    DateTime      @default(now())
+}
+
+model Competition {
   id                Int                @id @default(autoincrement())
-  name              String
-  isPodiumLocked    Boolean            @default(false) // 🔒 L'interrupteur est ici (ouvert par défaut)
+  tournamentId      Int
+  tournament        Tournament         @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  name              String             
+  sheetTabName      String?            
+  isPodiumLocked    Boolean            @default(false) 
   podiumPredictions PodiumPrediction[]
+  matches           Match[]
   createdAt         DateTime           @default(now())
 }
 
 model PodiumPrediction {
-  id           Int        @id @default(autoincrement())
-  userId       Int 
-  tournamentId Int 
-  gold         String
-  silver       String
-  bronze1      String
-  bronze2      String
-  pointsEarned Int        @default(0)
-  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
-  createdAt    DateTime   @default(now())
+  id            Int          @id @default(autoincrement())
+  userId        Int
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  competitionId Int?         
+  competition   Competition? @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  
+  gold          String
+  silver        String
+  bronze1       String
+  bronze2       String
+  pointsEarned  Int          @default(0)
 
-  @@unique([userId, tournamentId])
+  @@unique([userId, competitionId])
 }

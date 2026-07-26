@@ -1,17 +1,20 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const authMiddleware = require('../middleware/auth');
-
-// 1. Import de notre service Google Sheet
 const { syncMatchesFromSheet } = require('../services/sheetSync'); 
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// 1. Liste de tous les matchs
+// 1. Liste de tous les matchs (avec filtre optionnel par competitionId)
 router.get('/', async (req, res) => {
   try {
+    const { competitionId } = req.query;
+    
+    const filter = competitionId ? { competitionId: parseInt(competitionId, 10) } : {};
+
     const matches = await prisma.match.findMany({
+      where: filter,
       include: { predictions: true },
       orderBy: { id: 'asc' },
     });
@@ -22,14 +25,20 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 2. Synchronisation Google Sheet
+// 2. Synchronisation Google Sheet ciblée par compétition
 router.post('/sync-sheet', async (req, res) => {
+  const { competitionId } = req.body;
+  
+  if (!competitionId) {
+    return res.status(400).json({ error: 'Veuillez sélectionner une compétition pour synchroniser.' });
+  }
+
   try {
-    const result = await syncMatchesFromSheet();
+    const result = await syncMatchesFromSheet(competitionId);
     res.json({ message: 'Synchronisation terminée !', details: result });
   } catch (error) {
     console.error('Erreur synchro Sheet:', error);
-    res.status(500).json({ error: 'Échec de la synchronisation' });
+    res.status(500).json({ error: error.message || 'Échec de la synchronisation' });
   }
 });
 
@@ -85,7 +94,7 @@ router.post('/:id/predict', authMiddleware, async (req, res) => {
   }
 });
 
-// 5. DELETE : Supprimer un pronostic (BIEN PLACÉ EN DEHORS DE LA ROUTE PRÉCÉDENTE)
+// 5. DELETE : Supprimer un pronostic
 router.delete('/:id/predict', authMiddleware, async (req, res) => {
   const matchId = parseInt(req.params.id);
   const userId = req.user.userId;
