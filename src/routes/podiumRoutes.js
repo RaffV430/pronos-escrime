@@ -22,7 +22,7 @@ router.get('/competitions/:tournamentId', authMiddleware, async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// 4. GET : Récupérer le statut d'une compétition spécifique
+// 1. GET : Récupérer le statut d'une compétition spécifique
 // ---------------------------------------------------------
 router.get('/competition-status/:competitionId', authMiddleware, async (req, res) => {
   try {
@@ -39,28 +39,108 @@ router.get('/competition-status/:competitionId', authMiddleware, async (req, res
 });
 
 // ---------------------------------------------------------
-// 1. GET : Récupérer son propre pronostic pour une compétition
+// 2. GET : Récupérer les pronostics de tous les utilisateurs
 // ---------------------------------------------------------
-router.get('/:competitionId', authMiddleware, async (req, res) => {
+router.get('/all/competition/:competitionId', authMiddleware, async (req, res) => {
+  const { competitionId } = req.params;
+
   try {
-    const compId = parseInt(req.params.competitionId, 10);
-    const prediction = await prisma.podiumPrediction.findUnique({
-      where: {
-        userId_competitionId: {
-          userId: req.user.userId,
-          competitionId: compId
+    const compId = parseInt(competitionId, 10);
+
+    const allPredictions = await prisma.podiumPrediction.findMany({
+      where: { competitionId: compId },
+      include: {
+        user: {
+          select: { name: true }
         }
       }
     });
-    res.json(prediction || {});
-  } catch (err) {
-    console.error("Erreur chargement podium competition", err);
-    res.status(500).json({ error: "Erreur lors du chargement du podium." });
+
+    res.json(allPredictions);
+  } catch (error) {
+    console.error("Erreur GET all podiums:", error);
+    res.status(500).json({ error: "Erreur lors de la récupération des pronostics." });
   }
 });
 
 // ---------------------------------------------------------
-// 2. POST : Enregistrer un pronostic de podium (par competitionId)
+// 3. GET : Classement général du tournoi
+// ---------------------------------------------------------
+router.get('/leaderboard/:tournamentId', authMiddleware, async (req, res) => {
+  try {
+    const tournamentId = parseInt(req.params.tournamentId, 10);
+
+    const competitions = await prisma.competition.findMany({
+      where: { tournamentId },
+      select: { id: true }
+    });
+
+    const competitionIds = competitions.map(c => c.id);
+
+    const predictions = await prisma.podiumPrediction.findMany({
+      where: {
+        competitionId: { in: competitionIds }
+      },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true }
+        }
+      }
+    });
+
+    const leaderboardMap = {};
+
+    predictions.forEach(pred => {
+      const userId = pred.user.id;
+      if (!leaderboardMap[userId]) {
+        leaderboardMap[userId] = {
+          user: pred.user,
+          totalPoints: 0,
+          podiumsCount: 0
+        };
+      }
+      leaderboardMap[userId].totalPoints += pred.pointsEarned || 0;
+      leaderboardMap[userId].podiumsCount += 1;
+    });
+
+    const leaderboard = Object.values(leaderboardMap).sort((a, b) => b.totalPoints - a.totalPoints);
+
+    res.json(leaderboard);
+  } catch (error) {
+    console.error("Erreur leaderboard tournoi:", error);
+    res.status(500).json({ error: "Erreur lors du calcul du classement général." });
+  }
+});
+
+// ---------------------------------------------------------
+// 4. PUT : Verrouiller / Déverrouiller une compétition (Admin)
+// ---------------------------------------------------------
+router.put('/competition/:competitionId/toggle-lock', authMiddleware, async (req, res) => {
+  try {
+    if (!req.user.isAdmin) {
+      return res.status(403).json({ error: "Accès non autorisé." });
+    }
+
+    const compId = parseInt(req.params.competitionId, 10);
+    const { isLocked } = req.body;
+
+    const updatedCompetition = await prisma.competition.update({
+      where: { id: compId },
+      data: { isPodiumLocked: isLocked }
+    });
+
+    res.json({ 
+      message: `Pronostics ${isLocked ? 'verrouillés' : 'ouverts'} pour cette compétition.`, 
+      competition: updatedCompetition 
+    });
+  } catch (err) {
+    console.error('Erreur lors du verrouillage:', err);
+    res.status(500).json({ error: 'Erreur serveur lors de la modification du verrouillage' });
+  }
+});
+
+// ---------------------------------------------------------
+// 5. POST : Enregistrer un pronostic de podium
 // ---------------------------------------------------------
 router.post('/', authMiddleware, async (req, res) => {
   const { competitionId, gold, silver, bronze1, bronze2 } = req.body;
@@ -110,107 +190,23 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// 3. PUT : Verrouiller / Déverrouiller une compétition (Admin)
+// 6. GET : Récupérer son propre pronostic (GÉNÉRIQUE - TOUJOURS À LA FIN)
 // ---------------------------------------------------------
-router.put('/competition/:competitionId/toggle-lock', authMiddleware, async (req, res) => {
+router.get('/:competitionId', authMiddleware, async (req, res) => {
   try {
-    if (!req.user.isAdmin) {
-      return res.status(403).json({ error: "Accès non autorisé." });
-    }
-
     const compId = parseInt(req.params.competitionId, 10);
-    const { isLocked } = req.body;
-
-    const updatedCompetition = await prisma.competition.update({
-      where: { id: compId },
-      data: { isPodiumLocked: isLocked }
-    });
-
-    res.json({ 
-      message: `Pronostics ${isLocked ? 'verrouillés' : 'ouverts'} pour cette compétition.`, 
-      competition: updatedCompetition 
-    });
-  } catch (err) {
-    console.error('Erreur lors du verrouillage:', err);
-    res.status(500).json({ error: 'Erreur serveur lors de la modification du verrouillage' });
-  }
-});
-
-// ---------------------------------------------------------
-// 4. GET : Récupérer les pronostics de tous les utilisateurs pour une compétition
-// ---------------------------------------------------------
-router.get('/all/competition/:competitionId', authMiddleware, async (req, res) => {
-  const { competitionId } = req.params;
-
-  try {
-    const compId = parseInt(competitionId, 10);
-
-    const allPredictions = await prisma.podiumPrediction.findMany({
-      where: { competitionId: compId },
-      include: {
-        user: {
-          select: { name: true }
-        }
-      }
-    });
-
-    res.json(allPredictions);
-  } catch (error) {
-    console.error("Erreur GET all podiums:", error);
-    res.status(500).json({ error: "Erreur lors de la récupération des pronostics." });
-  }
-});
-
-// ---------------------------------------------------------
-// 5. GET : Classement général du tournoi (somme des points de toutes les compétitions)
-// ---------------------------------------------------------
-router.get('/leaderboard/:tournamentId', authMiddleware, async (req, res) => {
-  try {
-    const tournamentId = parseInt(req.params.tournamentId, 10);
-
-    // 1. Récupérer toutes les compétitions du tournoi
-    const competitions = await prisma.competition.findMany({
-      where: { tournamentId },
-      select: { id: true }
-    });
-
-    const competitionIds = competitions.map(c => c.id);
-
-    // 2. Récupérer tous les utilisateurs avec leurs points cumulés sur ces compétitions
-    const predictions = await prisma.podiumPrediction.findMany({
+    const prediction = await prisma.podiumPrediction.findUnique({
       where: {
-        competitionId: { in: competitionIds }
-      },
-      include: {
-        user: {
-          select: { id: true, name: true, email: true }
+        userId_competitionId: {
+          userId: req.user.userId,
+          competitionId: compId
         }
       }
     });
-
-    // 3. Agréger les points par utilisateur
-    const leaderboardMap = {};
-
-    predictions.forEach(pred => {
-      const userId = pred.user.id;
-      if (!leaderboardMap[userId]) {
-        leaderboardMap[userId] = {
-          user: pred.user,
-          totalPoints: 0,
-          podiumsCount: 0
-        };
-      }
-      leaderboardMap[userId].totalPoints += pred.pointsEarned || 0;
-      leaderboardMap[userId].podiumsCount += 1;
-    });
-
-    // Transformer en tableau et trier du plus grand au plus petit nombre de points
-    const leaderboard = Object.values(leaderboardMap).sort((a, b) => b.totalPoints - a.totalPoints);
-
-    res.json(leaderboard);
-  } catch (error) {
-    console.error("Erreur leaderboard tournoi:", error);
-    res.status(500).json({ error: "Erreur lors du calcul du classement général." });
+    res.json(prediction || {});
+  } catch (err) {
+    console.error("Erreur chargement podium competition", err);
+    res.status(500).json({ error: "Erreur lors du chargement du podium." });
   }
 });
 
