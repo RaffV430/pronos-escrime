@@ -16,6 +16,7 @@ model User {
   isAdmin           Boolean            @default(false)
   predictions       Prediction[]
   podiumPredictions PodiumPrediction[] 
+  pointAdjustments  PointAdjustment[]
   createdAt         DateTime           @default(now())
 }
 
@@ -79,4 +80,15 @@ model PodiumPrediction {
   pointsEarned  Int          @default(0)
 
   @@unique([userId, competitionId])
+}
+
+model PointAdjustment {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tournamentId  Int?     
+  competitionId Int?     
+  points        Int      
+  reason        String?  
+  createdAt     DateTime @default(now())
 }

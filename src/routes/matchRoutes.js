@@ -40,42 +40,63 @@ router.post('/sync-sheet', async (req, res) => {
   }
 });
 
-// 3. Classement général TOTAL (Calculé en temps réel : Matchs + Podiums)
+// 3. Classement général TOTAL (Avec filtres optionnels : competitionId ou tournamentId)
 router.get('/leaderboard', async (req, res) => {
   try {
-    // On récupère tous les joueurs
+    const { competitionId, tournamentId } = req.query;
+
     const users = await prisma.user.findMany({
       select: { id: true, name: true }
     });
 
-    // On récupère TOUS les pronostics de l'application
-    const allPodiumPreds = await prisma.podiumPrediction.findMany();
+    // Filtres dynamiques pour Prisma
+    const podiumFilter = {};
+    const matchFilter = {};
+    const adjustmentFilter = {};
+
+    if (competitionId) {
+      // Filtrer pour une compétition précise
+      const compIdInt = parseInt(competitionId, 10);
+      podiumFilter.competitionId = compIdInt;
+      matchFilter.match = { competitionId: compIdInt };
+      adjustmentFilter.competitionId = compIdInt;
+    } else if (tournamentId) {
+      // Filtrer pour tout un tournoi
+      const tourIdInt = parseInt(tournamentId, 10);
+      podiumFilter.competition = { tournamentId: tourIdInt };
+      matchFilter.match = { competition: { tournamentId: tourIdInt } };
+      adjustmentFilter.tournamentId = tourIdInt;
+    }
+
+    // On récupère les données filtrées
+    const allPodiumPreds = await prisma.podiumPrediction.findMany({ where: podiumFilter });
     const allMatchPreds = await prisma.prediction.findMany({
+      where: matchFilter,
       include: { match: true }
     });
+    const allAdjustments = await prisma.pointAdjustment.findMany({ where: adjustmentFilter });
 
     const leaderboard = users.map(user => {
       let podiumPoints = 0;
       let matchPoints = 0;
+      let adjustmentPoints = 0;
 
-      // Addition des points de Podiums (déjà calculés par la validation Admin)
       allPodiumPreds.filter(p => p.userId === user.id).forEach(p => {
         podiumPoints += (p.pointsEarned || 0);
       });
 
-      // Calcul direct des points de Matchs selon le barème officiel
+      allAdjustments.filter(a => a.userId === user.id).forEach(a => {
+        adjustmentPoints += (a.points || 0);
+      });
+
       allMatchPreds.filter(p => p.userId === user.id).forEach(p => {
         const match = p.match;
         if (match && match.isFinished) {
-          // Déterminer le vainqueur réel (1 pour Tireur1, 2 pour Tireur2, 0 pour égalité/erreur)
           const actualWinner = match.score1 > match.score2 ? 1 : (match.score2 > match.score1 ? 2 : 0);
-          // Déterminer le vainqueur pronostiqué
           const predWinner = p.predictedScore1 > p.predictedScore2 ? 1 : (p.predictedScore2 > p.predictedScore1 ? 2 : 0);
           
           if (actualWinner !== 0 && actualWinner === predWinner) {
-            matchPoints += 1; // Le vainqueur est bon = 1 point
-            
-            // Vérification du bonus de score exact (+3 points)
+            matchPoints += 1; 
             if (p.predictedScore1 === match.score1 && p.predictedScore2 === match.score2) {
               matchPoints += 3; 
             }
@@ -88,9 +109,10 @@ router.get('/leaderboard', async (req, res) => {
         name: user.name,
         matchPoints,
         podiumPoints,
-        totalPoints: matchPoints + podiumPoints // Le vrai Total Absolu
+        adjustmentPoints,
+        totalPoints: matchPoints + podiumPoints + adjustmentPoints 
       };
-    }).sort((a, b) => b.totalPoints - a.totalPoints); // Tri du premier au dernier
+    }).sort((a, b) => b.totalPoints - a.totalPoints); 
 
     res.json(leaderboard);
   } catch (error) {
