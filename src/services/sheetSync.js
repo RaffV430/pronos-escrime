@@ -4,7 +4,7 @@ const prisma = new PrismaClient();
 
 async function syncMatchesFromSheet(competitionId) {
   try {
-    // 1. On récupère la compétition en base pour obtenir son URL CSV (stockée dans sheetTabName)
+    // 1. On récupère la compétition en base pour obtenir son URL CSV
     const competition = await prisma.competition.findUnique({
       where: { id: parseInt(competitionId) }
     });
@@ -38,17 +38,24 @@ async function syncMatchesFromSheet(competitionId) {
 
       const score1 = parseInt(rawScore1) || 0;
       const score2 = parseInt(rawScore2) || 0;
-      const matchId = parseInt(rawId);
+      
+      // ==========================================
+      // CORRECTION : L'IDENTIFIANT COMPOSÉ UNIQUE
+      // ==========================================
+      // On fusionne l'ID de la compétition et l'ID du match (ex: Compétition 2, Match 15 = 200015)
+      const matchId = (parseInt(competitionId) * 10000) + parseInt(rawId);
+      // ==========================================
 
       const isFinished = (rawScore1 !== '' || rawScore2 !== '');
 
       const player1 = record.Tireur1 && record.Tireur1.trim() !== '' ? record.Tireur1.trim() : "En attente...";
       const player2 = record.Tireur2 && record.Tireur2.trim() !== '' ? record.Tireur2.trim() : "En attente...";
 
+      // Mise à jour du match officiel
       await prisma.match.upsert({
         where: { id: matchId },
         update: {
-          competitionId: parseInt(competitionId), // On relie le match à la compétition
+          competitionId: parseInt(competitionId),
           player1: player1,
           player2: player2,
           score1: score1,
@@ -57,7 +64,7 @@ async function syncMatchesFromSheet(competitionId) {
         },
         create: {
           id: matchId,
-          competitionId: parseInt(competitionId), // On relie le match à la compétition
+          competitionId: parseInt(competitionId),
           player1: player1, 
           player2: player2,
           score1: score1,
@@ -66,6 +73,47 @@ async function syncMatchesFromSheet(competitionId) {
         },
       });
       
+      // ==========================================
+      // LE MOTEUR DE CALCUL DES POINTS
+      // ==========================================
+      if (isFinished) {
+        // On récupère tous les pronostics liés à ce match
+        const predictions = await prisma.prediction.findMany({
+          where: { matchId: matchId }
+        });
+
+        // Pour chaque pronostic, on calcule les points
+        for (const prono of predictions) {
+          let points = 0;
+
+          // 🚨 --- TON BARÈME OFFICIEL --- 🚨
+          // On utilise les bons noms de colonnes pour la table Prediction
+          const pronoS1 = prono.predictedScore1;
+          const pronoS2 = prono.predictedScore2;
+
+          const vainqueurReel = score1 > score2 ? 1 : (score2 > score1 ? 2 : 0);
+          const vainqueurProno = pronoS1 > pronoS2 ? 1 : (pronoS2 > pronoS1 ? 2 : 0);
+
+          // Règle 1 : Bon vainqueur trouvé (+1 point)
+          if (vainqueurReel !== 0 && vainqueurReel === vainqueurProno) {
+            points += 1; 
+          }
+
+          // Règle 2 : Score exact (+3 points bonus, soit 4 points au total)
+          if (pronoS1 === score1 && pronoS2 === score2) {
+            points += 3;
+          }
+          // 🚨 ----------------------------------------- 🚨
+
+          // On met à jour la ligne du joueur dans la table Prediction
+          await prisma.prediction.update({
+            where: { id: prono.id },
+            data: { pointsEarned: points }
+          });
+        }
+      }
+      // ==========================================
+
       vraisMatchsEnregistres++;
     }
 
