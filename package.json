@@ -6,8 +6,15 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "db:migrate": "prisma migrate dev",
-    "db:seed": "node prisma/seed.js"
+    "check": "npm run prisma:validate && npm test && npm run syntax",
+    "syntax": "find src prisma test -type f -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "test": "node --test",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "node prisma/seed.js",
+    "postinstall": "prisma generate"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +28,8 @@
     "csv-parse": "^7.0.1",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "node-cron": "^4.6.0"
   },

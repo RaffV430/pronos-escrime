@@ -1,11 +1,11 @@
 // backend/src/routes/userRoutes.js
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
+const authMiddleware = require('../middleware/auth');
 
 // Récupérer le classement des utilisateurs
-router.get('/leaderboard', async (req, res) => {
+router.get('/leaderboard', authMiddleware, async (req, res) => {
   try {
     const users = await prisma.user.findMany({
       select: {

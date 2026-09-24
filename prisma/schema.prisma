@@ -11,7 +11,7 @@ model User {
   id                Int                @id @default(autoincrement())
   email             String             @unique
   password          String
-  name              String
+  name              String             @unique
   totalPoints       Int                @default(0)
   isAdmin           Boolean            @default(false)
   predictions       Prediction[]
@@ -22,8 +22,8 @@ model User {
 
 model Match {
   id            Int          @id @default(autoincrement())
-  competitionId Int?         
-  competition   Competition? @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  competitionId Int
+  competition   Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
   player1       String
   player2       String
   score1        Int?
@@ -70,8 +70,8 @@ model PodiumPrediction {
   id            Int          @id @default(autoincrement())
   userId        Int
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  competitionId Int?         
-  competition   Competition? @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  competitionId Int
+  competition   Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
   
   gold          String
   silver        String
@@ -80,6 +80,7 @@ model PodiumPrediction {
   pointsEarned  Int          @default(0)
 
   @@unique([userId, competitionId])
+  @@index([competitionId])
 }
 
 model PointAdjustment {
@@ -91,4 +92,8 @@ model PointAdjustment {
   points        Int      
   reason        String?  
   createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([tournamentId])
+  @@index([competitionId])
 }

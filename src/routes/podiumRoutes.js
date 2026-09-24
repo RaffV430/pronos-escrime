@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 const authMiddleware = require('../middleware/auth');
 
 // ---------------------------------------------------------
@@ -42,6 +41,11 @@ router.get('/all/competition/:competitionId', authMiddleware, async (req, res) =
   const { competitionId } = req.params;
   try {
     const compId = parseInt(competitionId, 10);
+    const competition = await prisma.competition.findUnique({ where: { id: compId } });
+    if (!competition) return res.status(404).json({ error: 'Compétition introuvable.' });
+    if (!competition.isPodiumLocked && !req.user.isAdmin) {
+      return res.status(403).json({ error: 'Les pronostics seront visibles après leur clôture.' });
+    }
     const allPredictions = await prisma.podiumPrediction.findMany({
       where: { competitionId: compId },
       include: { user: { select: { name: true } } }
@@ -66,7 +70,7 @@ router.get('/leaderboard/:tournamentId', authMiddleware, async (req, res) => {
 
     const predictions = await prisma.podiumPrediction.findMany({
       where: { competitionId: { in: competitionIds } },
-      include: { user: { select: { id: true, name: true, email: true } } }
+      include: { user: { select: { id: true, name: true } } }
     });
 
     const leaderboardMap = {};
@@ -128,6 +132,9 @@ router.post('/competition/:competitionId/resolve', authMiddleware, async (req, r
     const offBronze2 = normalize(bronze2);
     
     const officialAll = [offGold, offSilver, offBronze1, offBronze2];
+    if (new Set(officialAll).size !== 4) {
+      return res.status(400).json({ error: 'Les quatre médaillés doivent être différents.' });
+    }
     const officialBronzes = [offBronze1, offBronze2];
 
     // Récupérer tous les pronostics pour cette compétition
@@ -135,46 +142,29 @@ router.post('/competition/:competitionId/resolve', authMiddleware, async (req, r
       where: { competitionId: compId }
     });
 
-    let updateCount = 0;
+    await prisma.$transaction(async (tx) => {
+      for (const pred of predictions) {
+        let points = 0;
+        const pGold = normalize(pred.gold);
+        const pSilver = normalize(pred.silver);
+        const pBronze1 = normalize(pred.bronze1);
+        const pBronze2 = normalize(pred.bronze2);
 
-    for (const pred of predictions) {
-      let points = 0;
-      const pGold = normalize(pred.gold);
-      const pSilver = normalize(pred.silver);
-      const pBronze1 = normalize(pred.bronze1);
-      const pBronze2 = normalize(pred.bronze2);
+        if (pGold === offGold) points += 15;
+        else if (officialAll.includes(pGold)) points += 5;
+        if (pSilver === offSilver) points += 15;
+        else if (officialAll.includes(pSilver)) points += 5;
+        if (officialBronzes.includes(pBronze1)) points += 15;
+        else if (officialAll.includes(pBronze1)) points += 5;
+        if (officialBronzes.includes(pBronze2)) points += 15;
+        else if (officialAll.includes(pBronze2)) points += 5;
 
-      // Calcul OR
-      if (pGold === offGold) points += 15;
-      else if (officialAll.includes(pGold)) points += 5;
-
-      // Calcul ARGENT
-      if (pSilver === offSilver) points += 15;
-      else if (officialAll.includes(pSilver)) points += 5;
-
-      // Calcul BRONZE 1 (Interchangeable)
-      if (officialBronzes.includes(pBronze1)) points += 15;
-      else if (officialAll.includes(pBronze1)) points += 5;
-
-      // Calcul BRONZE 2 (Interchangeable)
-      if (officialBronzes.includes(pBronze2)) points += 15;
-      else if (officialAll.includes(pBronze2)) points += 5;
-
-      // Sauvegarde des points dans la base de données
-      await prisma.podiumPrediction.update({
-        where: { id: pred.id },
-        data: { pointsEarned: points }
-      });
-      updateCount++;
-    }
-
-    // On verrouille la compétition automatiquement
-    await prisma.competition.update({
-      where: { id: compId },
-      data: { isPodiumLocked: true }
+        await tx.podiumPrediction.update({ where: { id: pred.id }, data: { pointsEarned: points } });
+      }
+      await tx.competition.update({ where: { id: compId }, data: { isPodiumLocked: true } });
     });
 
-    res.json({ message: `🎯 Podium officiel validé ! Les points de ${updateCount} joueurs ont été calculés et mis à jour.`, updateCount });
+    res.json({ message: `🎯 Podium officiel validé ! Les points de ${predictions.length} joueurs ont été calculés et mis à jour.`, updateCount: predictions.length });
 
   } catch (err) {
     console.error("Erreur résolution podium:", err);
@@ -197,6 +187,12 @@ router.post('/', authMiddleware, async (req, res) => {
     
     if (!competition) return res.status(404).json({ error: "Compétition introuvable." });
     if (competition.isPodiumLocked) return res.status(403).json({ error: "Les pronostics sont verrouillés." });
+
+    const normalizedPodium = [gold, silver, bronze1, bronze2]
+      .map((name) => String(name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase());
+    if (normalizedPodium.some((name) => name.length > 100) || new Set(normalizedPodium).size !== 4) {
+      return res.status(400).json({ error: 'Les quatre tireurs doivent être différents et valides.' });
+    }
 
     const prediction = await prisma.podiumPrediction.upsert({
       where: { userId_competitionId: { userId: req.user.userId, competitionId: compId } },

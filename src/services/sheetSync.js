@@ -1,129 +1,108 @@
 const { parse } = require('csv-parse/sync');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
+const { calculateMatchPoints } = require('./matchPoints');
 
-async function syncMatchesFromSheet(competitionId) {
+const GOOGLE_SHEET_HOSTS = new Set(['docs.google.com']);
+
+function assertGoogleSheetUrl(value) {
+  let url;
   try {
-    // 1. On récupère la compétition en base pour obtenir son URL CSV
-    const competition = await prisma.competition.findUnique({
-      where: { id: parseInt(competitionId) }
-    });
-
-    if (!competition || !competition.sheetTabName) {
-      throw new Error("L'URL CSV de cette compétition n'est pas configurée dans la base de données.");
-    }
-
-    // 2. On utilise l'URL spécifique à cet onglet / cette compétition
-    const response = await fetch(competition.sheetTabName);
-    if (!response.ok) {
-      throw new Error(`Erreur lors de la récupération du Google Sheet : ${response.statusText}`);
-    }
-    
-    const csvData = await response.text();
-
-    const records = parse(csvData, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-    });
-
-    let vraisMatchsEnregistres = 0;
-
-    for (const record of records) {
-      const rawId = record.ID || record.Id || record.id;
-      if (!rawId) continue; // On ignore les lignes vides
-
-      const rawScore1 = record.Score1 !== undefined ? String(record.Score1).trim() : '';
-      const rawScore2 = record.Score2 !== undefined ? String(record.Score2).trim() : '';
-
-      const score1 = parseInt(rawScore1) || 0;
-      const score2 = parseInt(rawScore2) || 0;
-      
-      // ==========================================
-      // CORRECTION : L'IDENTIFIANT COMPOSÉ UNIQUE
-      // ==========================================
-      // On fusionne l'ID de la compétition et l'ID du match (ex: Compétition 2, Match 15 = 200015)
-      const matchId = (parseInt(competitionId) * 10000) + parseInt(rawId);
-      // ==========================================
-
-      const isFinished = (rawScore1 !== '' || rawScore2 !== '');
-
-      const player1 = record.Tireur1 && record.Tireur1.trim() !== '' ? record.Tireur1.trim() : "En attente...";
-      const player2 = record.Tireur2 && record.Tireur2.trim() !== '' ? record.Tireur2.trim() : "En attente...";
-
-      // Mise à jour du match officiel
-      await prisma.match.upsert({
-        where: { id: matchId },
-        update: {
-          competitionId: parseInt(competitionId),
-          player1: player1,
-          player2: player2,
-          score1: score1,
-          score2: score2,
-          isFinished: isFinished,
-        },
-        create: {
-          id: matchId,
-          competitionId: parseInt(competitionId),
-          player1: player1, 
-          player2: player2,
-          score1: score1,
-          score2: score2,
-          isFinished: isFinished,
-        },
-      });
-      
-      // ==========================================
-      // LE MOTEUR DE CALCUL DES POINTS
-      // ==========================================
-      if (isFinished) {
-        // On récupère tous les pronostics liés à ce match
-        const predictions = await prisma.prediction.findMany({
-          where: { matchId: matchId }
-        });
-
-        // Pour chaque pronostic, on calcule les points
-        for (const prono of predictions) {
-          let points = 0;
-
-          // 🚨 --- TON BARÈME OFFICIEL --- 🚨
-          // On utilise les bons noms de colonnes pour la table Prediction
-          const pronoS1 = prono.predictedScore1;
-          const pronoS2 = prono.predictedScore2;
-
-          const vainqueurReel = score1 > score2 ? 1 : (score2 > score1 ? 2 : 0);
-          const vainqueurProno = pronoS1 > pronoS2 ? 1 : (pronoS2 > pronoS1 ? 2 : 0);
-
-          // Règle 1 : Bon vainqueur trouvé (+1 point)
-          if (vainqueurReel !== 0 && vainqueurReel === vainqueurProno) {
-            points += 1; 
-          }
-
-          // Règle 2 : Score exact (+3 points bonus, soit 4 points au total)
-          if (pronoS1 === score1 && pronoS2 === score2) {
-            points += 3;
-          }
-          // 🚨 ----------------------------------------- 🚨
-
-          // On met à jour la ligne du joueur dans la table Prediction
-          await prisma.prediction.update({
-            where: { id: prono.id },
-            data: { pointsEarned: points }
-          });
-        }
-      }
-      // ==========================================
-
-      vraisMatchsEnregistres++;
-    }
-
-    console.log(`✅ ${vraisMatchsEnregistres} matchs insérés/mis à jour pour la compétition ID ${competitionId}.`);
-    return { success: true, count: vraisMatchsEnregistres };
-
-  } catch (error) {
-    console.error('❌ Erreur lors de la synchronisation avec Google Sheets:', error);
-    throw error;
+    url = new URL(value);
+  } catch {
+    throw new Error("L'URL Google Sheets configurée est invalide.");
   }
+  if (url.protocol !== 'https:' || !GOOGLE_SHEET_HOSTS.has(url.hostname)) {
+    throw new Error("L'URL de synchronisation doit être une URL HTTPS docs.google.com.");
+  }
+  return url.toString();
 }
 
-module.exports = { syncMatchesFromSheet };
+function parseScore(value, field, rowNumber) {
+  const raw = value === undefined || value === null ? '' : String(value).trim();
+  if (raw === '') return null;
+  if (!/^\d{1,3}$/.test(raw)) {
+    throw new Error(`Score ${field} invalide à la ligne ${rowNumber}.`);
+  }
+  return Number(raw);
+}
+
+function parseSheetRecords(csvData, competitionId) {
+  const records = parse(csvData, { columns: true, skip_empty_lines: true, trim: true });
+  const seenIds = new Set();
+
+  return records.flatMap((record, index) => {
+    const rowNumber = index + 2;
+    const rawId = String(record.ID ?? record.Id ?? record.id ?? '').trim();
+    if (!rawId) return [];
+    if (!/^\d{1,4}$/.test(rawId)) {
+      throw new Error(`ID de match invalide à la ligne ${rowNumber}.`);
+    }
+
+    const sheetMatchId = Number(rawId);
+    if (seenIds.has(sheetMatchId)) {
+      throw new Error(`ID de match dupliqué (${sheetMatchId}) dans le Google Sheet.`);
+    }
+    seenIds.add(sheetMatchId);
+
+    const score1 = parseScore(record.Score1, '1', rowNumber);
+    const score2 = parseScore(record.Score2, '2', rowNumber);
+    if ((score1 === null) !== (score2 === null)) {
+      throw new Error(`Les deux scores doivent être renseignés ensemble à la ligne ${rowNumber}.`);
+    }
+
+    return [{
+      id: (competitionId * 10000) + sheetMatchId,
+      competitionId,
+      player1: String(record.Tireur1 ?? '').trim() || 'En attente...',
+      player2: String(record.Tireur2 ?? '').trim() || 'En attente...',
+      score1,
+      score2,
+      isFinished: score1 !== null && score2 !== null,
+    }];
+  });
+}
+
+async function syncMatchesFromSheet(competitionIdValue) {
+  const competitionId = Number(competitionIdValue);
+  if (!Number.isInteger(competitionId) || competitionId <= 0) {
+    throw new Error('Identifiant de compétition invalide.');
+  }
+
+  const competition = await prisma.competition.findUnique({ where: { id: competitionId } });
+  if (!competition?.sheetTabName) {
+    throw new Error("L'URL CSV de cette compétition n'est pas configurée.");
+  }
+
+  const response = await fetch(assertGoogleSheetUrl(competition.sheetTabName), {
+    signal: AbortSignal.timeout(15000),
+    headers: { accept: 'text/csv,text/plain;q=0.9' },
+  });
+  if (!response.ok) {
+    throw new Error(`Google Sheets a répondu avec le statut ${response.status}.`);
+  }
+
+  const matches = parseSheetRecords(await response.text(), competitionId);
+
+  await prisma.$transaction(async (tx) => {
+    for (const match of matches) {
+      await tx.match.upsert({ where: { id: match.id }, update: match, create: match });
+
+      const predictions = await tx.prediction.findMany({ where: { matchId: match.id } });
+      for (const prediction of predictions) {
+        const pointsEarned = match.isFinished
+          ? calculateMatchPoints(
+              prediction.predictedScore1,
+              prediction.predictedScore2,
+              match.score1,
+              match.score2,
+            )
+          : 0;
+        await tx.prediction.update({ where: { id: prediction.id }, data: { pointsEarned } });
+      }
+    }
+  });
+
+  return { success: true, count: matches.length };
+}
+
+module.exports = { assertGoogleSheetUrl, parseSheetRecords, syncMatchesFromSheet };

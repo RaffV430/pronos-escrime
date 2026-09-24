@@ -1,20 +1,20 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const authMiddleware = require('../middleware/auth');
+const adminMiddleware = require('../middleware/admin');
 const { syncMatchesFromSheet } = require('../services/sheetSync'); 
 
 const router = express.Router();
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // 1. Liste de tous les matchs
-router.get('/', async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const { competitionId } = req.query;
     const filter = competitionId ? { competitionId: parseInt(competitionId, 10) } : {};
 
     const matches = await prisma.match.findMany({
       where: filter,
-      include: { predictions: true },
+      include: { predictions: { where: { userId: req.user.userId } } },
       orderBy: { id: 'asc' },
     });
     res.json(matches);
@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
 });
 
 // 2. Synchronisation Google Sheet
-router.post('/sync-sheet', async (req, res) => {
+router.post('/sync-sheet', authMiddleware, adminMiddleware, async (req, res) => {
   const { competitionId } = req.body;
   if (!competitionId) {
     return res.status(400).json({ error: 'Veuillez sélectionner une compétition pour synchroniser.' });
@@ -41,7 +41,7 @@ router.post('/sync-sheet', async (req, res) => {
 });
 
 // 3. Classement général TOTAL (Avec filtres optionnels : competitionId ou tournamentId)
-router.get('/leaderboard', async (req, res) => {
+router.get('/leaderboard', authMiddleware, async (req, res) => {
   try {
     const { competitionId, tournamentId } = req.query;
 
@@ -70,10 +70,7 @@ router.get('/leaderboard', async (req, res) => {
 
     // On récupère les données filtrées
     const allPodiumPreds = await prisma.podiumPrediction.findMany({ where: podiumFilter });
-    const allMatchPreds = await prisma.prediction.findMany({
-      where: matchFilter,
-      include: { match: true }
-    });
+    const allMatchPreds = await prisma.prediction.findMany({ where: matchFilter });
     const allAdjustments = await prisma.pointAdjustment.findMany({ where: adjustmentFilter });
 
     const leaderboard = users.map(user => {
@@ -90,18 +87,7 @@ router.get('/leaderboard', async (req, res) => {
       });
 
       allMatchPreds.filter(p => p.userId === user.id).forEach(p => {
-        const match = p.match;
-        if (match && match.isFinished) {
-          const actualWinner = match.score1 > match.score2 ? 1 : (match.score2 > match.score1 ? 2 : 0);
-          const predWinner = p.predictedScore1 > p.predictedScore2 ? 1 : (p.predictedScore2 > p.predictedScore1 ? 2 : 0);
-          
-          if (actualWinner !== 0 && actualWinner === predWinner) {
-            matchPoints += 1; 
-            if (p.predictedScore1 === match.score1 && p.predictedScore2 === match.score2) {
-              matchPoints += 3; 
-            }
-          }
-        }
+        matchPoints += p.pointsEarned || 0;
       });
 
       return {
@@ -125,13 +111,19 @@ router.get('/leaderboard', async (req, res) => {
 router.post('/:id/predict', authMiddleware, async (req, res) => {
   const matchId = parseInt(req.params.id); 
   const userId = req.user.userId;
-  const { predictedScore1, predictedScore2 } = req.body;
+  const predictedScore1 = Number(req.body.predictedScore1);
+  const predictedScore2 = Number(req.body.predictedScore2);
 
-  if (predictedScore1 === undefined || predictedScore2 === undefined) {
-    return res.status(400).json({ error: 'Veuillez renseigner les deux scores.' });
+  if (!Number.isInteger(matchId) || !Number.isInteger(predictedScore1) || !Number.isInteger(predictedScore2)
+      || predictedScore1 < 0 || predictedScore2 < 0 || predictedScore1 > 999 || predictedScore2 > 999) {
+    return res.status(400).json({ error: 'Les deux scores doivent être des entiers valides.' });
   }
 
   try {
+    const match = await prisma.match.findUnique({ where: { id: matchId } });
+    if (!match) return res.status(404).json({ error: 'Match introuvable.' });
+    if (match.isFinished) return res.status(409).json({ error: 'Les pronostics sont clos pour ce match.' });
+
     const prediction = await prisma.prediction.upsert({
       where: { userId_matchId: { userId: userId, matchId: matchId } },
       update: { predictedScore1, predictedScore2 },
@@ -149,6 +141,10 @@ router.delete('/:id/predict', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
+    const match = await prisma.match.findUnique({ where: { id: matchId } });
+    if (!match) return res.status(404).json({ error: 'Match introuvable.' });
+    if (match.isFinished) return res.status(409).json({ error: 'Les pronostics sont clos pour ce match.' });
+
     await prisma.prediction.deleteMany({
       where: { userId: userId, matchId: matchId },
     });

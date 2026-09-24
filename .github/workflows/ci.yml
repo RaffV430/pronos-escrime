@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main, codex/foundation-hardening]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      JWT_SECRET: ci-only-secret-at-least-32-characters-long
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
