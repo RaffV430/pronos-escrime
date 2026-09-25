@@ -39,6 +39,7 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/matches', matchRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/podium', podiumRoutes);
+app.use('/api/pools', require('./routes/poolRoutes'));
 
 app.post('/api/admin/adjust-points', authMiddleware, adminMiddleware, async (req, res) => {
   const userId = Number(req.body.userId);

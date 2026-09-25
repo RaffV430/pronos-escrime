@@ -15,6 +15,7 @@ model User {
   totalPoints       Int                @default(0)
   isAdmin           Boolean            @default(false)
   predictions       Prediction[]
+  poolPredictions   PoolPrediction[]
   podiumPredictions PodiumPrediction[] 
   pointAdjustments  PointAdjustment[]
   createdAt         DateTime           @default(now())
@@ -63,6 +64,7 @@ model Competition {
   isPodiumLocked    Boolean            @default(false) 
   podiumPredictions PodiumPrediction[]
   matches           Match[]
+  pools             Pool[]
   createdAt         DateTime           @default(now())
 }
 
@@ -96,4 +98,49 @@ model PointAdjustment {
   @@index([userId])
   @@index([tournamentId])
   @@index([competitionId])
+}
+
+model Pool {
+  id            Int          @id @default(autoincrement())
+  competitionId Int
+  competition   Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  name          String
+  closesAt      DateTime
+  isLocked      Boolean      @default(false)
+  isFinal       Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  fencers       PoolFencer[]
+
+  @@unique([competitionId, name])
+}
+
+model PoolFencer {
+  id            Int              @id @default(autoincrement())
+  poolId        Int
+  pool          Pool             @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  name          String
+  position      Int
+  wins          Int?
+  losses        Int?
+  indicator     Int?
+  predictions   PoolPrediction[]
+
+  @@unique([poolId, position])
+}
+
+model PoolPrediction {
+  id            Int         @id @default(autoincrement())
+  userId        Int
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fencerId      Int
+  fencer        PoolFencer  @relation(fields: [fencerId], references: [id], onDelete: Cascade)
+  wins          Int
+  losses        Int
+  indicator     Int
+  createdAt     DateTime     @default(now())
+  pointsEarned  Int          @default(0)
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([userId, fencerId])
+  @@index([fencerId])
 }

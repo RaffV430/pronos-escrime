@@ -71,12 +71,17 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
     // On récupère les données filtrées
     const allPodiumPreds = await prisma.podiumPrediction.findMany({ where: podiumFilter });
     const allMatchPreds = await prisma.prediction.findMany({ where: matchFilter });
+    const poolFilter = competitionId
+      ? { fencer: { pool: { competitionId: parseInt(competitionId, 10) } } }
+      : tournamentId ? { fencer: { pool: { competition: { tournamentId: parseInt(tournamentId, 10) } } } } : {};
+    const allPoolPreds = await prisma.poolPrediction.findMany({ where: poolFilter });
     const allAdjustments = await prisma.pointAdjustment.findMany({ where: adjustmentFilter });
 
     const leaderboard = users.map(user => {
       let podiumPoints = 0;
       let matchPoints = 0;
       let adjustmentPoints = 0;
+      const poolPoints = allPoolPreds.filter(p => p.userId === user.id).reduce((sum, p) => sum + p.pointsEarned, 0);
 
       allPodiumPreds.filter(p => p.userId === user.id).forEach(p => {
         podiumPoints += (p.pointsEarned || 0);
@@ -96,7 +101,8 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
         matchPoints,
         podiumPoints,
         adjustmentPoints,
-        totalPoints: matchPoints + podiumPoints + adjustmentPoints 
+        poolPoints,
+        totalPoints: matchPoints + podiumPoints + adjustmentPoints + poolPoints 
       };
     }).sort((a, b) => b.totalPoints - a.totalPoints); 
 
