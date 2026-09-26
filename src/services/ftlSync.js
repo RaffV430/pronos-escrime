@@ -18,6 +18,15 @@ function verifyPage(html,config){
  if(norm($('.desktop.tournName').text())!==norm(config.tournament)||norm($('.desktop.eventName').text())!==norm(config.event)||norm($('.desktop.eventTime').text())!==norm(config.eventTime))throw failure('Identité ou date de l’épreuve officielle différente de la configuration.');
  return $;
 }
+async function poolMatrices($,url,client){
+ if($('table.poolTable').length)return $;
+ // FTL's pool page publishes placeholders and loads each observed pool ID separately.
+ const ids=$('div[id^="pool_"]').toArray().map(el=>$(el).attr('id').slice(5));
+ if(!ids.length||ids.length>256||ids.some(id=>!/^[a-f0-9]{32}$/i.test(id))||new Set(ids).size!==ids.length)throw failure('Matrices de poules non encore publiées.');
+ const fragments=new Array(ids.length);let next=0;
+ await Promise.all(Array.from({length:Math.min(4,ids.length)},async()=>{while(next<ids.length){const i=next++;fragments[i]=await client.get(`${url}/${ids[i]}?dbut=true`);}}));
+ return load(fragments.map((html,i)=>`<div id="pool_${ids[i]}">${html}</div>`).join(''));
+}
 function podiumFromResults(rows,c,matches){
  if(!Array.isArray(rows))throw failure('Classement officiel non reconnu.');
  const final=matches.find(m=>m.round==='T2'&&m.isFinished),bronze=matches.find(m=>m.round==='Bronze'&&m.isFinished);
@@ -129,7 +138,7 @@ async function syncPools(db,c,config,actorId,client){
  for(const url of urls){
   try{
    const match=poolPattern.exec(url);if(!match||c.rosterSourceUrl?.toUpperCase()!==`https://www.fencingtimelive.com/events/competitors/${match[1]}`.toUpperCase())throw failure('Source de poules différente de la liste des engagés.');
-   const $=verifyPage(await client.get(url),config),tables=$('table.poolTable').toArray();
+   const $=await poolMatrices(verifyPage(await client.get(url),config),url,client),tables=$('table.poolTable').toArray();
    if(!tables.length)throw failure('Matrices de poules non encore publiées.');
    const poolNumbers=tables.map(t=>clean($(t).parent().find('.poolNum').text()));if(new Set(poolNumbers).size!==poolNumbers.length)throw failure('Numéros de poules ambigus.');
    for(const table of tables){
@@ -200,4 +209,4 @@ async function syncStatus(db,competitionId){
  const [last,latest]=await Promise.all([db.auditLog.findFirst({where:{targetType:'Competition',targetId:competitionId,action:{in:[DONE,FAILED]}},orderBy:{createdAt:'desc'}}),db.auditLog.findFirst({where:{action:START},orderBy:{createdAt:'desc'}})]);
  return {last:last?{at:last.createdAt,success:last.action===DONE,summary:last.after}:null,nextAllowedAt:latest?new Date(latest.createdAt.getTime()+COOLDOWN):null};
 }
-module.exports={syncCompetition,syncStatus,observe,planMatches,applyObservation,podiumFromResults,verifyPage};
+module.exports={syncCompetition,syncStatus,observe,planMatches,applyObservation,podiumFromResults,verifyPage,poolMatrices};

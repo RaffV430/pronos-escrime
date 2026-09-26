@@ -52,3 +52,10 @@ test('verified future event preview and creation preserve full roster and are id
  const saved=await save(db,{previewId:result.previewId,name:'Fleuret hommes'},1);assert.equal(saved.competitionId,70);assert.equal(competitions[0].podiumRoster[0].name,'FRANCE');
  assert.deepEqual(await save(db,{previewId:result.previewId},1),saved);assert.equal(tournaments,1);assert.equal(competitions.length,1);
 });
+test('official lazy pool placeholders load every matrix before parsing',async()=>{
+ const {poolMatrices}=require('../src/services/ftlSync'),id='07A7D819A07D44FA943BA793177B78AC',url='https://www.fencingtimelive.com/pools/scores/3E02F3DE23C54C7683C06B07F23E85F4/2D104659D71C4335A2D95211E4343ED7';
+ const $=load(fixture),html=$('table.poolTable').first().parent().html(),calls=[];
+ const result=await poolMatrices(load(`<div id="pool_${id}"></div>`),url,{get:async u=>{calls.push(u);return html;}});
+ assert.equal(parsePools(result.html()).length,1);assert.equal(calls[0],`${url}/${id}?dbut=true`);
+ await assert.rejects(poolMatrices(load('<div id="pool_invalid"></div>'),url,{get:()=>assert.fail()}),/publiées/);
+});
