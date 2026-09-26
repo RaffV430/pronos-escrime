@@ -1,10 +1,11 @@
 const {load}=require('cheerio');
 const {failure}=require('./ftlClient');
+const {localTime}=require('./localTime');
 const clean=s=>String(s||'').normalize('NFC').replace(/\s+/g,' ').trim();
 const norm=s=>clean(s).toLowerCase();
 const name=($,cell)=>clean($(cell).find('.tcln,.tcfn').map((i,e)=>$(e).text()).get().join(' '));
 function roundName(label){return /^Table of (\d+)$/.test(label)?`T${label.slice(9)}`:({'Semi-Finals':'T4','Finals':'T2','Bronze Medal':'Bronze'})[label];}
-function parseTable(html,{roster,date,offset='+03:00',maxScore=45,bronze=false,requireComplete=true}){
+function parseTable(html,{roster,date,offset='+03:00',timezone,maxScore=45,bronze=false,requireComplete=true}){
  const $=load(html),table=$('table.elimTableau');
  if(table.length!==1)throw failure('Structure du tableau officiel non reconnue.');
  const rows=table.find('tr').toArray(),headers=$(rows[0]).children('th').map((i,e)=>clean($(e).text())).get();
@@ -48,7 +49,7 @@ function parseTable(html,{roster,date,offset='+03:00',maxScore=45,bronze=false,r
    const times=[...timeText.matchAll(/\b(\d{1,2}):(\d{2})\s*(AM|PM)\b/g)];
    if(times.length>1)throw failure('Horaire de rencontre ambigu.');
    let startsAt=null;
-   if(times.length){let [,h,m,ampm]=times[0];if(+h<1||+h>12||+m>59)throw failure('Horaire invalide.');h=(+h%12)+(ampm==='PM'?12:0);startsAt=new Date(`${date}T${String(h).padStart(2,'0')}:${m}:00${offset}`);}
+   if(times.length){let [,h,m,ampm]=times[0];if(+h<1||+h>12||+m>59)throw failure('Horaire invalide.');h=(+h%12)+(ampm==='PM'?12:0);startsAt=timezone?localTime(date,h,+m,timezone):new Date(`${date}T${String(h).padStart(2,'0')}:${m}:00${offset}`);}
    out.push({sourceKey:`${label}:${i/2+1}`,round,player1,player2,startsAt,winner,score1,score2,resultType,isFinished});
   }
   rounds.push({round,previousRound:bronze?'T4':c?roundName(headers[c-1]):null,expectedMatchCount:c||bronze?capacity/2:real});

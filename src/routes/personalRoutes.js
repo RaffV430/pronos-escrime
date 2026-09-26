@@ -36,7 +36,8 @@ router.get('/summary/:tournamentId',async(req,res)=>{
   const predictions=await db.prediction.findMany({where:{userId,match:{competition:{tournamentId},isFinished:true}},include:{match:true}});
   const exact=predictions.filter(p=>p.match.resultType!=='MEDICAL_WITHDRAWAL'&&p.predictedScore1===p.match.score1&&p.predictedScore2===p.match.score2).length;
   const winners=predictions.filter(p=>calculateMatchPoints(p.predictedScore1,p.predictedScore2,p.match.score1,p.match.score2,p.match.winner,p.match.resultType)>0).length;
-  res.json({ranking:rows.find(r=>r.id===userId),players:rows.length,played:predictions.length,exact,winners,accuracy:predictions.length?Math.round(winners*100/predictions.length):null});
+  const progress=await require('../services/rankingHistory').rankProgress(db,tournamentId,userId);
+  res.json({progress,ranking:rows.find(r=>r.id===userId),players:rows.length,played:predictions.length,exact,winners,accuracy:predictions.length?Math.round(winners*100/predictions.length):null});
  }catch{res.status(500).json({error:'Bilan indisponible.'});}
 });
 module.exports=router;

@@ -17,6 +17,7 @@ router.get('/competitions/:tournamentId', authMiddleware, async (req, res) => {
     const tournamentId = parseInt(req.params.tournamentId, 10);
     const competitions = await prisma.competition.findMany({
       where: { tournamentId },
+      include: {matches:{select:{id:true}}},
       orderBy: { id: 'asc' }
     });
     res.json(competitions);
