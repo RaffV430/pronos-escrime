@@ -1,10 +1,11 @@
 const express = require('express');
 const prisma = require('../lib/prisma');
 const auth = require('../middleware/auth');
-const admin = require('../middleware/admin');
+const { createAdminMiddleware } = require('../middleware/admin');
 const { fail, id, validatePrediction, closed, fencerClosed, sourceUnavailable, validateSource, comparison, validateResults, poolPoints } = require('../services/poolRules');
 
 function createPoolRouter(db = prisma) {
+  const admin = createAdminMiddleware(db);
   const router = express.Router();
   router.use(auth);
   const handle = fn => async (req, res) => {

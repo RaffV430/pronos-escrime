@@ -12,6 +12,7 @@ function fixture() {
   let locked = false;
   const db = {
     $queryRaw: async () => { locked = true; return [{ id: 1 }]; },
+    user: { findUnique: async ({where}) => ({isAdmin:where.id===3}) },
     pool: {
       findUnique: async () => pool,
       update: async ({ data }) => Object.assign(pool, data),
@@ -46,7 +47,7 @@ test('HTTP authentication, ownership, closure and corrected results', async t =>
   const base = `http://127.0.0.1:${server.address().port}/pools`;
   const request = async (path, method = 'GET', body, userId = 1, isAdmin = false) => {
     const headers = { 'Content-Type': 'application/json' };
-    if (userId) headers.Authorization = `Bearer ${jwt.sign({ userId, isAdmin }, process.env.JWT_SECRET)}`;
+    if (userId) headers.Authorization = `Bearer ${jwt.sign({ userId: isAdmin ? 3 : userId, isAdmin:false }, process.env.JWT_SECRET)}`;
     return fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   };
   assert.equal((await request('?competitionId=1', 'GET', undefined, null)).status, 401);

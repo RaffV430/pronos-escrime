@@ -118,7 +118,7 @@ router.put('/competition/:competitionId/toggle-lock', authMiddleware, adminMiddl
 // ---------------------------------------------------------
 // 5. POST : Valider le podium officiel et calculer les points (ADMIN)
 // ---------------------------------------------------------
-router.post('/competition/:competitionId/resolve', authMiddleware, async (req, res) => {
+router.post('/competition/:competitionId/resolve', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) return res.status(403).json({ error: "Accès non autorisé." });
 

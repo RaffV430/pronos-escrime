@@ -12,7 +12,7 @@ const db = {
   competition: { findUnique:async()=>competition, update:async({data})=>{assert.ok(locked); return Object.assign(competition,data);} },
   podiumPrediction: { upsert:async({create})=>{assert.ok(locked);return create;} },
   prediction: { upsert:async({create})=>{assert.ok(locked);return create;}, deleteMany:async()=>{assert.ok(locked);}, findMany:async()=>picks, update:async({where,data})=>Object.assign(picks.find(p=>p.id===where.id),data) },
-  user:{findFirst:async({where})=>{assert.equal(where.OR[0].email.mode,'insensitive');assert.equal(where.OR[1].name.mode,'insensitive');return {id:1};},findMany:async({where})=>where.name?.equals==='Alice'?[{id:7,name:'Alice'}]:[],create:async()=>{throw {code:'P2002'};}},
+  user:{findUnique:async({where})=>({isAdmin:where.id===2}),findFirst:async({where})=>{assert.equal(where.OR[0].email.mode,'insensitive');assert.equal(where.OR[1].name.mode,'insensitive');return {id:1};},findMany:async({where})=>where.name?.equals==='Alice'?[{id:7,name:'Alice'}]:[],create:async()=>{throw {code:'P2002'};}},
   pointAdjustment: {create:async({data})=>data},
 };
 db.$transaction = async fn => {locked=false;return fn(db);};
@@ -20,7 +20,7 @@ require.cache[require.resolve('../src/lib/prisma')]={exports:db};
 const {app}=require('../src/server');
 test('HTTP admin reopen, podium persistence, medical closure, registration conflicts and points by name',async t=>{
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>{server.closeAllConnections();server.close();});
- const request=async(path,method='GET',body,admin=false)=>fetch(`http://127.0.0.1:${server.address().port}/api${path}`,{method,headers:{'Content-Type':'application/json',Authorization:`Bearer ${jwt.sign({userId:1,isAdmin:admin},process.env.JWT_SECRET)}`},body:body===undefined?undefined:JSON.stringify(body)});
+ const request=async(path,method='GET',body,admin=false)=>fetch(`http://127.0.0.1:${server.address().port}/api${path}`,{method,headers:{'Content-Type':'application/json',Authorization:`Bearer ${jwt.sign({userId:admin?2:1,isAdmin:false},process.env.JWT_SECRET)}`},body:body===undefined?undefined:JSON.stringify(body)});
  assert.equal((await request('/matches/1/predict','POST',{predictedScore1:15,predictedScore2:8})).status,409);
  assert.equal((await request('/matches/1/lock','PUT',{isLocked:false})).status,403);
  assert.equal((await request('/matches/1/lock','PUT',{isLocked:false},true)).status,200);
