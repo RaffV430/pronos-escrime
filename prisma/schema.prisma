@@ -37,6 +37,9 @@ model Match {
   sourceKey     String?
   sourceCheckedAt DateTime?
   round         String?
+  manualUnlock  Boolean      @default(false)
+  winner        Int?
+  resultType    String?
 
   @@unique([competitionId, sourceKey])
 }
@@ -69,7 +72,8 @@ model Competition {
   tournament        Tournament         @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   name              String             
   sheetTabName      String?            
-  isPodiumLocked    Boolean            @default(false) 
+  isPodiumLocked    Boolean            @default(false)
+  podiumManualUnlock Boolean           @default(false) 
   podiumPredictions PodiumPrediction[]
   matches           Match[]
   pools             Pool[]

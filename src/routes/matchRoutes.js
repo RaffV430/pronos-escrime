@@ -5,7 +5,7 @@ const { syncMatchesFromSheet } = require('../services/sheetSync');
 
 const router = express.Router();
 const prisma = require('../lib/prisma');
-const { matchClosed } = require('../lib/matchLock');
+const { matchClosed, closesAt } = require('../lib/matchLock');
 
 // 1. Liste de tous les matchs
 router.get('/', authMiddleware, async (req, res) => {
@@ -18,7 +18,7 @@ router.get('/', authMiddleware, async (req, res) => {
       include: { predictions: { where: { userId: req.user.userId } } },
       orderBy: { id: 'asc' },
     });
-    res.json(matches.map(match => ({ ...match, isClosed: matchClosed(match) })));
+    res.json(matches.map(match => ({ ...match, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
   } catch (error) {
     console.error('Erreur matches:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des matchs.' });
@@ -167,6 +167,40 @@ router.delete('/:id/predict', authMiddleware, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la suppression du pronostic' });
   }
+});
+
+// Manual reopening overrides the deadline until an administrator locks again.
+router.put('/:id/lock', authMiddleware, adminMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0 || typeof req.body.isLocked !== 'boolean') return res.status(400).json({ error: 'Verrouillage invalide.' });
+  try {
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${id} FOR UPDATE`;
+      const match = await tx.match.findUnique({ where: { id } });
+      if (!match) return { status: 404, error: 'Match introuvable.' };
+      if (match.isFinished) return { status: 409, error: 'Un match terminé ne peut pas être rouvert.' };
+      return { match: await tx.match.update({ where: { id }, data: { isLocked: req.body.isLocked, manualUnlock: !req.body.isLocked } }) };
+    });
+    res.status(result.status || 200).json(result);
+  } catch { res.status(500).json({ error: 'Impossible de modifier le verrouillage.' }); }
+});
+
+router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (req, res) => {
+  const id = Number(req.params.id), winner = req.body.winner;
+  if (!Number.isInteger(id) || id <= 0 || ![1, 2].includes(winner)) return res.status(400).json({ error: 'Choisissez le tireur qualifié (1 ou 2).' });
+  try {
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${id} FOR UPDATE`;
+      const current = await tx.match.findUnique({ where: { id } });
+      if (!current) return { status: 404, error: 'Match introuvable.' };
+      const match = await tx.match.update({ where: { id }, data: { winner, resultType: 'MEDICAL_WITHDRAWAL', score1: null, score2: null, isFinished: true, isLocked: true, manualUnlock: false } });
+      const predictions = await tx.prediction.findMany({ where: { matchId: id } });
+      const { calculateMatchPoints } = require('../services/matchPoints');
+      for (const p of predictions) await tx.prediction.update({ where: { id: p.id }, data: { pointsEarned: calculateMatchPoints(p.predictedScore1, p.predictedScore2, null, null, winner, 'MEDICAL_WITHDRAWAL') } });
+      return { match };
+    });
+    res.status(result.status || 200).json(result);
+  } catch { res.status(500).json({ error: 'Impossible de valider le retrait médical.' }); }
 });
 
 module.exports = router;

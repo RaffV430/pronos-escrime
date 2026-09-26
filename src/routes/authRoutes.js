@@ -31,7 +31,7 @@ router.get('/me', authMiddleware, async (req, res) => {
 // ---------------------------------------------------------
 router.post('/register', async (req, res) => {
   try {
-    const username = String(req.body.username || '').trim();
+    const username = String(req.body.username || '').normalize('NFC').trim();
     const email = String(req.body.email || '').trim().toLowerCase();
     const password = String(req.body.password || '');
 
@@ -52,7 +52,7 @@ router.post('/register', async (req, res) => {
 
     const existingUser = await prisma.user.findFirst({
       where: {
-        OR: [{ email: email }, { name: nameToSave }] // On cherche dans 'name'
+        OR: [{ email: { equals: email, mode: 'insensitive' } }, { name: { equals: nameToSave, mode: 'insensitive' } }] // On cherche dans 'name'
       }
     });
 
@@ -81,6 +81,7 @@ router.post('/register', async (req, res) => {
       user: { id: newUser.id, username: newUser.name, email: newUser.email, isAdmin: newUser.isAdmin },
     });
   } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Ce nom ou cette adresse e-mail est déjà utilisé.' });
     console.error('Erreur Register:', err);
     res.status(500).json({ error: "Erreur lors de l'inscription." });
   }

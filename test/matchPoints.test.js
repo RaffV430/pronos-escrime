@@ -14,3 +14,11 @@ test('attribue 0 point pour le mauvais vainqueur ou une égalité', () => {
   assert.equal(calculateMatchPoints(12, 15, 15, 12), 0);
   assert.equal(calculateMatchPoints(10, 10, 15, 12), 0);
 });
+
+test('medical withdrawal awards winner only, including corrected winner and draws', () => {
+  assert.equal(calculateMatchPoints(15, 0, null, null, 1, 'MEDICAL_WITHDRAWAL'), 1);
+  assert.equal(calculateMatchPoints(15, 0, null, null, 2, 'MEDICAL_WITHDRAWAL'), 0);
+  assert.equal(calculateMatchPoints(0, 15, null, null, 2, 'MEDICAL_WITHDRAWAL'), 1);
+  assert.equal(calculateMatchPoints(0, 0, null, null, 1, 'MEDICAL_WITHDRAWAL'), 0);
+  assert.equal(calculateMatchPoints(15, 0, null, null), 0);
+});

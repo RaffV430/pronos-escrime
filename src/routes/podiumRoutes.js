@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const authMiddleware = require('../middleware/auth');
+const adminMiddleware = require('../middleware/admin');
+const { podiumClosed } = require('../lib/matchLock');
+async function isClosed(tx, competition) {
+  return podiumClosed(competition, await tx.match.findMany({ where: { competitionId: competition.id } }));
+}
 
 // ---------------------------------------------------------
 // 0. GET : Récupérer toutes les compétitions d'un tournoi
@@ -28,7 +33,7 @@ router.get('/competition-status/:competitionId', authMiddleware, async (req, res
     const competition = await prisma.competition.findUnique({
       where: { id: compId }
     });
-    res.json({ isLocked: competition ? competition.isPodiumLocked : false });
+    res.json({ isLocked: competition ? await isClosed(prisma, competition) : false });
   } catch (err) {
     res.status(500).json({ error: "Erreur lors de la récupération du statut." });
   }
@@ -43,7 +48,7 @@ router.get('/all/competition/:competitionId', authMiddleware, async (req, res) =
     const compId = parseInt(competitionId, 10);
     const competition = await prisma.competition.findUnique({ where: { id: compId } });
     if (!competition) return res.status(404).json({ error: 'Compétition introuvable.' });
-    if (!competition.isPodiumLocked && !req.user.isAdmin) {
+    if (!(await isClosed(prisma, competition)) && !req.user.isAdmin) {
       return res.status(403).json({ error: 'Les pronostics seront visibles après leur clôture.' });
     }
     const allPredictions = await prisma.podiumPrediction.findMany({
@@ -93,15 +98,16 @@ router.get('/leaderboard/:tournamentId', authMiddleware, async (req, res) => {
 // ---------------------------------------------------------
 // 4. PUT : Verrouiller / Déverrouiller une compétition (Admin)
 // ---------------------------------------------------------
-router.put('/competition/:competitionId/toggle-lock', authMiddleware, async (req, res) => {
+router.put('/competition/:competitionId/toggle-lock', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) return res.status(403).json({ error: "Accès non autorisé." });
     const compId = parseInt(req.params.competitionId, 10);
     const { isLocked } = req.body;
 
-    const updatedCompetition = await prisma.competition.update({
-      where: { id: compId },
-      data: { isPodiumLocked: isLocked }
+    if (!Number.isInteger(compId) || typeof isLocked !== 'boolean') return res.status(400).json({ error: 'Verrouillage invalide.' });
+    const updatedCompetition = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${compId} FOR UPDATE`;
+      return tx.competition.update({ where: { id: compId }, data: { isPodiumLocked: isLocked, podiumManualUnlock: !isLocked } });
     });
     res.json({ message: `Pronostics ${isLocked ? 'verrouillés' : 'ouverts'} pour cette compétition.`, competition: updatedCompetition });
   } catch (err) {
@@ -143,6 +149,7 @@ router.post('/competition/:competitionId/resolve', authMiddleware, async (req, r
     });
 
     await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${compId} FOR UPDATE`;
       for (const pred of predictions) {
         let points = 0;
         const pGold = normalize(pred.gold);
@@ -161,7 +168,7 @@ router.post('/competition/:competitionId/resolve', authMiddleware, async (req, r
 
         await tx.podiumPrediction.update({ where: { id: pred.id }, data: { pointsEarned: points } });
       }
-      await tx.competition.update({ where: { id: compId }, data: { isPodiumLocked: true } });
+      await tx.competition.update({ where: { id: compId }, data: { isPodiumLocked: true, podiumManualUnlock: false } });
     });
 
     res.json({ message: `🎯 Podium officiel validé ! Les points de ${predictions.length} joueurs ont été calculés et mis à jour.`, updateCount: predictions.length });
@@ -183,23 +190,27 @@ router.post('/', authMiddleware, async (req, res) => {
 
   try {
     const compId = parseInt(competitionId, 10);
-    const competition = await prisma.competition.findUnique({ where: { id: compId } });
+    const result = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${compId} FOR UPDATE`;
+    const competition = await tx.competition.findUnique({ where: { id: compId } });
     
-    if (!competition) return res.status(404).json({ error: "Compétition introuvable." });
-    if (competition.isPodiumLocked) return res.status(403).json({ error: "Les pronostics sont verrouillés." });
+    if (!competition) return { status: 404, body: { error: "Compétition introuvable." } };
+    if (await isClosed(tx, competition)) return { status: 403, body: { error: "Les pronostics sont verrouillés." } };
 
     const normalizedPodium = [gold, silver, bronze1, bronze2]
       .map((name) => String(name).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase());
     if (normalizedPodium.some((name) => name.length > 100) || new Set(normalizedPodium).size !== 4) {
-      return res.status(400).json({ error: 'Les quatre tireurs doivent être différents et valides.' });
+      return { status: 400, body: { error: 'Les quatre tireurs doivent être différents et valides.' } };
     }
 
-    const prediction = await prisma.podiumPrediction.upsert({
+    const prediction = await tx.podiumPrediction.upsert({
       where: { userId_competitionId: { userId: req.user.userId, competitionId: compId } },
       update: { gold, silver, bronze1, bronze2 },
       create: { userId: req.user.userId, competitionId: compId, gold, silver, bronze1, bronze2 }
     });
-    res.json({ message: "Pronostic de podium enregistré avec succès !", prediction });
+    return { status: 200, body: { message: "Pronostic de podium enregistré avec succès !", prediction } };
+    });
+    res.status(result.status).json(result.body);
   } catch (error) {
     res.status(500).json({ error: "Erreur lors de l'enregistrement du podium." });
   }
