@@ -74,6 +74,14 @@ model Competition {
   sheetTabName      String?            
   isPodiumLocked    Boolean            @default(false)
   podiumManualUnlock Boolean           @default(false) 
+  podiumFormat String @default("INDIVIDUAL")
+  podiumRoster Json?
+  rosterSourceUrl String?
+  rosterCheckedAt DateTime?
+  officialPodium Json?
+  resultsSourceUrl String?
+  resultsVerifiedAt DateTime?
+  podiumResolvedAt DateTime?
   podiumPredictions PodiumPrediction[]
   matches           Match[]
   pools             Pool[]
@@ -91,6 +99,7 @@ model PodiumPrediction {
   silver        String
   bronze1       String
   bronze2       String
+  selectionIds Json?
   pointsEarned  Int          @default(0)
 
   @@unique([userId, competitionId])

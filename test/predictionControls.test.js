@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 process.env.JWT_SECRET = 'local-test-secret-not-for-production';
 let locked = false;
 const match = { id: 1, competitionId: 1, round: 'T128', startsAt: new Date(Date.now()-3600000), player1: 'Alice', player2: 'Bob', isFinished: false, isLocked: false };
-const competition = { id: 1, isPodiumLocked: true };
+const competition = { id: 1, isPodiumLocked: true, podiumFormat:'INDIVIDUAL', podiumRoster:['A','B','C','D'].map(id=>({id,name:id,country:'FRA'})) };
 const picks = [{id:1, predictedScore1:15, predictedScore2:8, pointsEarned:4},{id:2,predictedScore1:8,predictedScore2:15,pointsEarned:0}];
 const db = {
   $queryRaw: async () => { locked = true; return [{id:1}]; },
@@ -29,7 +29,9 @@ test('HTTP admin reopen, podium persistence, medical closure, registration confl
  assert.equal((await request('/podium/competition/1/toggle-lock','PUT',{isLocked:'false'},true)).status,400);
  assert.equal((await request('/podium/competition/1/toggle-lock','PUT',{isLocked:false},true)).status,200);
  assert.equal((await (await request('/podium/competition-status/1')).json()).isLocked,false);
- assert.equal((await request('/podium','POST',{competitionId:1,gold:'A',silver:'B',bronze1:'C',bronze2:'D'})).status,200);
+ assert.equal((await request('/podium','POST',{competitionId:1,selectionIds:{gold:'A',silver:'B',bronze1:'C',bronze2:'D'}})).status,200);
+ assert.equal((await request('/podium/competition/1/resolve','POST',{gold:'A',silver:'B',bronze1:'C',bronze2:'D'},true)).status,409);
+ assert.equal((await request('/podium','POST',{competitionId:1,gold:'A',silver:'B',bronze1:'C',bronze2:'D'})).status,400);
  assert.equal((await request('/matches/1/medical-withdrawal','PUT',{winner:2})).status,403);
  assert.equal((await request('/matches/1/medical-withdrawal','PUT',{winner:2},true)).status,200);
  assert.equal(match.isFinished,true);assert.equal(match.score1,null);assert.equal(match.winner,2);assert.deepEqual(picks.map(p=>p.pointsEarned),[0,1]);
