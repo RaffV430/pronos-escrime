@@ -25,6 +25,9 @@ test('HTTP admin reopen, podium persistence, medical closure, registration confl
  const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>{server.closeAllConnections();server.close();});
  const request=async(path,method='GET',body,admin=false)=>fetch(`http://127.0.0.1:${server.address().port}/api${path}`,{method,headers:{'Content-Type':'application/json',Authorization:`Bearer ${jwt.sign({userId:admin?2:1,isAdmin:false},process.env.JWT_SECRET)}`},body:body===undefined?undefined:JSON.stringify(body)});
  assert.equal((await request('/matches/1/predict','POST',{predictedScore1:15,predictedScore2:8})).status,409);
+ assert.equal((await request('/matches/sync-ftl','POST',{competitionId:1})).status,403);
+ assert.equal((await request('/matches/sync-ftl/1')).status,403);
+ assert.equal((await request('/matches/sync-ftl','POST',{competitionId:0},true)).status,400);
  assert.equal((await request('/matches/1/lock','PUT',{isLocked:false})).status,403);
  assert.equal((await request('/matches/1/lock','PUT',{isLocked:false},true)).status,400);
  assert.equal((await request('/matches/rounds/1/T128/unlock','PUT',{})).status,403);

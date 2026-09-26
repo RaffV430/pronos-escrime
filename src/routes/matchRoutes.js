@@ -8,6 +8,18 @@ const prisma = require('../lib/prisma');
 const { matchClosed, closesAt } = require('../lib/matchLock');
 const {timedMatches,timedMatch,reopenRound} = require('../services/roundTiming');
 
+router.get('/sync-ftl/:competitionId',authMiddleware,adminMiddleware,async(req,res)=>{
+ const id=Number(req.params.competitionId);
+ if(!Number.isSafeInteger(id)||id<=0)return res.status(400).json({error:'Épreuve invalide.'});
+ try{res.json(await require('../services/ftlSync').syncStatus(prisma,id));}catch{res.status(500).json({error:'État du contrôle indisponible.'});}
+});
+router.post('/sync-ftl',authMiddleware,adminMiddleware,async(req,res)=>{
+ const id=Number(req.body.competitionId);
+ if(!Number.isSafeInteger(id)||id<=0)return res.status(400).json({error:'Épreuve invalide.'});
+ try{res.json(await require('../services/ftlSync').syncCompetition(prisma,id,req.user.userId));}
+ catch(e){if(e.retryAfter)res.set('Retry-After',String(e.retryAfter));res.status(e.status||500).json({error:e.status?e.message:'Contrôle indisponible.',retryAfter:e.retryAfter});}
+});
+
 // 1. Liste de tous les matchs
 router.get('/', authMiddleware, async (req, res) => {
   try {
