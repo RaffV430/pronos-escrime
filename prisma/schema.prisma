@@ -15,6 +15,7 @@ model User {
   totalPoints       Int                @default(0)
   isAdmin           Boolean            @default(false)
   predictions       Prediction[]
+  poolPredictions   PoolPrediction[]
   podiumPredictions PodiumPrediction[] 
   pointAdjustments  PointAdjustment[]
   createdAt         DateTime           @default(now())
@@ -30,6 +31,17 @@ model Match {
   score2        Int?
   isFinished    Boolean      @default(false)
   predictions   Prediction[]
+  isLocked      Boolean      @default(false)
+  startsAt      DateTime?
+  sourceUrl     String?
+  sourceKey     String?
+  sourceCheckedAt DateTime?
+  round         String?
+  manualUnlock  Boolean      @default(false)
+  winner        Int?
+  resultType    String?
+
+  @@unique([competitionId, sourceKey])
 }
 
 model Prediction {
@@ -60,9 +72,19 @@ model Competition {
   tournament        Tournament         @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   name              String             
   sheetTabName      String?            
-  isPodiumLocked    Boolean            @default(false) 
+  isPodiumLocked    Boolean            @default(false)
+  podiumManualUnlock Boolean           @default(false) 
+  podiumFormat String @default("INDIVIDUAL")
+  podiumRoster Json?
+  rosterSourceUrl String?
+  rosterCheckedAt DateTime?
+  officialPodium Json?
+  resultsSourceUrl String?
+  resultsVerifiedAt DateTime?
+  podiumResolvedAt DateTime?
   podiumPredictions PodiumPrediction[]
   matches           Match[]
+  pools             Pool[]
   createdAt         DateTime           @default(now())
 }
 
@@ -77,6 +99,7 @@ model PodiumPrediction {
   silver        String
   bronze1       String
   bronze2       String
+  selectionIds Json?
   pointsEarned  Int          @default(0)
 
   @@unique([userId, competitionId])
@@ -96,4 +119,59 @@ model PointAdjustment {
   @@index([userId])
   @@index([tournamentId])
   @@index([competitionId])
+}
+
+model Pool {
+  id            Int          @id @default(autoincrement())
+  competitionId Int
+  competition   Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  name          String
+  closesAt      DateTime
+  lockMode      String       @default("FIRST_RESULT")
+  sourceUrl     String?
+  sourcePoolNumber Int?
+  sourceCheckedAt DateTime?
+  rankingSystem String?
+  rankingSourceUrl String?
+  rankingAsOf DateTime?
+  isLocked      Boolean      @default(false)
+  isFinal       Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  fencers       PoolFencer[]
+
+  @@unique([competitionId, name])
+}
+
+model PoolFencer {
+  id            Int              @id @default(autoincrement())
+  poolId        Int
+  pool          Pool             @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  name          String
+  position      Int
+  wins          Int?
+  losses        Int?
+  indicator     Int?
+  firstResultAt DateTime?
+  countryCode   String?
+  ranking       Int?
+  predictions   PoolPrediction[]
+
+  @@unique([poolId, position])
+}
+
+model PoolPrediction {
+  id            Int         @id @default(autoincrement())
+  userId        Int
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fencerId      Int
+  fencer        PoolFencer  @relation(fields: [fencerId], references: [id], onDelete: Cascade)
+  wins          Int
+  losses        Int
+  indicator     Int
+  createdAt     DateTime     @default(now())
+  pointsEarned  Int          @default(0)
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([userId, fencerId])
+  @@index([fencerId])
 }
