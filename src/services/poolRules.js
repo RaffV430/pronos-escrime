@@ -25,7 +25,23 @@ function validatePrediction(value, size) {
   return { wins, losses, indicator };
 }
 function closed(pool, now = new Date()) {
-  return pool.isLocked || pool.isFinal || new Date(pool.closesAt) <= now;
+  return Boolean(pool.isLocked || pool.isFinal || (pool.lockMode !== 'FIRST_RESULT' && new Date(pool.closesAt) <= now));
+}
+function sourceUnavailable(pool, now = new Date()) {
+  return pool.lockMode === 'FIRST_RESULT' && (!pool.sourceCheckedAt || now - new Date(pool.sourceCheckedAt) > 180000);
+}
+function fencerClosed(pool, fencer, now = new Date()) {
+  return closed(pool, now) || Boolean(fencer.firstResultAt) || sourceUnavailable(pool, now);
+}
+function validateSource(sourceUrl, sourcePoolNumber) {
+  if (typeof sourceUrl !== 'string') fail('Lien FencingTimeLive requis.');
+  let url;
+  try { url = new URL(sourceUrl); } catch { fail('Lien FencingTimeLive invalide.'); }
+  if (url.origin !== 'https://www.fencingtimelive.com' || url.username || url.password || !/^\/pools\/scores\/[A-Fa-f0-9]{32}\/[A-Fa-f0-9]{32}\/?$/.test(url.pathname)) {
+    fail('Utilisez le lien officiel FencingTimeLive des résultats de poules.');
+  }
+  if (!Number.isInteger(sourcePoolNumber) || sourcePoolNumber < 1 || sourcePoolNumber > 1000) fail('Numéro de poule FencingTimeLive invalide.');
+  return { sourceUrl: url.origin + url.pathname.replace(/\/$/, ''), sourcePoolNumber };
 }
 function comparison(prediction, fencer, final) {
   if (!final || !prediction) return null;
@@ -67,4 +83,4 @@ function poolPoints(prediction, result) {
   const indicatorPoints = indicatorDifference === 0 ? 5 : indicatorDifference <= 3 ? 3 : indicatorDifference <= 5 ? 1 : 0;
   return { winsPoints, indicatorPoints, total: winsPoints + indicatorPoints };
 }
-module.exports = { poolPoints, fail, id, validatePrediction, closed, comparison, validateResults };
+module.exports = { poolPoints, fail, id, validatePrediction, closed, fencerClosed, sourceUnavailable, validateSource, comparison, validateResults };

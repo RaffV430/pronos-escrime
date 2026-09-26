@@ -106,6 +106,10 @@ model Pool {
   competition   Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
   name          String
   closesAt      DateTime
+  lockMode      String       @default("FIRST_RESULT")
+  sourceUrl     String?
+  sourcePoolNumber Int?
+  sourceCheckedAt DateTime?
   isLocked      Boolean      @default(false)
   isFinal       Boolean      @default(false)
   createdAt     DateTime     @default(now())
@@ -123,6 +127,7 @@ model PoolFencer {
   wins          Int?
   losses        Int?
   indicator     Int?
+  firstResultAt DateTime?
   predictions   PoolPrediction[]
 
   @@unique([poolId, position])

@@ -44,3 +44,23 @@ test('ids do not accept permissive parseInt values or coercion', () => {
   assert.equal(id('123'), 123);
   for (const value of ['1bad', '', true, null, -1, 1.2, 2147483648]) assert.throws(() => id(value));
 });
+
+test('individual closure ignores timetable, freezes on stale source, and preserves manual closures', () => {
+  const { fencerClosed, sourceUnavailable } = require('../src/services/poolRules');
+  const now = new Date('2026-10-01T10:00:00Z');
+  const pool = { lockMode: 'FIRST_RESULT', closesAt: '2026-09-01', sourceCheckedAt: now };
+  assert.equal(fencerClosed(pool, {}, now), false);
+  assert.equal(fencerClosed(pool, { firstResultAt: now }, now), true);
+  assert.equal(fencerClosed({ ...pool, isLocked: true }, {}, now), true);
+  assert.equal(fencerClosed({ ...pool, isFinal: true }, {}, now), true);
+  assert.equal(sourceUnavailable({ ...pool, sourceCheckedAt: null }, now), true);
+  assert.equal(fencerClosed({ ...pool, sourceCheckedAt: new Date(now - 180001) }, {}, now), true);
+  assert.equal(fencerClosed(pool, { firstResultAt: new Date(now - 60000) }, new Date(now.getTime() + 10000)), true);
+});
+test('source mapping accepts only official pool pages and an explicit pool number', () => {
+  const { validateSource } = require('../src/services/poolRules');
+  const url = 'https://www.fencingtimelive.com/pools/scores/' + 'A'.repeat(32) + '/' + 'B'.repeat(32);
+  assert.deepEqual(validateSource(url + '#test', 2), { sourceUrl: url, sourcePoolNumber: 2 });
+  for (const source of ['https://evil.example/pools/scores/a/b', url.replace('https:', 'http:'), url.replace('www.', 'user:pass@www.'), url.replace('/pools/', '/other/')]) assert.throws(() => validateSource(source, 2));
+  for (const number of [0, -1, 1.5, '2', 1001]) assert.throws(() => validateSource(url, number));
+});

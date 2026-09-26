@@ -75,3 +75,36 @@ test('HTTP authentication, ownership, closure and corrected results', async t =>
   assert.equal(predictions[1].pointsEarned, 6);
   assert.equal(pool.isFinal, true);
 });
+
+test('HTTP individual locks reject creation, edits and deletion while another fencer stays open', async t => {
+  const { db, pool, predictions } = fixture();
+  pool.lockMode = 'FIRST_RESULT';
+  pool.closesAt = new Date('2000-01-01');
+  pool.sourceCheckedAt = new Date();
+  const app = express(); app.use(express.json()); app.use('/pools', createPoolRouter(db));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const request = async (path, method = 'GET', body) => fetch(`http://127.0.0.1:${server.address().port}/pools${path}`, {
+    method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt.sign({ userId: 1 }, process.env.JWT_SECRET)}` },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const pick = { wins: 1, losses: 0, indicator: 3 };
+  assert.equal((await request('/1/fencers/10/prediction', 'PUT', pick)).status, 200);
+  pool.fencers[0].firstResultAt = new Date();
+  assert.equal((await request('/1/fencers/10/prediction', 'PUT', { ...pick, wins: 0, losses: 1, indicator: -3, firstResultAt: null })).status, 409);
+  assert.equal((await request('/1/fencers/10/prediction', 'DELETE')).status, 409);
+  assert.equal(predictions[0].wins, 1);
+  assert.equal((await request('/1/fencers/20/prediction', 'PUT', pick)).status, 200);
+  let rows = await (await request('?competitionId=1')).json();
+  assert.equal(rows[0].isClosed, false);
+  assert.equal(rows[0].fencers[0].isClosed, true);
+  assert.equal(rows[0].fencers[1].isClosed, false);
+  pool.sourceCheckedAt = new Date(Date.now() - 180001);
+  assert.equal((await request('/1/fencers/20/prediction', 'PUT', pick)).status, 409);
+  pool.sourceCheckedAt = new Date();
+  assert.equal((await request('/1/fencers/20/prediction', 'DELETE')).status, 204);
+  assert.equal((await request('/1/fencers/10/prediction', 'DELETE')).status, 409);
+  pool.isLocked = true;
+  assert.equal((await request('/1/fencers/20/prediction', 'PUT', pick)).status, 409);
+});

@@ -2,7 +2,7 @@ const express = require('express');
 const prisma = require('../lib/prisma');
 const auth = require('../middleware/auth');
 const admin = require('../middleware/admin');
-const { fail, id, validatePrediction, closed, comparison, validateResults, poolPoints } = require('../services/poolRules');
+const { fail, id, validatePrediction, closed, fencerClosed, sourceUnavailable, validateSource, comparison, validateResults, poolPoints } = require('../services/poolRules');
 
 function createPoolRouter(db = prisma) {
   const router = express.Router();
@@ -32,9 +32,9 @@ function createPoolRouter(db = prisma) {
       include: { fencers: { orderBy: { position: 'asc' }, include: { predictions: { where: { userId: req.user.userId } } } } },
     });
     res.json(pools.map(pool => ({
-      ...pool, isClosed: closed(pool),
+      ...pool, isClosed: closed(pool), sourceUnavailable: sourceUnavailable(pool),
       fencers: pool.fencers.map(({ predictions, ...fencer }) => ({
-        ...fencer, prediction: predictions[0] || null,
+        ...fencer, isClosed: fencerClosed(pool, fencer), prediction: predictions[0] || null,
         comparison: comparison(predictions[0], fencer, pool.isFinal),
       })),
     })));
@@ -43,17 +43,20 @@ function createPoolRouter(db = prisma) {
   router.post('/', admin, handle(async (req, res) => {
     const competitionId = id(req.body.competitionId);
     const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
-    const closesAt = new Date(req.body.closesAt);
+    const lockMode = req.body.lockMode ?? 'FIRST_RESULT';
+    if (!['TIME', 'FIRST_RESULT'].includes(lockMode)) fail('Mode de clôture invalide.');
+    const source = lockMode === 'FIRST_RESULT' ? validateSource(req.body.sourceUrl, req.body.sourcePoolNumber) : {};
+    const closesAt = lockMode === 'FIRST_RESULT' ? new Date() : new Date(req.body.closesAt);
     if (!name || name.length > 100) fail('Nom de poule requis (100 caractères maximum).');
-    if (typeof req.body.closesAt !== 'string' || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(req.body.closesAt)
-      || !Number.isFinite(closesAt.getTime()) || closesAt <= new Date()) fail('Choisissez une clôture future avec un fuseau horaire.');
+    if (lockMode === 'TIME' && (typeof req.body.closesAt !== 'string' || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(req.body.closesAt)
+      || !Number.isFinite(closesAt.getTime()) || closesAt <= new Date())) fail('Choisissez une clôture future avec un fuseau horaire.');
     if (!Array.isArray(req.body.fencers) || req.body.fencers.length < 2 || req.body.fencers.length > 8) fail('Une poule doit contenir de 2 à 8 tireurs.');
     const names = req.body.fencers.map(n => typeof n === 'string' ? n.trim() : '');
     if (names.some(n => !n || n.length > 100) || new Set(names.map(n => n.normalize('NFKC').toLowerCase())).size !== names.length) {
       fail('Chaque tireur doit avoir un nom distinct, de 1 à 100 caractères.');
     }
     if (!await db.competition.findUnique({ where: { id: competitionId } })) fail('Compétition introuvable.', 404);
-    const pool = await db.pool.create({ data: { competitionId, name, closesAt,
+    const pool = await db.pool.create({ data: { competitionId, name, closesAt, lockMode, ...source,
       fencers: { create: names.map((name, index) => ({ name, position: index + 1 })) },
     }, include: { fencers: true } });
     res.status(201).json(pool);
@@ -63,8 +66,9 @@ function createPoolRouter(db = prisma) {
     const poolId = id(req.params.poolId);
     const fencerId = id(req.params.fencerId);
     const prediction = await withPool(poolId, async (tx, pool) => {
-      if (closed(pool)) fail('Les pronostics de cette poule sont clos.', 409);
-      if (!pool.fencers.some(f => f.id === fencerId)) fail('Tireur introuvable dans cette poule.', 404);
+      const fencer = pool.fencers.find(f => f.id === fencerId);
+      if (!fencer) fail('Tireur introuvable dans cette poule.', 404);
+      if (fencerClosed(pool, fencer)) fail(sourceUnavailable(pool) && !fencer.firstResultAt && !closed(pool) ? 'Vérification FencingTimeLive en attente. Réessayez après le prochain contrôle.' : 'Les pronostics de ce tireur sont clos.', 409);
       const data = validatePrediction(req.body, pool.fencers.length);
       return tx.poolPrediction.upsert({
         where: { userId_fencerId: { userId: req.user.userId, fencerId } },
@@ -78,8 +82,9 @@ function createPoolRouter(db = prisma) {
     const poolId = id(req.params.poolId);
     const fencerId = id(req.params.fencerId);
     await withPool(poolId, async (tx, pool) => {
-      if (closed(pool)) fail('Les pronostics de cette poule sont clos.', 409);
-      if (!pool.fencers.some(f => f.id === fencerId)) fail('Tireur introuvable dans cette poule.', 404);
+      const fencer = pool.fencers.find(f => f.id === fencerId);
+      if (!fencer) fail('Tireur introuvable dans cette poule.', 404);
+      if (fencerClosed(pool, fencer)) fail(sourceUnavailable(pool) && !fencer.firstResultAt && !closed(pool) ? 'Vérification FencingTimeLive en attente. Réessayez après le prochain contrôle.' : 'Les pronostics de ce tireur sont clos.', 409);
       await tx.poolPrediction.deleteMany({ where: { userId: req.user.userId, fencerId } });
     });
     res.status(204).end();
