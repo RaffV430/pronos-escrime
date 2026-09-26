@@ -3,6 +3,7 @@ const {id,fencerClosed,poolPoints}=require('../services/poolRules');
 const {matchClosed,closesAt,podiumClosed}=require('../lib/matchLock');
 const {calculateMatchPoints}=require('../services/matchPoints');
 const {fields,verifiedPodium,predictionIds}=require('../services/podiumRules');
+const {timedMatches}=require('../services/roundTiming');
 const {standings}=require('../services/standings');
 router.use(require('../middleware/auth'));
 router.get('/predictions',async(req,res)=>{
@@ -14,9 +15,9 @@ router.get('/predictions',async(req,res)=>{
    db.pool.findMany({where:{competitionId},include:{fencers:{include:{predictions:{where:{userId}}},orderBy:{position:'asc'}}}}),
    db.podiumPrediction.findUnique({where:{userId_competitionId:{userId,competitionId}}})]);
   const rows=[];
-  for(const m of matches){const p=m.predictions[0],finished=m.isFinished,closed=matchClosed(m);let details=[];
+  for(const m of await timedMatches(db,matches)){const p=m.predictions[0],finished=m.isFinished,closed=matchClosed(m);let details=[];
    if(p&&finished){const total=calculateMatchPoints(p.predictedScore1,p.predictedScore2,m.score1,m.score2,m.winner,m.resultType);const exact=m.resultType!=='MEDICAL_WITHDRAWAL'&&p.predictedScore1===m.score1&&p.predictedScore2===m.score2;details=[`Bon vainqueur : +${total-(exact?3:0)}`,`Score exact : +${exact?3:0}`];}
-   rows.push({key:`match-${m.id}`,type:'Match',name:`${m.player1} / ${m.player2}`,round:m.round,status:finished?'Terminé':closed?'Clos':p?'Enregistré':'À compléter',prediction:p?`${p.predictedScore1} – ${p.predictedScore2}`:null,result:finished?(m.resultType==='MEDICAL_WITHDRAWAL'?`Retrait médical · ${m.winner===1?m.player1:m.player2} qualifié(e)`:`${m.score1} – ${m.score2}`):null,points:p&&finished?p.pointsEarned:null,details,startsAt:m.startsAt,closesAt:closesAt(m),manualUnlock:m.manualUnlock,sourceCheckedAt:m.sourceCheckedAt,sourceUrl:m.sourceUrl});
+   rows.push({key:`match-${m.id}`,type:'Match',name:`${m.player1} / ${m.player2}`,round:m.round,status:finished?'Terminé':closed?'Clos':p?'Enregistré':'À compléter',prediction:p?`${p.predictedScore1} – ${p.predictedScore2}`:null,result:finished?(m.resultType==='MEDICAL_WITHDRAWAL'?`Retrait médical · ${m.winner===1?m.player1:m.player2} qualifié(e)`:`${m.score1} – ${m.score2}`):null,points:p&&finished?p.pointsEarned:null,details,startsAt:m.startsAt,closesAt:closesAt(m),manualUnlockUntil:m.manualUnlockUntil,awaitingPreviousRound:m.awaitingPreviousRound,timingUnverified:m.timingUnverified,sourceCheckedAt:m.sourceCheckedAt,sourceUrl:m.sourceUrl});
   }
   for(const pool of pools)for(const f of pool.fencers){const p=f.predictions[0],closed=fencerClosed(pool,f);const pts=p&&pool.isFinal?poolPoints(p,f):null;
    rows.push({key:`pool-${f.id}`,type:'Poule',name:`${pool.name} · ${f.name}`,status:pool.isFinal?'Terminé':closed?'Clos':p?'Enregistré':'À compléter',prediction:p?`${p.wins} V · indice ${p.indicator}`:null,result:pool.isFinal?`${f.wins} V · indice ${f.indicator}`:null,points:pts?p.pointsEarned:null,details:pts?[`Victoires : +${pts.winsPoints}`,`Indice : +${pts.indicatorPoints}`]:[],sourceCheckedAt:pool.sourceCheckedAt,sourceUrl:pool.sourceUrl});

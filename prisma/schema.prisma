@@ -40,6 +40,7 @@ model Match {
   manualUnlock  Boolean      @default(false)
   winner        Int?
   resultType    String?
+  resultRegisteredAt DateTime?
 
   @@unique([competitionId, sourceKey])
 }
@@ -84,6 +85,7 @@ model Competition {
   podiumResolvedAt DateTime?
   podiumPredictions PodiumPrediction[]
   matches           Match[]
+  matchRounds       MatchRound[]
   pools             Pool[]
   createdAt         DateTime           @default(now())
 }
@@ -228,4 +230,17 @@ model ChallengePick {
   winner Int
   updatedAt DateTime @updatedAt
   @@unique([challengeId,userId])
+}
+
+// Official manifest: counts exclude exemptions; previousRound is null only for the first round.
+model MatchRound {
+  competitionId Int
+  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  round String
+  previousRound String?
+  expectedMatchCount Int
+  sourceUrl String
+  verifiedAt DateTime
+  manualUnlockUntil DateTime?
+  @@id([competitionId, round])
 }

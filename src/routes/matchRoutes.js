@@ -6,6 +6,7 @@ const { syncMatchesFromSheet } = require('../services/sheetSync');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { matchClosed, closesAt } = require('../lib/matchLock');
+const {timedMatches,timedMatch,reopenRound} = require('../services/roundTiming');
 
 // 1. Liste de tous les matchs
 router.get('/', authMiddleware, async (req, res) => {
@@ -18,7 +19,7 @@ router.get('/', authMiddleware, async (req, res) => {
       include: { competition: { select: { name: true, podiumFormat: true } }, predictions: { where: { userId: req.user.userId } } },
       orderBy: { id: 'asc' },
     });
-    res.json(matches.map(match => ({ ...match, maxScore: match.competition?.podiumFormat === 'TEAM' ? 45 : 15, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
+    res.json((await timedMatches(prisma,matches)).map(match => ({ ...match, maxScore: match.competition?.podiumFormat === 'TEAM' ? 45 : 15, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
   } catch (error) {
     console.error('Erreur matches:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des matchs.' });
@@ -64,7 +65,7 @@ router.post('/:id/predict', authMiddleware, async (req, res) => {
     await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${matchId} FOR UPDATE`;
     const match = await tx.match.findUnique({ where: { id: matchId } });
     if (!match) return { status: 404, body: { error: 'Match introuvable.' } };
-    if (matchClosed(match)) return { status: 409, body: { error: 'Les pronostics sont clos ou la vérification du match est en attente.' } };
+    if (matchClosed(await timedMatch(tx,match))) return { status: 409, body: { error: 'Les pronostics sont clos ou la vérification du match est en attente.' } };
 
     const competition = await tx.competition.findUnique({ where: { id: match.competitionId } });
     const maxScore = competition?.podiumFormat === 'TEAM' ? 45 : 15;
@@ -92,7 +93,7 @@ router.delete('/:id/predict', authMiddleware, async (req, res) => {
     await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${matchId} FOR UPDATE`;
     const match = await tx.match.findUnique({ where: { id: matchId } });
     if (!match) return { status: 404, body: { error: 'Match introuvable.' } };
-    if (matchClosed(match)) return { status: 409, body: { error: 'Les pronostics sont clos ou la vérification du match est en attente.' } };
+    if (matchClosed(await timedMatch(tx,match))) return { status: 409, body: { error: 'Les pronostics sont clos ou la vérification du match est en attente.' } };
 
     await tx.prediction.deleteMany({
       where: { userId: userId, matchId: matchId },
@@ -105,22 +106,50 @@ router.delete('/:id/predict', authMiddleware, async (req, res) => {
   }
 });
 
-// Manual reopening overrides the deadline until an administrator locks again.
-router.put('/:id/lock', authMiddleware, adminMiddleware, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0 || typeof req.body.isLocked !== 'boolean') return res.status(400).json({ error: 'Verrouillage invalide.' });
-  try {
-    const result = await prisma.$transaction(async tx => {
-      await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${id} FOR UPDATE`;
-      const match = await tx.match.findUnique({ where: { id } });
-      if (!match) return { status: 404, error: 'Match introuvable.' };
-      if (match.isFinished) return { status: 409, error: 'Un match terminé ne peut pas être rouvert.' };
-      const updated=await tx.match.update({ where: { id }, data: { isLocked: req.body.isLocked, manualUnlock: !req.body.isLocked } });
-      await tx.auditLog.create({data:{actorId:req.user.userId,action:req.body.isLocked?'Verrouillage':'Réouverture',targetType:'Match',targetId:id,before:{isLocked:match.isLocked,manualUnlock:!!match.manualUnlock},after:{isLocked:updated.isLocked,manualUnlock:updated.manualUnlock}}});
-      return {match:updated};
-    });
-    res.status(result.status || 200).json(result);
-  } catch { res.status(500).json({ error: 'Impossible de modifier le verrouillage.' }); }
+// Existing individual endpoint can still close a match, but cannot reopen indefinitely.
+router.put('/:id/lock', authMiddleware, adminMiddleware, async (req,res)=>{
+ const id=Number(req.params.id);
+ if(!Number.isSafeInteger(id)||id<=0||req.body.isLocked!==true)return res.status(400).json({error:'Pour rouvrir, utilisez la réouverture du tour pendant 10 minutes.'});
+ try {
+  const result=await prisma.$transaction(async tx=>{
+   await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${id} FOR UPDATE`;
+   const match=await tx.match.findUnique({where:{id}});
+   if(!match)return {status:404,error:'Match introuvable.'};
+   const updated=await tx.match.update({where:{id},data:{isLocked:true,manualUnlock:false}});
+   await tx.auditLog.create({data:{actorId:req.user.userId,action:'Verrouillage',targetType:'Match',targetId:id,before:{isLocked:match.isLocked},after:{isLocked:true}}});
+   return {match:updated};
+  });res.status(result.status||200).json(result);
+ }catch{res.status(500).json({error:'Verrouillage impossible.'});}
+});
+// An explicit import step: counts must come from the full official bracket, not imported pairs.
+router.put('/rounds/:competitionId/manifest',authMiddleware,adminMiddleware,async(req,res)=>{
+ const competitionId=Number(req.params.competitionId),{sourceUrl}=req.body;
+ let rounds;
+ try{
+  if(!Number.isSafeInteger(competitionId)||competitionId<=0||typeof sourceUrl!=='string'||!/^https:\/\/www\.fencingtimelive\.com\/tableaus\/scores\/[a-f0-9]{32}\/[a-f0-9]{32}$/i.test(sourceUrl))throw new Error('Source officielle et épreuve requises.');
+  rounds=require('../services/roundManifest').validateManifest(req.body.rounds);
+ }catch(e){return res.status(400).json({error:e.message});}
+ try{
+  const result=await prisma.$transaction(async tx=>{
+   await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${competitionId} FOR UPDATE`;
+   const competition=await tx.competition.findUnique({where:{id:competitionId}});
+   if(!competition)return {status:404,error:'Épreuve introuvable.'};
+   const existing=await tx.match.findMany({where:{competitionId}});
+   if(!existing.some(m=>m.sourceUrl===sourceUrl))return {status:409,error:'Source non rattachée aux matchs de cette épreuve.'};
+   if(existing.some(m=>!rounds.some(r=>r.round===m.round))||rounds.some(r=>existing.filter(m=>m.round===r.round).length>r.expectedMatchCount))return {status:409,error:'Composition importée incompatible avec le tableau officiel.'};
+   const before=await tx.matchRound.findMany({where:{competitionId}});
+   if(before.some(r=>!rounds.some(n=>n.round===r.round)))return {status:409,error:'Un tour déjà configuré ne peut pas être supprimé.'};
+   for(const r of rounds)await tx.matchRound.upsert({where:{competitionId_round:{competitionId,round:r.round}},create:{competitionId,...r,sourceUrl,verifiedAt:new Date()},update:{...r,sourceUrl,verifiedAt:new Date()}});
+   await tx.auditLog.create({data:{actorId:req.user.userId,action:'Vérification du tableau et des délais par tour',targetType:'Competition',targetId:competitionId,after:{sourceUrl,rounds}}});
+   return {rounds};
+  });res.status(result.status||200).json(result);
+ }catch{res.status(500).json({error:'Configuration du tableau impossible.'});}
+});
+router.put('/rounds/:competitionId/:round/unlock',authMiddleware,adminMiddleware,async(req,res)=>{
+ const competitionId=Number(req.params.competitionId),round=req.params.round;
+ if(!Number.isSafeInteger(competitionId)||competitionId<=0||!round||round.length>80)return res.status(400).json({error:'Tour invalide.'});
+ try{const result=await prisma.$transaction(tx=>reopenRound(tx,competitionId,round,req.user.userId));res.status(result.status||200).json(result);}
+ catch{res.status(500).json({error:'Réouverture du tour impossible.'});}
 });
 
 router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (req, res) => {
