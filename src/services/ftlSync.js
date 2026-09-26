@@ -93,7 +93,10 @@ async function applyObservation(tx,c,observation,actorId){
  const summary={created:0,results:0,corrections:0,pointsUpdated:0,podium:false,checked:plan.length,checkedAt:observation.checkedAt.toISOString(),warnings:observation.warnings};
  for(const r of observation.rounds)await tx.matchRound.upsert({where:{competitionId_round:{competitionId:c.id,round:r.round}},create:{competitionId:c.id,...r,sourceUrl:observation.sourceUrl,verifiedAt:observation.checkedAt},update:{...r,sourceUrl:observation.sourceUrl,verifiedAt:observation.checkedAt}});
  for(const {current:m,observed:o} of plan){
-  const wasFinished=m?.isFinished,corrected=wasFinished&&['score1','score2','winner','resultType'].some(k=>m[k]!==o[k]);
+  const wasFinished=m?.isFinished;
+  // Legacy scored finals may lack an explicit winner/type; filling those is not a score correction.
+  const previousWinner=m?.winner??(Number.isInteger(m?.score1)&&Number.isInteger(m?.score2)&&m.score1!==m.score2?(m.score1>m.score2?1:2):null);
+  const corrected=wasFinished&&(m.score1!==o.score1||m.score2!==o.score2||previousWinner!==o.winner||(m.resultType==='MEDICAL_WITHDRAWAL')!==(o.resultType==='MEDICAL_WITHDRAWAL'));
   const data={sourceUrl:observation.sourceUrl,sourceKey:o.sourceKey,round:o.round,sourceCheckedAt:observation.checkedAt,...(o.startsAt?{startsAt:o.startsAt}:{})};
   if(o.isFinished)Object.assign(data,{score1:o.score1,score2:o.score2,winner:o.winner,resultType:o.resultType,isFinished:true,isLocked:true,manualUnlock:false});
   const saved=m?await tx.match.update({where:{id:m.id},data}):await tx.match.create({data:{competitionId:c.id,player1:o.player1,player2:o.player2,...data}});
