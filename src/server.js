@@ -41,38 +41,9 @@ app.use('/api/users', userRoutes);
 app.use('/api/podium', podiumRoutes);
 app.use('/api/pools', require('./routes/poolRoutes'));
 
-app.post('/api/admin/adjust-points', authMiddleware, adminMiddleware, async (req, res) => {
-  let userId = req.body.userId ? Number(req.body.userId) : null;
-  const name = String(req.body.name || '').normalize('NFC').trim();
-  const points = Number(req.body.points);
-  const tournamentId = req.body.tournamentId ? Number(req.body.tournamentId) : null;
-  const competitionId = req.body.competitionId ? Number(req.body.competitionId) : null;
-  const reason = String(req.body.reason || 'Ajustement manuel admin').trim().slice(0, 250);
-
-  if ((!name && (!Number.isInteger(userId) || userId <= 0)) || (name && userId !== null) || !Number.isInteger(points) || Math.abs(points) > 10000) {
-    return res.status(400).json({ error: "L'utilisateur et un nombre de points valide sont obligatoires." });
-  }
-  if ((tournamentId !== null && (!Number.isInteger(tournamentId) || tournamentId <= 0))
-      || (competitionId !== null && (!Number.isInteger(competitionId) || competitionId <= 0))) {
-    return res.status(400).json({ error: 'Tournoi ou compétition invalide.' });
-  }
-
-  try {
-    const candidates = await prisma.user.findMany({ where: name ? { name: { equals: name, mode: 'insensitive' } } : { id: userId }, select: { id: true, name: true } });
-    if (candidates.length > 1) return res.status(409).json({ error: 'Nom ambigu : utilisez l’ID du joueur.' });
-    const user = candidates[0];
-    if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
-
-    userId = user.id;
-    const adjustment = await prisma.pointAdjustment.create({
-      data: { userId, points, reason, tournamentId, competitionId },
-    });
-    res.json({ success: true, adjustment, user });
-  } catch (error) {
-    console.error("Erreur lors de l'ajustement des points :", error);
-    res.status(500).json({ error: "Erreur lors de l'enregistrement de l'ajustement." });
-  }
-});
+app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/community', require('./routes/communityRoutes'));
+app.use('/api/me', require('./routes/personalRoutes'));
 
 app.get('/api/tournaments', authMiddleware, async (req, res) => {
   try {

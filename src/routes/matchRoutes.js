@@ -15,10 +15,10 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const matches = await prisma.match.findMany({
       where: filter,
-      include: { competition: { select: { name: true } }, predictions: { where: { userId: req.user.userId } } },
+      include: { competition: { select: { name: true, podiumFormat: true } }, predictions: { where: { userId: req.user.userId } } },
       orderBy: { id: 'asc' },
     });
-    res.json(matches.map(match => ({ ...match, maxScore: /par équipes/i.test(match.competition?.name || '') ? 45 : 15, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
+    res.json(matches.map(match => ({ ...match, maxScore: match.competition?.podiumFormat === 'TEAM' ? 45 : 15, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
   } catch (error) {
     console.error('Erreur matches:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des matchs.' });
@@ -42,84 +42,17 @@ router.post('/sync-sheet', authMiddleware, adminMiddleware, async (req, res) => 
 });
 
 // 3. Classement général TOTAL (Avec filtres optionnels : competitionId ou tournamentId)
-router.get('/leaderboard', authMiddleware, async (req, res) => {
-  try {
-    const { competitionId, tournamentId } = req.query;
-
-    const users = await prisma.user.findMany({
-      select: { id: true, name: true }
-    });
-
-    // Filtres dynamiques pour Prisma
-    const podiumFilter = {};
-    const matchFilter = {};
-    const adjustmentFilter = {};
-
-    if (competitionId) {
-      // Filtrer pour une compétition précise
-      const compIdInt = parseInt(competitionId, 10);
-      podiumFilter.competitionId = compIdInt;
-      matchFilter.match = { competitionId: compIdInt };
-      adjustmentFilter.competitionId = compIdInt;
-    } else if (tournamentId) {
-      // Filtrer pour tout un tournoi
-      const tourIdInt = parseInt(tournamentId, 10);
-      podiumFilter.competition = { tournamentId: tourIdInt };
-      matchFilter.match = { competition: { tournamentId: tourIdInt } };
-      adjustmentFilter.tournamentId = tourIdInt;
-    }
-
-    // On récupère les données filtrées
-    const allPodiumPreds = await prisma.podiumPrediction.findMany({ where: podiumFilter });
-    const allMatchPreds = await prisma.prediction.findMany({ where: matchFilter });
-    const poolFilter = competitionId
-      ? { fencer: { pool: { competitionId: parseInt(competitionId, 10) } } }
-      : tournamentId ? { fencer: { pool: { competition: { tournamentId: parseInt(tournamentId, 10) } } } } : {};
-    const allPoolPreds = await prisma.poolPrediction.findMany({ where: poolFilter });
-    const allAdjustments = await prisma.pointAdjustment.findMany({ where: adjustmentFilter });
-
-    const leaderboard = users.map(user => {
-      let podiumPoints = 0;
-      let matchPoints = 0;
-      let adjustmentPoints = 0;
-      const poolPoints = allPoolPreds.filter(p => p.userId === user.id).reduce((sum, p) => sum + p.pointsEarned, 0);
-
-      allPodiumPreds.filter(p => p.userId === user.id).forEach(p => {
-        podiumPoints += (p.pointsEarned || 0);
-      });
-
-      allAdjustments.filter(a => a.userId === user.id).forEach(a => {
-        adjustmentPoints += (a.points || 0);
-      });
-
-      allMatchPreds.filter(p => p.userId === user.id).forEach(p => {
-        matchPoints += p.pointsEarned || 0;
-      });
-
-      return {
-        id: user.id,
-        name: user.name,
-        matchPoints,
-        podiumPoints,
-        adjustmentPoints,
-        poolPoints,
-        totalPoints: matchPoints + podiumPoints + adjustmentPoints + poolPoints 
-      };
-    }).sort((a, b) => b.totalPoints - a.totalPoints); 
-
-    res.json(leaderboard);
-  } catch (error) {
-    console.error('Erreur leaderboard global:', error);
-    res.status(500).json({ error: 'Erreur lors du calcul du classement général.' });
-  }
+router.get('/leaderboard',authMiddleware,async(req,res)=>{
+ try { const {id}=require('../services/poolRules'); const filter={}; for(const k of ['competitionId','tournamentId'])if(req.query[k])filter[k]=id(req.query[k]); res.json(await require('../services/standings').standings(prisma,filter)); }
+ catch(e){res.status(e.status||500).json({error:e.status?e.message:'Classement indisponible.'});}
 });
 
 // 4. POST : Ajouter ou modifier un pronostic
 router.post('/:id/predict', authMiddleware, async (req, res) => {
-  const matchId = parseInt(req.params.id); 
+  const matchId = Number(req.params.id); 
   const userId = req.user.userId;
-  const predictedScore1 = Number(req.body.predictedScore1);
-  const predictedScore2 = Number(req.body.predictedScore2);
+  const predictedScore1 = req.body.predictedScore1;
+  const predictedScore2 = req.body.predictedScore2;
 
   if (!Number.isInteger(matchId) || !Number.isInteger(predictedScore1) || !Number.isInteger(predictedScore2)
       || predictedScore1 < 0 || predictedScore2 < 0 || predictedScore1 > 999 || predictedScore2 > 999) {
@@ -133,9 +66,12 @@ router.post('/:id/predict', authMiddleware, async (req, res) => {
     if (!match) return { status: 404, body: { error: 'Match introuvable.' } };
     if (matchClosed(match)) return { status: 409, body: { error: 'Les pronostics sont clos ou la vérification du match est en attente.' } };
 
+    const competition = await tx.competition.findUnique({ where: { id: match.competitionId } });
+    const maxScore = competition?.podiumFormat === 'TEAM' ? 45 : 15;
+    if (predictedScore1 > maxScore || predictedScore2 > maxScore || predictedScore1 === predictedScore2) return { status: 400, body: { error: `Scores distincts entre 0 et ${maxScore} requis.` } };
     const prediction = await tx.prediction.upsert({
       where: { userId_matchId: { userId: userId, matchId: matchId } },
-      update: { predictedScore1, predictedScore2 },
+      update: { predictedScore1, predictedScore2, pointsEarned: 0 },
       create: { userId: userId, matchId: matchId, predictedScore1, predictedScore2 },
     });
     return { status: 200, body: prediction };
@@ -148,7 +84,7 @@ router.post('/:id/predict', authMiddleware, async (req, res) => {
 
 // 5. DELETE : Supprimer un pronostic
 router.delete('/:id/predict', authMiddleware, async (req, res) => {
-  const matchId = parseInt(req.params.id);
+  const matchId = Number(req.params.id);
   const userId = req.user.userId;
 
   try {
@@ -179,7 +115,9 @@ router.put('/:id/lock', authMiddleware, adminMiddleware, async (req, res) => {
       const match = await tx.match.findUnique({ where: { id } });
       if (!match) return { status: 404, error: 'Match introuvable.' };
       if (match.isFinished) return { status: 409, error: 'Un match terminé ne peut pas être rouvert.' };
-      return { match: await tx.match.update({ where: { id }, data: { isLocked: req.body.isLocked, manualUnlock: !req.body.isLocked } }) };
+      const updated=await tx.match.update({ where: { id }, data: { isLocked: req.body.isLocked, manualUnlock: !req.body.isLocked } });
+      await tx.auditLog.create({data:{actorId:req.user.userId,action:req.body.isLocked?'Verrouillage':'Réouverture',targetType:'Match',targetId:id,before:{isLocked:match.isLocked,manualUnlock:!!match.manualUnlock},after:{isLocked:updated.isLocked,manualUnlock:updated.manualUnlock}}});
+      return {match:updated};
     });
     res.status(result.status || 200).json(result);
   } catch { res.status(500).json({ error: 'Impossible de modifier le verrouillage.' }); }
@@ -197,10 +135,31 @@ router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (re
       const predictions = await tx.prediction.findMany({ where: { matchId: id } });
       const { calculateMatchPoints } = require('../services/matchPoints');
       for (const p of predictions) await tx.prediction.update({ where: { id: p.id }, data: { pointsEarned: calculateMatchPoints(p.predictedScore1, p.predictedScore2, null, null, winner, 'MEDICAL_WITHDRAWAL') } });
+      await tx.auditLog.create({data:{actorId:req.user.userId,action:'Retrait médical',targetType:'Match',targetId:id,after:{winner}}});
       return { match };
     });
     res.status(result.status || 200).json(result);
   } catch { res.status(500).json({ error: 'Impossible de valider le retrait médical.' }); }
 });
 
+// Explicit administrative correction of a published official score.
+router.put('/:id/result', authMiddleware, adminMiddleware, async (req,res)=>{
+ const id=Number(req.params.id),{score1,score2,reason,sourceUrl}=req.body;
+ if(!Number.isSafeInteger(id)||id<=0||![score1,score2].every(Number.isInteger)||score1<0||score2<0||score1===score2||typeof reason!=='string'||reason.trim().length<3||reason.length>250)return res.status(400).json({error:'Deux scores distincts et un motif de correction sont requis.'});
+ try{
+  const outcome=await prisma.$transaction(async tx=>{
+   await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${id} FOR UPDATE`;
+   const current=await tx.match.findUnique({where:{id}});if(!current)return {status:404,error:'Match introuvable.'};
+   if(!current.sourceUrl||current.sourceUrl!==sourceUrl)return {status:409,error:'Vérifiez la source officielle enregistrée de ce match.'};
+   const c=await tx.competition.findUnique({where:{id:current.competitionId}}),max=c?.podiumFormat==='TEAM'?45:15;
+   if(score1>max||score2>max)return {status:400,error:`Scores limités à ${max} touches.`};
+   const winner=score1>score2?1:2;
+   const match=await tx.match.update({where:{id},data:{score1,score2,winner,resultType:'NORMAL',isFinished:true,isLocked:true,manualUnlock:false}});
+   const predictions=await tx.prediction.findMany({where:{matchId:id}});
+   for(const p of predictions)await tx.prediction.update({where:{id:p.id},data:{pointsEarned:require('../services/matchPoints').calculateMatchPoints(p.predictedScore1,p.predictedScore2,score1,score2)}});
+   await tx.auditLog.create({data:{actorId:req.user.userId,action:'Correction du résultat officiel',targetType:'Match',targetId:id,before:{score1:current.score1,score2:current.score2,winner:current.winner,resultType:current.resultType},after:{score1,score2,winner,reason:reason.trim(),sourceUrl}}});
+   return {match};
+  });res.status(outcome.status||200).json(outcome);
+ }catch{res.status(500).json({error:'Correction impossible.'});}
+});
 module.exports = router;

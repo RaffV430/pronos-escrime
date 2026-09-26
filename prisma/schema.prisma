@@ -107,6 +107,8 @@ model PodiumPrediction {
 }
 
 model PointAdjustment {
+  requestKey String? @unique
+  actorId Int?
   id            Int      @id @default(autoincrement())
   userId        Int
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -174,4 +176,56 @@ model PoolPrediction {
 
   @@unique([userId, fencerId])
   @@index([fencerId])
+}
+
+model AuditLog {
+  id Int @id @default(autoincrement())
+  actorId Int
+  action String
+  targetType String
+  targetId Int
+  before Json?
+  after Json?
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
+model League {
+  id Int @id @default(autoincrement())
+  name String
+  kind String @default("PRIVATE")
+  ownerId Int
+  tournamentId Int
+  startsAt DateTime
+  code String @unique
+  members LeagueMember[]
+  createdAt DateTime @default(now())
+  @@index([tournamentId])
+}
+model LeagueMember {
+  id Int @id @default(autoincrement())
+  leagueId Int
+  league League @relation(fields:[leagueId],references:[id])
+  userId Int
+  joinedAt DateTime @default(now())
+  @@unique([leagueId,userId])
+  @@index([userId])
+}
+model Challenge {
+  id Int @id @default(autoincrement())
+  name String
+  matchId Int @unique
+  closesAt DateTime
+  bonus Int @default(3)
+  createdBy Int
+  picks ChallengePick[]
+  createdAt DateTime @default(now())
+}
+model ChallengePick {
+  id Int @id @default(autoincrement())
+  challengeId Int
+  challenge Challenge @relation(fields:[challengeId],references:[id])
+  userId Int
+  winner Int
+  updatedAt DateTime @updatedAt
+  @@unique([challengeId,userId])
 }

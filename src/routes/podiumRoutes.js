@@ -90,7 +90,7 @@ router.get('/leaderboard/:tournamentId', authMiddleware, async (req, res) => {
     });
 
     const leaderboard = Object.values(leaderboardMap).sort((a, b) => b.totalPoints - a.totalPoints);
-    res.json(leaderboard);
+    res.json(require('../services/ranking').rankRows(leaderboard));
   } catch (error) {
     res.status(500).json({ error: "Erreur lors du calcul du classement général." });
   }
@@ -108,11 +108,15 @@ router.put('/competition/:competitionId/toggle-lock', authMiddleware, adminMiddl
     if (!Number.isInteger(compId) || typeof isLocked !== 'boolean') return res.status(400).json({ error: 'Verrouillage invalide.' });
     const updatedCompetition = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${compId} FOR UPDATE`;
-      return tx.competition.update({ where: { id: compId }, data: { isPodiumLocked: isLocked, podiumManualUnlock: !isLocked } });
+      const current = await tx.competition.findUnique({ where: { id: compId } });
+      if (!isLocked && (current?.podiumResolvedAt || current?.officialPodium?.finalConfirmed)) { const error = new Error('Un podium définitif ne peut pas être rouvert. Corrigez le résultat officiel puis recalculez les points.'); error.status = 409; throw error; }
+      const updated=await tx.competition.update({ where: { id: compId }, data: { isPodiumLocked: isLocked, podiumManualUnlock: !isLocked } });
+      await tx.auditLog.create({data:{actorId:req.user.userId,action:isLocked?'Verrouillage podium':'Réouverture podium',targetType:'Competition',targetId:compId,before:{isPodiumLocked:current.isPodiumLocked},after:{isPodiumLocked:isLocked}}});
+      return updated;
     });
     res.json({ message: `Pronostics ${isLocked ? 'verrouillés' : 'ouverts'} pour cette compétition.`, competition: updatedCompetition });
   } catch (err) {
-    res.status(500).json({ error: 'Erreur serveur lors de la modification du verrouillage' });
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Erreur serveur lors de la modification du verrouillage' });
   }
 });
 
@@ -124,7 +128,7 @@ router.post('/competition/:competitionId/resolve', authMiddleware, adminMiddlewa
     const compId = Number(req.params.competitionId);
     if (!Number.isInteger(compId) || compId < 1) return res.status(400).json({ error: 'Compétition invalide.' });
     // Client-entered names are never used as an official result.
-    const updateCount = await prisma.$transaction(tx => resolvePodium(tx, compId));
+    const updateCount = await prisma.$transaction(async tx => { const count=await resolvePodium(tx, compId);await tx.auditLog.create({data:{actorId:req.user.userId,action:'Recalcul podium officiel',targetType:'Competition',targetId:compId,after:{predictions:count}}});return count; });
     res.json({ message: `Podium officiel vérifié : points de ${updateCount} joueur(s) recalculés.`, updateCount });
   } catch (error) { res.status(error.status || 500).json({ error: error.status ? error.message : 'Erreur lors du calcul des points.' }); }
 });

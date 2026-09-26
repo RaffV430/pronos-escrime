@@ -13,7 +13,8 @@ const db = {
   podiumPrediction: { upsert:async({create})=>{assert.ok(locked);return create;} },
   prediction: { upsert:async({create})=>{assert.ok(locked);return create;}, deleteMany:async()=>{assert.ok(locked);}, findMany:async()=>picks, update:async({where,data})=>Object.assign(picks.find(p=>p.id===where.id),data) },
   user:{findUnique:async({where})=>({isAdmin:where.id===2}),findFirst:async({where})=>{assert.equal(where.OR[0].email.mode,'insensitive');assert.equal(where.OR[1].name.mode,'insensitive');return {id:1};},findMany:async({where})=>where.name?.equals==='Alice'?[{id:7,name:'Alice'}]:[],create:async()=>{throw {code:'P2002'};}},
-  pointAdjustment: {create:async({data})=>data},
+  auditLog:{create:async({data})=>data},
+  pointAdjustment: {findUnique:async()=>null,create:async({data})=>data},
 };
 db.$transaction = async fn => {locked=false;return fn(db);};
 require.cache[require.resolve('../src/lib/prisma')]={exports:db};
@@ -26,6 +27,12 @@ test('HTTP admin reopen, podium persistence, medical closure, registration confl
  assert.equal((await request('/matches/1/lock','PUT',{isLocked:false},true)).status,200);
  assert.equal((await request('/matches/1/predict','POST',{predictedScore1:15,predictedScore2:8})).status,200);
  assert.equal((await request('/matches/1/predict','DELETE')).status,200);
+ for(const [a,b] of [[16,1],[15,15],[null,3],['15',3],[true,3],[1.5,3]])assert.equal((await request('/matches/1/predict','POST',{predictedScore1:a,predictedScore2:b})).status,400);
+ competition.podiumFormat='TEAM';
+ assert.equal((await request('/matches/1/predict','POST',{predictedScore1:45,predictedScore2:44})).status,200);
+ assert.equal((await request('/matches/1/predict','POST',{predictedScore1:46,predictedScore2:44})).status,400);
+ competition.podiumFormat='INDIVIDUAL';
+
  assert.equal((await request('/podium/competition/1/toggle-lock','PUT',{isLocked:'false'},true)).status,400);
  assert.equal((await request('/podium/competition/1/toggle-lock','PUT',{isLocked:false},true)).status,200);
  assert.equal((await (await request('/podium/competition-status/1')).json()).isLocked,false);
@@ -38,11 +45,15 @@ test('HTTP admin reopen, podium persistence, medical closure, registration confl
  await request('/matches/1/medical-withdrawal','PUT',{winner:2},true);assert.deepEqual(picks.map(p=>p.pointsEarned),[0,1]);
  assert.equal((await request('/matches/1/lock','PUT',{isLocked:false},true)).status,409);
  assert.equal((await request('/matches/1/predict','DELETE')).status,409);
+ competition.podiumResolvedAt=new Date();
+ assert.equal((await request('/podium/competition/1/toggle-lock','PUT',{isLocked:false},true)).status,409);
+ assert.equal((await (await request('/podium/competition-status/1')).json()).isLocked,true);
+
  assert.equal((await request('/auth/register','POST',{username:'ALICE',email:'Alice@example.com',password:'test-password-long'})).status,400);
  db.user.findFirst=async()=>null;
  assert.equal((await request('/auth/register','POST',{username:'ALICE',email:'Alice@example.com',password:'test-password-long'})).status,409);
- const adjustment=await request('/admin/adjust-points','POST',{name:'Alice',points:3},true);
+ const adjustment=await request('/admin/adjust-points','POST',{name:'Alice',points:3,reason:'Test ajustement',requestKey:'test-key-123456789'},true);
  assert.equal(adjustment.status,200);assert.equal((await adjustment.json()).adjustment.userId,7);
- assert.equal((await request('/admin/adjust-points','POST',{name:'Unknown',points:3},true)).status,404);
- assert.equal((await request('/admin/adjust-points','POST',{name:'Alice',userId:7,points:3},true)).status,400);
+ assert.equal((await request('/admin/adjust-points','POST',{name:'Unknown',points:3,reason:'Test ajustement',requestKey:'test-key-123456789'},true)).status,404);
+ assert.equal((await request('/admin/adjust-points','POST',{name:'Alice',userId:7,points:3,reason:'Test ajustement',requestKey:'test-key-123456789'},true)).status,400);
 });

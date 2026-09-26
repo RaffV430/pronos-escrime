@@ -56,3 +56,18 @@ La clôture est contrôlée côté serveur à chaque écriture et les mutations 
 Appliquer uniquement `prisma/changes/20260925-pool-predictions.sql` sur une copie de la base actuelle, vérifier, puis sur la cible autorisée **avant de déployer le nouveau backend**. Ce script ajoute les trois tables `Pool`, `PoolFencer`, `PoolPrediction` ; il ne réexécute aucune ancienne migration et ne modifie pas les sept tables existantes. L'exécuter une seule fois, dans une transaction. Un second passage échoue volontairement plutôt que masquer une différence de schéma.
 
 Ne pas lancer `prisma migrate deploy`, `db push`, ni `baseline-current.sql` sur la production existante. La commande Render reste `npm ci && npx prisma generate`, puis `node src/server.js`. Déployer ensuite le frontend associé. Un retour à l'ancien code peut laisser les trois nouvelles tables en place pour conserver les pronostics.
+
+
+## Fiabilité et communauté — 26 septembre 2026
+
+Les scores sont limités à 15 en individuel et 45 par équipes, sans égalité. Un podium finalisé ne peut plus être rouvert. Les ex æquo partagent les rangs (1, 1, 3).
+
+« Mes pronostics » regroupe les poules, matchs et podium, la progression de saisie, le détail des points et le bilan du tournoi. L’évolution de rang compare la dernière consultation dans ce navigateur. Les dates indiquent le fuseau de l’appareil ; l’heure de clôture correspond au début prévu +30 minutes, sauf réouverture manuelle. Une actualisation de l’affichage ne collecte pas les sources officielles.
+
+L’espace Administration sépare les contrôles des parcours joueurs : recherche par nom ou ID, ajustements avec portée explicite et identifiant anti-doublon, verrouillages, retrait médical, correction d’un score officiel et validation du podium vérifié. Les changements sont journalisés à partir de cette version ; aucun historique antérieur n’est inventé. Les corrections de score ne modifient pas automatiquement les adversaires des tours suivants : vérifier lors du prochain import officiel.
+
+Les ligues privées sont sur invitation et reprennent tous les points du tournoi, y compris avant l’adhésion. Les clubs se classent à la moyenne des points de tous leurs membres, avec au moins trois membres ; un joueur appartient à un seul club par tournoi. Les inscriptions/départs sont figés dès le premier horaire de match enregistré ou dès qu’un résultat de poule est connu. Sans horaire connu, la création de clubs est refusée.
+
+Un défi ponctuel porte sur un match : bon vainqueur +3 points bonus, sinon 0. Création avant le début prévu, barème immuable, clôture au début prévu (ou avant si le résultat est publié), points uniquement après résultat final. Le bonus est séparé des 4 points du pronostic normal et recalculé à la lecture en cas de correction officielle.
+
+Base : appliquer seulement `prisma/changes/20260926-community.sql` pour ces ajouts, puis générer le client Prisma. Ne pas lancer les anciennes migrations en production. Cette évolution ne redémarre aucune planification FencingTimeLive.

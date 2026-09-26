@@ -11,6 +11,7 @@ function matchClosed(match, now = Date.now()) {
   return Boolean(match.isLocked || (deadline && now >= Date.parse(deadline)));
 }
 function podiumClosed(competition, matches, now = Date.now()) {
+  if (competition.podiumResolvedAt || competition.officialPodium?.finalConfirmed) return true;
   if (competition.podiumManualUnlock) return false;
   if (competition.isPodiumLocked) return true;
   const rounds = matches.map(m => Number(/^T(\d+)$/.exec(m.round || '')?.[1])).filter(Number.isFinite);
