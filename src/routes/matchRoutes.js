@@ -15,10 +15,10 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const matches = await prisma.match.findMany({
       where: filter,
-      include: { predictions: { where: { userId: req.user.userId } } },
+      include: { competition: { select: { name: true } }, predictions: { where: { userId: req.user.userId } } },
       orderBy: { id: 'asc' },
     });
-    res.json(matches.map(match => ({ ...match, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
+    res.json(matches.map(match => ({ ...match, maxScore: /par équipes/i.test(match.competition?.name || '') ? 45 : 15, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
   } catch (error) {
     console.error('Erreur matches:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des matchs.' });
