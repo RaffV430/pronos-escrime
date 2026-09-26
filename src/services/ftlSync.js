@@ -118,7 +118,7 @@ async function applyObservation(tx,c,observation,actorId){
 }
 async function syncCompetition(db,competitionId,actorId,client=createClient()){
  const c=await db.$transaction(async tx=>{
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(184721)`;
+  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184721)`;
   const latest=await tx.auditLog.findFirst({where:{action:START},orderBy:{createdAt:'desc'}});
   if(latest&&Date.now()-latest.createdAt.getTime()<COOLDOWN)throw Object.assign(failure('Un contrôle a déjà été lancé. Patientez deux minutes entre deux contrôles.',429),{retryAfter:Math.ceil((latest.createdAt.getTime()+COOLDOWN-Date.now())/1000)});
   const competition=await tx.competition.findUnique({where:{id:competitionId}});if(!competition)throw failure('Épreuve introuvable.',404);
