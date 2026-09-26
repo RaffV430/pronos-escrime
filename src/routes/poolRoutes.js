@@ -42,6 +42,8 @@ function createPoolRouter(db = prisma) {
 
   router.post('/', admin, handle(async (req, res) => {
     const competitionId = id(req.body.competitionId);
+    const rankingSystem = req.body.rankingSystem || null;
+    if (rankingSystem !== null && !['FIE', 'EFC', 'NATIONAL'].includes(rankingSystem)) fail('Type de classement invalide.');
     const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
     const lockMode = req.body.lockMode ?? 'FIRST_RESULT';
     if (!['TIME', 'FIRST_RESULT'].includes(lockMode)) fail('Mode de clôture invalide.');
@@ -56,7 +58,7 @@ function createPoolRouter(db = prisma) {
       fail('Chaque tireur doit avoir un nom distinct, de 1 à 100 caractères.');
     }
     if (!await db.competition.findUnique({ where: { id: competitionId } })) fail('Compétition introuvable.', 404);
-    const pool = await db.pool.create({ data: { competitionId, name, closesAt, lockMode, ...source,
+    const pool = await db.pool.create({ data: { competitionId, name, closesAt, lockMode, rankingSystem, ...source,
       fencers: { create: names.map((name, index) => ({ name, position: index + 1 })) },
     }, include: { fencers: true } });
     res.status(201).json(pool);

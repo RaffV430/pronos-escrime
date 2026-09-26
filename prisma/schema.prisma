@@ -110,6 +110,9 @@ model Pool {
   sourceUrl     String?
   sourcePoolNumber Int?
   sourceCheckedAt DateTime?
+  rankingSystem String?
+  rankingSourceUrl String?
+  rankingAsOf DateTime?
   isLocked      Boolean      @default(false)
   isFinal       Boolean      @default(false)
   createdAt     DateTime     @default(now())
@@ -128,6 +131,8 @@ model PoolFencer {
   losses        Int?
   indicator     Int?
   firstResultAt DateTime?
+  countryCode   String?
+  ranking       Int?
   predictions   PoolPrediction[]
 
   @@unique([poolId, position])
