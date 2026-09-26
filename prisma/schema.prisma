@@ -31,6 +31,14 @@ model Match {
   score2        Int?
   isFinished    Boolean      @default(false)
   predictions   Prediction[]
+  isLocked      Boolean      @default(false)
+  startsAt      DateTime?
+  sourceUrl     String?
+  sourceKey     String?
+  sourceCheckedAt DateTime?
+  round         String?
+
+  @@unique([competitionId, sourceKey])
 }
 
 model Prediction {

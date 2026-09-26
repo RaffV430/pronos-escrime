@@ -5,6 +5,7 @@ const { syncMatchesFromSheet } = require('../services/sheetSync');
 
 const router = express.Router();
 const prisma = require('../lib/prisma');
+const { matchClosed } = require('../lib/matchLock');
 
 // 1. Liste de tous les matchs
 router.get('/', authMiddleware, async (req, res) => {
@@ -17,7 +18,7 @@ router.get('/', authMiddleware, async (req, res) => {
       include: { predictions: { where: { userId: req.user.userId } } },
       orderBy: { id: 'asc' },
     });
-    res.json(matches);
+    res.json(matches.map(match => ({ ...match, isClosed: matchClosed(match) })));
   } catch (error) {
     console.error('Erreur matches:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des matchs.' });
@@ -126,16 +127,20 @@ router.post('/:id/predict', authMiddleware, async (req, res) => {
   }
 
   try {
-    const match = await prisma.match.findUnique({ where: { id: matchId } });
-    if (!match) return res.status(404).json({ error: 'Match introuvable.' });
-    if (match.isFinished) return res.status(409).json({ error: 'Les pronostics sont clos pour ce match.' });
+    const result = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${matchId} FOR UPDATE`;
+    const match = await tx.match.findUnique({ where: { id: matchId } });
+    if (!match) return { status: 404, body: { error: 'Match introuvable.' } };
+    if (matchClosed(match)) return { status: 409, body: { error: 'Les pronostics sont clos ou la vérification du match est en attente.' } };
 
-    const prediction = await prisma.prediction.upsert({
+    const prediction = await tx.prediction.upsert({
       where: { userId_matchId: { userId: userId, matchId: matchId } },
       update: { predictedScore1, predictedScore2 },
       create: { userId: userId, matchId: matchId, predictedScore1, predictedScore2 },
     });
-    res.json(prediction);
+    return { status: 200, body: prediction };
+    });
+    res.status(result.status).json(result.body);
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la sauvegarde du pronostic' });
   }
@@ -147,14 +152,18 @@ router.delete('/:id/predict', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    const match = await prisma.match.findUnique({ where: { id: matchId } });
-    if (!match) return res.status(404).json({ error: 'Match introuvable.' });
-    if (match.isFinished) return res.status(409).json({ error: 'Les pronostics sont clos pour ce match.' });
+    const result = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${matchId} FOR UPDATE`;
+    const match = await tx.match.findUnique({ where: { id: matchId } });
+    if (!match) return { status: 404, body: { error: 'Match introuvable.' } };
+    if (matchClosed(match)) return { status: 409, body: { error: 'Les pronostics sont clos ou la vérification du match est en attente.' } };
 
-    await prisma.prediction.deleteMany({
+    await tx.prediction.deleteMany({
       where: { userId: userId, matchId: matchId },
     });
-    res.json({ success: true, message: 'Pronostic supprimé avec succès' });
+    return { status: 200, body: { success: true, message: 'Pronostic supprimé avec succès' } };
+    });
+    res.status(result.status).json(result.body);
   } catch (error) {
     res.status(500).json({ error: 'Erreur lors de la suppression du pronostic' });
   }
