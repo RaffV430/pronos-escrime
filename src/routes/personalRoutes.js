@@ -16,6 +16,7 @@ router.get('/predictions',async(req,res)=>{
    db.podiumPrediction.findUnique({where:{userId_competitionId:{userId,competitionId}}})]);
   const rows=[];
   for(const m of await timedMatches(db,matches)){const p=m.predictions[0],finished=m.isFinished,closed=matchClosed(m);let details=[];
+   if(m.resultType==='CANCELLED'){if(p)rows.push({key:`match-${m.id}`,type:'Match',name:`${m.player1} / ${m.player2}`,round:m.round,status:'Annulé',prediction:`${p.predictedScore1} – ${p.predictedScore2}`,result:'Affiche retirée du tableau officiel',points:0,details:['Pronostic conservé dans l’historique, sans attribution de points.'],sourceUrl:m.sourceUrl});continue;}
    if(p&&finished){const total=calculateMatchPoints(p.predictedScore1,p.predictedScore2,m.score1,m.score2,m.winner,m.resultType);const exact=m.resultType!=='MEDICAL_WITHDRAWAL'&&p.predictedScore1===m.score1&&p.predictedScore2===m.score2;details=[`Bon vainqueur : +${total-(exact?3:0)}`,`Score exact : +${exact?3:0}`];}
    rows.push({key:`match-${m.id}`,type:'Match',name:`${m.player1} / ${m.player2}`,round:m.round,status:finished?'Terminé':closed?'Clos':p?'Enregistré':'À compléter',prediction:p?`${p.predictedScore1} – ${p.predictedScore2}`:null,result:finished?(m.resultType==='MEDICAL_WITHDRAWAL'?`Retrait médical · ${m.winner===1?m.player1:m.player2} qualifié(e)`:`${m.score1} – ${m.score2}`):null,points:p&&finished?p.pointsEarned:null,details,startsAt:m.startsAt,closesAt:closesAt(m),manualUnlockUntil:m.manualUnlockUntil,awaitingPreviousRound:m.awaitingPreviousRound,timingUnverified:m.timingUnverified,sourceCheckedAt:m.sourceCheckedAt,sourceUrl:m.sourceUrl});
   }
@@ -33,7 +34,7 @@ router.get('/summary/:tournamentId',async(req,res)=>{
  try{
   const tournamentId=id(req.params.tournamentId),userId=req.user.userId;
   const rows=await standings(db,{tournamentId});
-  const predictions=await db.prediction.findMany({where:{userId,match:{competition:{tournamentId},isFinished:true}},include:{match:true}});
+  const predictions=await db.prediction.findMany({where:{userId,match:{competition:{tournamentId},isFinished:true,OR:[{resultType:null},{resultType:{not:'CANCELLED'}}]}},include:{match:true}});
   const exact=predictions.filter(p=>p.match.resultType!=='MEDICAL_WITHDRAWAL'&&p.predictedScore1===p.match.score1&&p.predictedScore2===p.match.score2).length;
   const winners=predictions.filter(p=>calculateMatchPoints(p.predictedScore1,p.predictedScore2,p.match.score1,p.match.score2,p.match.winner,p.match.resultType)>0).length;
   const progress=await require('../services/rankingHistory').rankProgress(db,tournamentId,userId);

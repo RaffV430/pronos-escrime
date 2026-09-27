@@ -24,7 +24,7 @@ router.post('/sync-ftl',authMiddleware,adminMiddleware,async(req,res)=>{
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const { competitionId } = req.query;
-    const filter = competitionId ? { competitionId: parseInt(competitionId, 10) } : {};
+    const filter = {...(competitionId ? { competitionId: parseInt(competitionId, 10) } : {}),OR:[{resultType:null},{resultType:{not:'CANCELLED'}}]};
 
     const matches = await prisma.match.findMany({
       where: filter,
@@ -172,6 +172,7 @@ router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (re
       await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${id} FOR UPDATE`;
       const current = await tx.match.findUnique({ where: { id } });
       if (!current) return { status: 404, error: 'Match introuvable.' };
+      if(current.resultType==='CANCELLED')return {status:409,error:'Cette affiche a été annulée.'};
       const match = await tx.match.update({ where: { id }, data: { winner, resultType: 'MEDICAL_WITHDRAWAL', score1: null, score2: null, isFinished: true, isLocked: true, manualUnlock: false } });
       const predictions = await tx.prediction.findMany({ where: { matchId: id } });
       const { calculateMatchPoints } = require('../services/matchPoints');
@@ -191,6 +192,7 @@ router.put('/:id/result', authMiddleware, adminMiddleware, async (req,res)=>{
   const outcome=await prisma.$transaction(async tx=>{
    await tx.$queryRaw`SELECT id FROM "Match" WHERE id=${id} FOR UPDATE`;
    const current=await tx.match.findUnique({where:{id}});if(!current)return {status:404,error:'Match introuvable.'};
+   if(current.resultType==='CANCELLED')return {status:409,error:'Cette affiche a été annulée.'};
    if(!current.sourceUrl||current.sourceUrl!==sourceUrl)return {status:409,error:'Vérifiez la source officielle enregistrée de ce match.'};
    const c=await tx.competition.findUnique({where:{id:current.competitionId}}),max=c?.podiumFormat==='TEAM'?45:15;
    if(score1>max||score2>max)return {status:400,error:`Scores limités à ${max} touches.`};

@@ -78,7 +78,9 @@ function start() {
   const server = app.listen(port, () => console.log(`Serveur démarré sur le port ${port}`));
 
   const stopNotifications = require('./services/pushNotifications').startWorker(prisma);
+  const stopFtl = require('./services/ftlScheduler').startWorker(prisma);
   const shutdown = async () => {
+    stopFtl();
     stopNotifications();
     server.close(async () => {
       await prisma.$disconnect();

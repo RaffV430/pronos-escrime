@@ -8,7 +8,7 @@ function closesAt(match) {
   return Number.isFinite(deadline) ? new Date(deadline).toISOString() : null;
 }
 function matchClosed(match, now = Date.now()) {
-  if (match.isFinished) return true;
+  if (match.isFinished || match.syncIssue) return true;
   // An expired override closes the round even if its original deadline is later.
   if (match.manualUnlockUntil) return now >= time(match.manualUnlockUntil);
   if (match.timingUnverified) return true;
@@ -19,8 +19,8 @@ function roundContext(matches, rounds) {
   return matches.map(match => {
     const config = rounds.find(r => r.competitionId === match.competitionId && r.round === match.round);
     const previous = config?.previousRound && rounds.find(r => r.competitionId === match.competitionId && r.round === config.previousRound);
-    const results = previous ? matches.filter(m => m.competitionId === match.competitionId && m.round === previous.round) : [];
-    const complete = previous && results.length === previous.expectedMatchCount && results.every(m => m.isFinished && Number.isFinite(time(m.resultRegisteredAt)));
+    const results = previous ? matches.filter(m => m.resultType!=='CANCELLED' && m.competitionId === match.competitionId && m.round === previous.round) : [];
+    const complete = previous && results.length === previous.expectedMatchCount && results.every(m => !m.syncIssue && m.isFinished && Number.isFinite(time(m.resultRegisteredAt)));
     return {...match, manualUnlockUntil: config?.manualUnlockUntil || null,
       timingUnverified: !config,
       awaitingPreviousRound: Boolean(config?.previousRound && !complete),
@@ -28,6 +28,7 @@ function roundContext(matches, rounds) {
   });
 }
 function podiumClosed(competition, matches, now = Date.now()) {
+  matches=matches.filter(m=>m.resultType!=='CANCELLED');
   if (competition.podiumResolvedAt || competition.officialPodium?.finalConfirmed) return true;
   if (competition.podiumManualUnlock) return false;
   if (competition.isPodiumLocked) return true;

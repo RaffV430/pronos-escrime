@@ -42,6 +42,7 @@ model Match {
   winner        Int?
   resultType    String?
   resultRegisteredAt DateTime?
+  syncIssue String?
 
   @@unique([competitionId, sourceKey])
 }
@@ -246,6 +247,20 @@ model MatchRound {
   verifiedAt DateTime
   manualUnlockUntil DateTime?
   @@id([competitionId, round])
+}
+
+// A renewable claim shared by manual and automatic controls; survives restarts.
+model FtlSyncState {
+ competitionId Int @id
+ leaseToken String?
+ leaseUntil DateTime?
+ lastStartedAt DateTime?
+ lastFinishedAt DateTime?
+ nextAutomaticAt DateTime? @default(now())
+ failures Int @default(0)
+ status String @default("PENDING")
+ lastError String?
+ @@index([nextAutomaticAt])
 }
 
 model PushSubscription {
