@@ -54,12 +54,12 @@ async function save(db,input,actorId){
   const {config,roster}=entry.after;
   let c=competitionId?await tx.competition.findUnique({where:{id:competitionId}}):null;
   if(competitionId&&!c)throw failure('Épreuve introuvable.',404);
-  const duplicate=await tx.competition.findFirst({where:{rosterSourceUrl:config.rosterSourceUrl,...(c?{id:{not:c.id}}:{})}});
+  const duplicate=await tx.competition.findFirst({where:{OR:[{rosterSourceUrl:config.rosterSourceUrl},{ftlEventId:config.eventId}],...(c?{id:{not:c.id}}:{})}});
   if(duplicate)throw failure('Cette épreuve est déjà reliée à une compétition.',409);
   if(c){
    await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
    c=await tx.competition.findUnique({where:{id:c.id}});
-   if(c.rosterSourceUrl&&c.rosterSourceUrl!==config.rosterSourceUrl)throw failure('La source de cette épreuve ne peut pas être remplacée.',409);
+   if((c.ftlEventId&&c.ftlEventId!==config.eventId)||(c.rosterSourceUrl&&c.rosterSourceUrl!==config.rosterSourceUrl))throw failure('La source de cette épreuve ne peut pas être remplacée.',409);
    const sources=await tx.match.findMany({where:{competitionId:c.id,sourceUrl:{not:null}},select:{sourceUrl:true}});
    if(sources.some(m=>SOURCE.exec(m.sourceUrl)?.[2]?.toUpperCase()!==config.eventId))throw failure('Des rencontres existantes appartiennent à une autre source officielle.',409);
    const identity=entries=>JSON.stringify((entries||[]).map(e=>[e.id,norm(e.name)]).sort((a,b)=>a[0].localeCompare(b[0])));
@@ -73,7 +73,7 @@ async function save(db,input,actorId){
    if(name.length>200)throw failure('Nom d’épreuve trop long.',400);
    c=await tx.competition.create({data:{name,tournamentId:t.id,podiumFormat:config.format}});
   }
-  await tx.competition.update({where:{id:c.id},data:{podiumFormat:config.format,...(!c.podiumRoster?{podiumRoster:roster,rosterSourceUrl:config.rosterSourceUrl,rosterCheckedAt:entry.createdAt}:{})}});
+  await tx.competition.update({where:{id:c.id},data:{ftlEventId:config.eventId,podiumFormat:config.format,...(!c.podiumRoster?{podiumRoster:roster,rosterSourceUrl:config.rosterSourceUrl,rosterCheckedAt:entry.createdAt}:{})}});
   await tx.auditLog.create({data:{actorId,action:CONFIG,targetType:'Competition',targetId:c.id,after:{...config,name:c.name}}});
   const result={competitionId:c.id,tournamentId:c.tournamentId,name:c.name};
   await tx.auditLog.create({data:{actorId,action:'Configuration FTL enregistrée',targetType:'FtlSetupPreview',targetId:previewId,after:result}});

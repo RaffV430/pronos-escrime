@@ -14,6 +14,7 @@ model User {
   name              String             @unique
   totalPoints       Int                @default(0)
   isAdmin           Boolean            @default(false)
+  pushSubscriptions PushSubscription[]
   predictions       Prediction[]
   poolPredictions   PoolPrediction[]
   podiumPredictions PodiumPrediction[] 
@@ -60,6 +61,7 @@ model Prediction {
 }
 
 model Tournament {
+  ftlSourceUrl String? @unique
   id           Int           @id @default(autoincrement())
   name         String        
   isLocked     Boolean       @default(false) 
@@ -68,6 +70,7 @@ model Tournament {
 }
 
 model Competition {
+  ftlEventId String? @unique
   id                Int                @id @default(autoincrement())
   tournamentId      Int
   tournament        Tournament         @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
@@ -243,4 +246,44 @@ model MatchRound {
   verifiedAt DateTime
   manualUnlockUntil DateTime?
   @@id([competitionId, round])
+}
+
+model PushSubscription {
+ id String @id @default(uuid())
+ userId Int
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ endpoint String @unique
+ p256dh String
+ auth String
+ enabled Boolean @default(true)
+ tournamentIds Int[]
+ competitionIds Int[]
+ lastEventId Int @default(0)
+ deliveries PushDelivery[]
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@index([userId])
+}
+model PushEvent {
+ id Int @id @default(autoincrement())
+ matchId Int @unique
+ competitionId Int
+ createdAt DateTime @default(now())
+ @@index([createdAt])
+}
+model PushDelivery {
+ id String @id @default(uuid())
+ subscriptionId String
+ subscription PushSubscription @relation(fields:[subscriptionId],references:[id],onDelete:Cascade)
+ competitionId Int
+ throughEventId Int
+ matchIds Int[]
+ status String @default("PENDING")
+ attempts Int @default(0)
+ nextAttemptAt DateTime @default(now())
+ claimedAt DateTime?
+ sentAt DateTime?
+ createdAt DateTime @default(now())
+ @@unique([subscriptionId,competitionId,throughEventId])
+ @@index([status,nextAttemptAt])
 }

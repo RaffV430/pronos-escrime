@@ -34,6 +34,23 @@ function createClient({email=process.env.FTL_ACCOUNT_EMAIL,password=process.env.
    if(response.status!==200)throw failure('La source officielle est temporairement indisponible.');
    if(typeof response.data==='string'&&/id=["']loginForm["']/.test(response.data))throw failure('Connexion FencingTimeLive requise.',503);
    return response.data;
+  },
+  async eventPage(path) {
+   const initial=new URL(path,ORIGIN),id=/^\/events\/view\/([a-f0-9]{32})$/i.exec(initial.pathname)?.[1];
+   if(initial.origin!==ORIGIN||!id||initial.search||initial.hash)throw failure('Lien d’épreuve invalide.',400);
+   let url=initial;
+   for(let redirects=0;redirects<5;redirects++){
+    const response=await request(url.href);
+    if(response.status>=300&&response.status<400){
+     const next=new URL(response.headers.location||'/',url);
+     const allowed=new RegExp(`^/(?:events/(?:view|competitors|format|results)/${id}|(?:pools|tableaus)/scores/${id}/[a-f0-9]{32})$`,'i');
+     if(next.origin!==ORIGIN||next.username||next.password||next.search||next.hash||!allowed.test(next.pathname))throw failure('Redirection officielle non vérifiable.');
+     url=next;continue;
+    }
+    if(response.status!==200||typeof response.data!=='string'||/id=["']loginForm["']/.test(response.data))throw failure('Épreuve officielle indisponible.');
+    return {html:response.data,url:url.href};
+   }
+   throw failure('Trop de redirections pour cette épreuve.');
   }
  };
 }

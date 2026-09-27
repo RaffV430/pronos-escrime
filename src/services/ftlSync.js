@@ -112,7 +112,7 @@ async function applyObservation(tx,c,observation,actorId){
   const data={sourceUrl:observation.sourceUrl,sourceKey:o.sourceKey,round:o.round,sourceCheckedAt:observation.checkedAt,...(o.startsAt?{startsAt:o.startsAt}:{})};
   if(o.isFinished)Object.assign(data,{score1:o.score1,score2:o.score2,winner:o.winner,resultType:o.resultType,isFinished:true,isLocked:true,manualUnlock:false});
   const saved=m?await tx.match.update({where:{id:m.id},data}):await tx.match.create({data:{competitionId:c.id,player1:o.player1,player2:o.player2,...data}});
-  if(!m){summary.created++;summary.createdIds.push(saved.id);}
+  if(!m){summary.created++;summary.createdIds.push(saved.id);await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184725)`;await tx.pushEvent.create({data:{matchId:saved.id,competitionId:c.id}});}
   if(o.isFinished){
    if(!wasFinished)summary.results++;
    else if(corrected)summary.corrections++;
@@ -176,7 +176,7 @@ async function syncPools(db,c,config,actorId,client){
  return summary;
 }
 async function syncCompetition(db,competitionId,actorId,client=createClient()){
- const c=await db.$transaction(async tx=>{
+ let c=await db.$transaction(async tx=>{
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184721)`;
   const latest=await tx.auditLog.findFirst({where:{action:START},orderBy:{createdAt:'desc'}});
   if(latest&&Date.now()-latest.createdAt.getTime()<COOLDOWN)throw Object.assign(failure('Un contrôle a déjà été lancé. Patientez deux minutes entre deux contrôles.',429),{retryAfter:Math.ceil((latest.createdAt.getTime()+COOLDOWN-Date.now())/1000)});
@@ -186,15 +186,16 @@ async function syncCompetition(db,competitionId,actorId,client=createClient()){
  try{
   const existing=await db.match.findMany({where:{competitionId}}),configured=await configuration(db,competitionId);
   const source=[...existing.map(m=>m.sourceUrl),configured?.sourceUrl,configured?.poolSources?.[0],c.rosterSourceUrl].find(Boolean);
-  const eventId=source?.match(/([a-f0-9]{32})/i)?.[1]?.toUpperCase(),config=configured||events[eventId];
+  const eventId=source?.match(/([a-f0-9]{32})/i)?.[1]?.toUpperCase();let config=configured||events[eventId];
   if(!config||c.name!==config.name||c.podiumFormat!==config.format)throw failure('Configurez la source et l’identité de cette épreuve dans Administration.',409);
   await client.login();
+  ({c,config}=await require('./ftlTournament').refreshPending(db,c,config,actorId,client));
   const poolSummary=await syncPools(db,c,config,actorId,client);
   let summary={createdIds:[],created:0,results:0,corrections:0,pointsUpdated:0,podium:false,checked:0,checkedAt:new Date().toISOString(),warnings:[]};
   if(existing.some(m=>m.sourceUrl)||config.sourceUrl){
    try{const observation=await observe(c,existing,client,config,true);summary=await db.$transaction(tx=>applyObservation(tx,c,observation,actorId),{timeout:30000,maxWait:5000});}
    catch(e){if(!poolSummary.checked)throw e;summary.warnings.push(e.status?e.message:'Tableau non vérifiable pour le moment.');}
-  }else summary.warnings.push('Tableau non encore relié. Vérifiez sa source dans la configuration après publication.');
+  }else summary.warnings.push('Tableau pas encore publié. Il sera recherché au prochain contrôle manuel.');
   summary.pools=poolSummary;summary.pointsUpdated+=poolSummary.pointsUpdated;summary.warnings.push(...poolSummary.warnings);
   // Ranking history must never roll back a certain score or first-result lock.
   try{await db.$transaction(async tx=>{await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184723)`;await captureRankings(tx,c,actorId);},{timeout:30000});}catch{summary.warnings.push('Résultats enregistrés, historique du classement à réessayer au prochain contrôle.');}

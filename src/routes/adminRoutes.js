@@ -36,4 +36,6 @@ router.post('/adjust-points',wrap(async(req,res)=>{
 router.post('/ftl/preview',wrap(async(req,res)=>res.json(await require('../services/ftlConfiguration').preview(prisma,req.body,req.user.userId))));
 router.post('/ftl/configure',wrap(async(req,res)=>res.json(await require('../services/ftlConfiguration').save(prisma,req.body,req.user.userId))));
 router.get('/ftl/configuration/:competitionId',wrap(async(req,res)=>res.json(await require('../services/ftlConfiguration').configuration(prisma,id(req.params.competitionId)))));
+router.post('/ftl/tournament/preview',wrap(async(req,res)=>res.json(await require('../services/ftlTournament').preview(prisma,req.body,req.user.userId))));
+router.post('/ftl/tournament/configure',wrap(async(req,res)=>res.json(await require('../services/ftlTournament').save(prisma,req.body,req.user.userId))));
 module.exports=router;
