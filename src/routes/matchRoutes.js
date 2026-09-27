@@ -8,6 +8,10 @@ const prisma = require('../lib/prisma');
 const { matchClosed, closesAt } = require('../lib/matchLock');
 const {timedMatches,timedMatch,reopenRound} = require('../services/roundTiming');
 
+router.get('/freshness/:competitionId',authMiddleware,async(req,res)=>{
+ const competitionId=Number(req.params.competitionId);if(!Number.isSafeInteger(competitionId)||competitionId<1)return res.status(400).json({error:'Épreuve invalide.'});
+ try{const state=await prisma.ftlSyncState.findUnique({where:{competitionId}});res.json({...require('../services/playerExperience').freshness(state),automatic:require('../services/ftlScheduler').enabled()});}catch{res.status(503).json({error:'État de synchronisation indisponible.'});}
+});
 router.get('/sync-ftl/:competitionId',authMiddleware,adminMiddleware,async(req,res)=>{
  const id=Number(req.params.competitionId);
  if(!Number.isSafeInteger(id)||id<=0)return res.status(400).json({error:'Épreuve invalide.'});

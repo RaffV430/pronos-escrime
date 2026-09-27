@@ -7,7 +7,7 @@ const wrap=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){res.status(e.sta
 router.get('/config',wrap(async(req,res)=>res.json({available:push.configured(),publicKey:push.configured()?process.env.VAPID_PUBLIC_KEY:null})));
 router.get('/choices',wrap(async(req,res)=>res.json(await db.tournament.findMany({select:{id:true,name:true,competitions:{select:{id:true,name:true},orderBy:{name:'asc'}}},orderBy:{createdAt:'desc'}}))));
 router.post('/status',wrap(async(req,res)=>{
- const row=typeof req.body.endpoint==='string'?await db.pushSubscription.findFirst({where:{endpoint:req.body.endpoint,userId:req.user.userId},select:{id:true,enabled:true,tournamentIds:true,competitionIds:true}}):null;res.json(row);
+ const row=typeof req.body.endpoint==='string'?await db.pushSubscription.findFirst({where:{endpoint:req.body.endpoint,userId:req.user.userId},select:{id:true,enabled:true,tournamentIds:true,competitionIds:true,preferences:true}}):null;if(row){const [sent,failed]=await Promise.all([db.pushDelivery.findFirst({where:{subscriptionId:row.id,status:'SENT'},orderBy:{sentAt:'desc'},select:{sentAt:true}}),db.pushDelivery.count({where:{subscriptionId:row.id,status:'FAILED',createdAt:{gte:new Date(Date.now()-86400000)}}})]);row.preferences=require('../services/playerExperience').preferences(row.preferences||{});row.diagnostic={sentAt:sent?.sentAt||null,failed:failed>0};}res.json(row);
 }));
 router.post('/subscribe',wrap(async(req,res)=>{if(!push.configured())return res.status(503).json({error:'Notifications en cours de configuration.'});res.json(await push.subscribe(db,req.user.userId,req.body));}));
 router.post('/disable',wrap(async(req,res)=>{

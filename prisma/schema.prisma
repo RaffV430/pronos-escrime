@@ -273,6 +273,8 @@ model PushSubscription {
  enabled Boolean @default(true)
  tournamentIds Int[]
  competitionIds Int[]
+ preferences Json?
+ preferencesSince DateTime @default(now())
  lastEventId Int @default(0)
  deliveries PushDelivery[]
  createdAt DateTime @default(now())
@@ -292,6 +294,8 @@ model PushDelivery {
  subscription PushSubscription @relation(fields:[subscriptionId],references:[id],onDelete:Cascade)
  competitionId Int
  throughEventId Int
+ kind String @default("MATCHES")
+ round String @default("")
  matchIds Int[]
  status String @default("PENDING")
  attempts Int @default(0)
@@ -299,6 +303,6 @@ model PushDelivery {
  claimedAt DateTime?
  sentAt DateTime?
  createdAt DateTime @default(now())
- @@unique([subscriptionId,competitionId,throughEventId])
+ @@unique([subscriptionId,competitionId,throughEventId,kind,round], map:"PushDelivery_scope_event_kind_round_key")
  @@index([status,nextAttemptAt])
 }
