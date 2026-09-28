@@ -7,7 +7,9 @@ async function main() {
   const password = process.env.SEED_ADMIN_PASSWORD;
 
   if (!email || !name || !password || password.length < 12) {
-    throw new Error('SEED_ADMIN_EMAIL, SEED_ADMIN_NAME et un SEED_ADMIN_PASSWORD de 12 caractères minimum sont requis.');
+    throw new Error(
+      'SEED_ADMIN_EMAIL, SEED_ADMIN_NAME et un SEED_ADMIN_PASSWORD de 12 caractères minimum sont requis.',
+    );
   }
 
   const hashedPassword = await bcrypt.hash(password, 12);

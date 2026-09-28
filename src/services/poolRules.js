@@ -36,11 +36,21 @@ function fencerClosed(pool, fencer, now = new Date()) {
 function validateSource(sourceUrl, sourcePoolNumber) {
   if (typeof sourceUrl !== 'string') fail('Lien FencingTimeLive requis.');
   let url;
-  try { url = new URL(sourceUrl); } catch { fail('Lien FencingTimeLive invalide.'); }
-  if (url.origin !== 'https://www.fencingtimelive.com' || url.username || url.password || !/^\/pools\/scores\/[A-Fa-f0-9]{32}\/[A-Fa-f0-9]{32}\/?$/.test(url.pathname)) {
+  try {
+    url = new URL(sourceUrl);
+  } catch {
+    fail('Lien FencingTimeLive invalide.');
+  }
+  if (
+    url.origin !== 'https://www.fencingtimelive.com' ||
+    url.username ||
+    url.password ||
+    !/^\/pools\/scores\/[A-Fa-f0-9]{32}\/[A-Fa-f0-9]{32}\/?$/.test(url.pathname)
+  ) {
     fail('Utilisez le lien officiel FencingTimeLive des résultats de poules.');
   }
-  if (!Number.isInteger(sourcePoolNumber) || sourcePoolNumber < 1 || sourcePoolNumber > 1000) fail('Numéro de poule FencingTimeLive invalide.');
+  if (!Number.isInteger(sourcePoolNumber) || sourcePoolNumber < 1 || sourcePoolNumber > 1000)
+    fail('Numéro de poule FencingTimeLive invalide.');
   return { sourceUrl: url.origin + url.pathname.replace(/\/$/, ''), sourcePoolNumber };
 }
 function comparison(prediction, fencer, final) {
@@ -55,24 +65,24 @@ function comparison(prediction, fencer, final) {
 }
 function validateResults(rows, fencers) {
   if (!Array.isArray(rows) || rows.length !== fencers.length) fail('Un résultat est requis pour chaque tireur.');
-  const expected = new Set(fencers.map(f => f.id));
+  const expected = new Set(fencers.map((f) => f.id));
   const seen = new Set();
-  const results = rows.map(row => {
+  const results = rows.map((row) => {
     const fencerId = id(row?.fencerId);
     if (!expected.has(fencerId) || seen.has(fencerId)) fail('Tireur inconnu ou résultat en double.');
     seen.add(fencerId);
     return { fencerId, ...validatePrediction(row, fencers.length) };
   });
-  const bouts = fencers.length * (fencers.length - 1) / 2;
+  const bouts = (fencers.length * (fencers.length - 1)) / 2;
   if (results.reduce((s, r) => s + r.wins, 0) !== bouts || results.reduce((s, r) => s + r.indicator, 0) !== 0) {
     fail('Bilan de poule incohérent : une victoire par match et une somme des indices égale à zéro sont requises.');
   }
   // A sorted tournament score sequence must satisfy Landau's inequalities.
-  const wins = results.map(r => r.wins).sort((a, b) => a - b);
+  const wins = results.map((r) => r.wins).sort((a, b) => a - b);
   let total = 0;
   for (let k = 1; k <= wins.length; k++) {
     total += wins[k - 1];
-    if (total < k * (k - 1) / 2) fail('Cette répartition des victoires est impossible dans une poule.');
+    if (total < (k * (k - 1)) / 2) fail('Cette répartition des victoires est impossible dans une poule.');
   }
   return results;
 }
@@ -80,7 +90,19 @@ function poolPoints(prediction, result) {
   const winDifference = Math.abs(prediction.wins - result.wins);
   const indicatorDifference = Math.abs(prediction.indicator - result.indicator);
   const winsPoints = winDifference === 0 ? 3 : winDifference === 1 ? 1 : 0;
-  const indicatorPoints = indicatorDifference === 0 ? 5 : indicatorDifference <= 3 ? 3 : indicatorDifference <= 5 ? 1 : 0;
+  const indicatorPoints =
+    indicatorDifference === 0 ? 5 : indicatorDifference <= 3 ? 3 : indicatorDifference <= 5 ? 1 : 0;
   return { winsPoints, indicatorPoints, total: winsPoints + indicatorPoints };
 }
-module.exports = { poolPoints, fail, id, validatePrediction, closed, fencerClosed, sourceUnavailable, validateSource, comparison, validateResults };
+module.exports = {
+  poolPoints,
+  fail,
+  id,
+  validatePrediction,
+  closed,
+  fencerClosed,
+  sourceUnavailable,
+  validateSource,
+  comparison,
+  validateResults,
+};

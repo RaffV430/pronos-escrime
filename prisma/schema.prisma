@@ -59,6 +59,7 @@ model Prediction {
   createdAt       DateTime @default(now())
 
   @@unique([userId, matchId])
+  @@index([matchId])
 }
 
 model Tournament {
@@ -196,6 +197,7 @@ model AuditLog {
   after Json?
   createdAt DateTime @default(now())
   @@index([createdAt])
+  @@index([action, targetType, targetId])
 }
 model League {
   id Int @id @default(autoincrement())
