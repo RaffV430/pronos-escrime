@@ -103,10 +103,17 @@ function withCountries(match) {
     player2Country: countryFor(podiumRoster, match.player2),
   };
 }
+// Code olympique (CIO) tel que publié dans la liste des engagés : FRA, GER, SUI…
+function olympicCodeFor(roster, name) {
+  const found = (Array.isArray(roster) ? roster : []).filter((r) => normalize(r.name) === normalize(name));
+  if (found.length !== 1) return null;
+  const code = normalize(found[0].country);
+  return /^[A-Z]{3}$/.test(code) ? code : null;
+}
 // Rang d'entrée dans l'épreuve (liste des engagés FencingTimeLive), si le nom est unique.
 function entryRankFor(roster, name) {
   const found = (Array.isArray(roster) ? roster : []).filter((r) => normalize(r.name) === normalize(name));
   const rank = found.length === 1 ? found[0].entryRanking : null;
   return Number.isSafeInteger(rank) && rank > 0 ? rank : null;
 }
-module.exports = { countryFor, withCountries, entryRankFor };
+module.exports = { countryFor, olympicCodeFor, withCountries, entryRankFor };

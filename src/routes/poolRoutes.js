@@ -15,7 +15,7 @@ const {
   poolPoints,
 } = require('../services/poolRules');
 const { rescore } = require('../services/rescore');
-const { countryFor, entryRankFor } = require('../services/matchCountries');
+const { olympicCodeFor, entryRankFor } = require('../services/matchCountries');
 
 function createPoolRouter(db = prisma) {
   const admin = createAdminMiddleware(db);
@@ -46,7 +46,7 @@ function createPoolRouter(db = prisma) {
     '/',
     handle(async (req, res) => {
       const competitionId = id(req.query.competitionId);
-      // Nation (code ISO) et rang d'entrée tirés de la liste des engagés de l'épreuve,
+      // Nation (code olympique) et rang d'entrée tirés de la liste des engagés de l'épreuve,
       // comme pour les cartes de match, quand la poule ne les fournit pas.
       const competition = await db.competition.findUnique({
         where: { id: competitionId },
@@ -67,7 +67,7 @@ function createPoolRouter(db = prisma) {
           sourceUnavailable: sourceUnavailable(pool),
           fencers: pool.fencers.map(({ predictions, ...fencer }) => ({
             ...fencer,
-            countryCode: fencer.countryCode || countryFor(roster, fencer.name),
+            countryCode: fencer.countryCode || olympicCodeFor(roster, fencer.name),
             entryRanking: entryRankFor(roster, fencer.name),
             isClosed: fencerClosed(pool, fencer),
             prediction: predictions[0] || null,
