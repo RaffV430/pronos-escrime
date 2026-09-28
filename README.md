@@ -30,6 +30,8 @@ Le fichier prisma/baseline-current.sql décrit une installation neuve du schéma
 
 Avant un déploiement sur la base actuelle : sauvegarder les données, inspecter le schéma réel et l'historique _prisma_migrations, puis préparer et tester une migration incrémentale sur une copie. Vérifier notamment les noms d'utilisateur dupliqués et les relations competitionId nulles avant d'ajouter les nouvelles contraintes. Ne pas utiliser migrate reset en production.
 
+Une procédure pour repartir d'une migration de référence unique et réactiver `prisma migrate deploy` est décrite dans [docs/migrations-baseline.md](docs/migrations-baseline.md).
+
 La cause des erreurs 500 doit être confirmée dans les journaux Render et par un contrôle de connexion PostgreSQL. Les seuls codes HTTP ne prouvent pas une erreur de migration.
 
 ## Pronostics de poules
