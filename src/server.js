@@ -10,7 +10,6 @@ const authMiddleware = require('./middleware/auth');
 const adminMiddleware = require('./middleware/admin');
 const authRoutes = require('./routes/authRoutes');
 const matchRoutes = require('./routes/matchRoutes');
-const userRoutes = require('./routes/userRoutes');
 const podiumRoutes = require('./routes/podiumRoutes');
 
 const app = express();
@@ -37,7 +36,6 @@ const authLimiter = rateLimit({
 
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/matches', matchRoutes);
-app.use('/api/users', userRoutes);
 app.use('/api/podium', podiumRoutes);
 app.use('/api/pools', require('./routes/poolRoutes'));
 

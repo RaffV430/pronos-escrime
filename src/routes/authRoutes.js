@@ -14,7 +14,7 @@ router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, name: true, email: true, isAdmin: true, totalPoints: true } // On sélectionne bien 'name' ici
+      select: { id: true, name: true, email: true, isAdmin: true } // On sélectionne bien 'name' ici
     });
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
     
