@@ -250,3 +250,10 @@ test('GET /api/me/season only reads the signed-in player and validates the seaso
   assert.equal(body.label, '2025-2026');
   assert.equal(body.totals.total, 3);
 });
+
+test('an event lists pools first, then bouts by time, and the podium last', () => {
+  const out = buildSeason(fixture(), 2026, new Date('2026-12-01T00:00:00Z'));
+  const types = out.tournaments[0].competitions[0].rows.map((r) => r.type);
+  assert.deepEqual(types.slice(0, 2), ['Poule', 'Poule']);
+  assert.equal(types.at(-1), 'Podium');
+});

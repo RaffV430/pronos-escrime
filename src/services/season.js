@@ -117,6 +117,11 @@ function challengeRow(pick, match) {
 
 // data : { predictions, poolPredictions, podiums, challengePicks, challengeMatches, adjustments,
 //          tournaments (avec competitions), firstDates: Map(competitionId → date) }
+// Ordre d'une épreuve : poules, puis matchs et défis dans l'ordre du tableau, podium en dernier.
+const TYPE_ORDER = { Poule: 0, Match: 1, Défi: 1, Podium: 2 };
+const chronological = (a, b) =>
+  TYPE_ORDER[a.type] - TYPE_ORDER[b.type] || new Date(a.date || 0) - new Date(b.date || 0);
+
 function buildSeason(data, requested, now = new Date()) {
   const dates = tournamentDates(data.tournaments, data.firstDates);
   const compToTournament = new Map();
@@ -203,7 +208,7 @@ function buildSeason(data, requested, now = new Date()) {
       ...t,
       competitions: [...t.competitions.values()].map((c) => ({
         ...c,
-        rows: c.rows.sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0)),
+        rows: c.rows.sort(chronological),
       })),
     })),
     adjustments,
