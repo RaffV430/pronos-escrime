@@ -43,7 +43,7 @@ test('cancellation is excluded from previous round completion and cannot be unlo
  assert.equal(matchClosed({syncIssue:'Changed',manualUnlockUntil:new Date(Date.now()+600000)}),true);
 });
 test('claims are per event, reject active leases, and recover an expired lease',async()=>{
- const states=new Map();const db={$queryRaw:async()=>[],competition:{findUnique:async({where})=>({id:where.id})},ftlSyncState:{upsert:async({where})=>states.get(where.competitionId)||{},update:async({where,data})=>states.set(where.competitionId,{...data})}};db.$transaction=fn=>fn(db);
+ const states=new Map();const db={tournament:{findUnique:async()=>({})},$queryRaw:async()=>[],competition:{findUnique:async({where})=>({id:where.id})},ftlSyncState:{upsert:async({where})=>states.get(where.competitionId)||{},update:async({where,data})=>states.set(where.competitionId,{...data})}};db.$transaction=fn=>fn(db);
  const now=new Date();const one=await claim(db,1,{now});assert.ok(one.token);
  assert.ok(await claim(db,2,{now}));await assert.rejects(claim(db,1,{now}),e=>e.status===409);
  assert.ok(await claim(db,1,{now:new Date(now.getTime()+180001)}));
@@ -57,6 +57,6 @@ test('retry backoff, complete stop and stale token guard',async()=>{
 test('automatic scan visits both events despite one error, with no AI or browser session',async()=>{
  const ids=['F11BB8AC692C4073BA38A7592EC7309E','647A20DB3116411181393C8F779CD2A4'];const seen=[];
  const db={competition:{findMany:async()=>ids.map((id,i)=>({id:i+5,rosterSourceUrl:`https://www.fencingtimelive.com/events/competitors/${id}`}))},auditLog:{findFirst:async()=>null},ftlSyncState:{findMany:async()=>[]}};
- await tick(db,{now:new Date('2026-09-28'),sync:async(db,id,actor,client,options)=>{seen.push(id);assert.equal(actor,0);assert.equal(options.automatic,true);if(id===5)throw Error('upstream');return{created:2};}});
+ await tick(db,{archive:async()=>[],now:new Date('2026-09-28'),sync:async(db,id,actor,client,options)=>{seen.push(id);assert.equal(actor,0);assert.equal(options.automatic,true);if(id===5)throw Error('upstream');return{created:2};}});
  assert.deepEqual(seen,[5,6]);assert.equal(windowDelay({date:'2026-10-10'},Date.parse('2026-09-28')),86400000);
 });

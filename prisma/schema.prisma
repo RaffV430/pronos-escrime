@@ -62,6 +62,8 @@ model Prediction {
 }
 
 model Tournament {
+  archivedAt DateTime?
+  completionNextCheckAt DateTime?
   ftlSourceUrl String? @unique
   id           Int           @id @default(autoincrement())
   name         String        

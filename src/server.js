@@ -48,7 +48,7 @@ app.use('/api/me', require('./routes/personalRoutes'));
 
 app.get('/api/tournaments', authMiddleware, async (req, res) => {
   try {
-    const tournaments = await prisma.tournament.findMany({ orderBy: { createdAt: 'desc' } });
+    const tournaments = await prisma.tournament.findMany({ where:req.query.active==='true'?{archivedAt:null}:{}, orderBy: { createdAt: 'desc' } });
     res.json(tournaments);
   } catch (error) {
     console.error('Erreur récupération tournois:', error);

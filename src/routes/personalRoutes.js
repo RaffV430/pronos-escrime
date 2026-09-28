@@ -35,18 +35,25 @@ router.get('/predictions',async(req,res)=>{
 router.get('/summary/:tournamentId',async(req,res)=>{
  try{
   const tournamentId=id(req.params.tournamentId),userId=req.user.userId;
-  const rows=await standings(db,{tournamentId});
-  const predictions=await db.prediction.findMany({where:{userId,match:{competition:{tournamentId},isFinished:true,OR:[{resultType:null},{resultType:{not:'CANCELLED'}}]}},include:{match:true}});
+  const general=req.query.scope==='general',leagueId=req.query.leagueId?Number(req.query.leagueId):null;
+  if(leagueId&&!Number.isSafeInteger(leagueId))return res.status(400).json({error:'Groupe invalide.'});
+  const league=leagueId?await db.league.findUnique({where:{id:leagueId},include:{members:true}}):null;
+  if(leagueId&&(!league||league.tournamentId!==tournamentId||!league.members.some(m=>m.userId===userId)))return res.status(403).json({error:'Ce groupe est privé.'});
+  let rows=await standings(db,general?{}:{tournamentId});
+  if(league)rows=require('../services/ranking').rankRows(rows.filter(r=>league.members.some(m=>m.userId===r.id)));
+  const eventScope=general?{}:{tournamentId};
+  const predictions=await db.prediction.findMany({where:{userId,match:{competition:eventScope,isFinished:true,OR:[{resultType:null},{resultType:{not:'CANCELLED'}}]}},include:{match:true}});
   const exact=predictions.filter(p=>p.match.resultType!=='MEDICAL_WITHDRAWAL'&&p.predictedScore1===p.match.score1&&p.predictedScore2===p.match.score2).length;
   const winners=predictions.filter(p=>calculateMatchPoints(p.predictedScore1,p.predictedScore2,p.match.score1,p.match.score2,p.match.winner,p.match.resultType)>0).length;
   const progress=await require('../services/rankingHistory').rankProgress(db,tournamentId,userId);
   const tournament=await db.tournament.findUnique({where:{id:tournamentId},include:{competitions:{select:{id:true,name:true,podiumResolvedAt:true}}}});
-  const allRounds=await db.matchRound.findMany({where:{competitionId:{in:tournament.competitions.map(c=>c.id)}}});
-  const allMatches=await db.match.findMany({where:{competition:{tournamentId}},include:{predictions:{where:{userId}}}});
-  const perRound=tournament.competitions.flatMap(c=>require('../services/playerExperience').roundSummaries(allMatches.filter(m=>m.competitionId===c.id),allRounds.filter(r=>r.competitionId===c.id)).filter(r=>r.completed&&r.saved>0).map(r=>({...r,competition:c.name})));
+  const scopeCompetitions=general?await db.competition.findMany({select:{id:true,name:true,podiumResolvedAt:true}}):tournament.competitions;
+  const allRounds=await db.matchRound.findMany({where:{competitionId:{in:scopeCompetitions.map(c=>c.id)}}});
+  const allMatches=await db.match.findMany({where:{competition:eventScope},include:{predictions:{where:{userId}}}});
+  const perRound=scopeCompetitions.flatMap(c=>require('../services/playerExperience').roundSummaries(allMatches.filter(m=>m.competitionId===c.id),allRounds.filter(r=>r.competitionId===c.id)).filter(r=>r.completed&&r.saved>0).map(r=>({...r,competition:c.name})));
   const bestRound=perRound.sort((a,b)=>b.points-a.points)[0]||null;
-  const complete=tournament.competitions.length>0&&tournament.competitions.every(c=>c.podiumResolvedAt);
-  res.json({tournamentName:tournament.name,complete,bestRound,progress,ranking:rows.find(r=>r.id===userId),players:rows.length,played:predictions.length,exact,winners,accuracy:predictions.length?Math.round(winners*100/predictions.length):null});
+  const complete=!general&&scopeCompetitions.length>0&&scopeCompetitions.every(c=>c.podiumResolvedAt);
+  res.json({tournamentName:general?'Classement général':league?`${league.kind==='CLUB'?'Club':'Ligue'} · ${league.name} — ${tournament.name}`:tournament.name,complete,bestRound,progress,ranking:rows.find(r=>r.id===userId),players:rows.length,played:predictions.length,exact,winners,accuracy:predictions.length?Math.round(winners*100/predictions.length):null});
  }catch{res.status(500).json({error:'Bilan indisponible.'});}
 });
 module.exports=router;

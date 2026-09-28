@@ -41,7 +41,7 @@ test('transaction preserves predictions, locks and result timestamp; recalculate
  locks=0;const b=await applyObservation(db,c,observation,1);assert.equal(b.results,0);assert.equal(b.pointsUpdated,0);assert.equal(p.pointsEarned,1);
 });
 test('event cooldown refuses a concurrent request before any login',async()=>{
- const db={$queryRaw:async()=>[],competition:{findUnique:async()=>({id:1})},ftlSyncState:{upsert:async()=>({lastStartedAt:new Date()})}};db.$transaction=fn=>fn(db);
+ const db={tournament:{findUnique:async()=>({})},$queryRaw:async()=>[],competition:{findUnique:async()=>({id:1})},ftlSyncState:{upsert:async()=>({lastStartedAt:new Date()})}};db.$transaction=fn=>fn(db);
  await assert.rejects(syncCompetition(db,1,1,{login:()=>assert.fail('must not login')}),e=>e.status===429&&e.retryAfter>0);
 });
 test('dedicated client keeps cookies and password server-side and rejects external destinations',async()=>{

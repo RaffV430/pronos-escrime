@@ -1,6 +1,7 @@
 const {randomUUID}=require('node:crypto');
 const {failure}=require('./ftlClient');
 const events=require('./ftlEvents');
+const {eventComplete,archiveCompleted}=require('./tournamentArchive');
 const {configuration}=require('./ftlConfiguration');
 const INTERVAL=120000, LEASE=180000;
 const enabled=()=>process.env.FTL_AUTO_SYNC==='true';
@@ -10,6 +11,8 @@ async function claim(db,competitionId,{automatic=false,now=new Date()}={}){
   await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${competitionId} FOR UPDATE`;
   const competition=await tx.competition.findUnique({where:{id:competitionId}});
   if(!competition)throw failure('Épreuve introuvable.',404);
+  const tournament=await tx.tournament.findUnique({where:{id:competition.tournamentId}});
+  if(tournament?.archivedAt)throw failure('Tournoi archivé : suivi automatique arrêté.',409);
   const state=await tx.ftlSyncState.upsert({where:{competitionId},create:{competitionId},update:{}});
   if(state.leaseUntil>now)throw Object.assign(failure('Un contrôle de cette épreuve est déjà en cours.',409),{retryAfter:Math.ceil((state.leaseUntil-now)/1000)});
   const allowed=state.lastStartedAt?state.lastStartedAt.getTime()+INTERVAL:0;
@@ -48,14 +51,18 @@ function windowDelay(config,now=Date.now()){
  return day-now>86400000?Math.min(86400000,day-now-86400000):0;
 }
 let running=false;
-async function tick(db,{sync,now=new Date()}={}){
+async function tick(db,{sync,archive=archiveCompleted,now=new Date()}={}){
  if(running)return[];running=true;
  const outcomes=[];
  try{
-  const competitions=await db.competition.findMany({where:{OR:[{rosterSourceUrl:{not:null}},{ftlEventId:{not:null}}]},orderBy:{id:'asc'}});
+  const competitions=await db.competition.findMany({where:{tournament:{archivedAt:null},OR:[{rosterSourceUrl:{not:null}},{ftlEventId:{not:null}}]},include:{matches:true,pools:true,matchRounds:true},orderBy:{id:'asc'}});
   const states=await db.ftlSyncState.findMany();
   for(const c of competitions){
    const state=states.find(s=>s.competitionId===c.id);
+   if(eventComplete(c)&&!['RUNNING','ERROR','ATTENTION'].includes(state?.status)&&!(state?.leaseUntil>now)){
+    if(state?.status!=='COMPLETE'||state.nextAutomaticAt)await db.ftlSyncState.upsert({where:{competitionId:c.id},create:{competitionId:c.id,status:'COMPLETE',nextAutomaticAt:null},update:{status:'COMPLETE',nextAutomaticAt:null}});
+    continue;
+   }
    if(state&&(state.nextAutomaticAt===null||state.nextAutomaticAt>now||state.leaseUntil>now))continue;
    const config=await configFor(db,c);if(!config)continue;
    const delay=windowDelay(config,now.getTime());if(delay===null)continue;
@@ -66,6 +73,7 @@ async function tick(db,{sync,now=new Date()}={}){
     outcomes.push({competitionId:c.id,ok:true,created:result?.created||0});
    }catch(e){outcomes.push({competitionId:c.id,ok:false,status:e.status||500});}
   }
+  await archive(db,{now});
   return outcomes;
  }finally{running=false;}
 }
