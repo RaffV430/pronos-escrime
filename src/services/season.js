@@ -27,6 +27,9 @@ function matchRow(p) {
   const base = {
     key: `match-${p.id}`,
     type: 'Match',
+    matchId: m.id,
+    competitionId: m.competitionId,
+    resultAt: m.resultRegisteredAt || null,
     name: `${m.player1} / ${m.player2}`,
     round: m.round || null,
     date: m.startsAt || null,

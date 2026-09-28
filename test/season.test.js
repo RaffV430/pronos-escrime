@@ -227,7 +227,14 @@ test('GET /api/me/season only reads the signed-in player and validates the seaso
     async ({ where }) =>
       where.competitionId.in.map((id) => ({ competitionId: id, _min: { [field]: f.firstDates.get(id) } }));
   const db = {
-    prediction: { findMany: async ({ where }) => (own(where), f.predictions) },
+    prediction: {
+      findMany: async ({ where, select }) => {
+        if (where.userId !== undefined) return (own(where), f.predictions);
+        // Trophées : lecture des points de tous, jamais des scores pronostiqués.
+        assert.deepEqual(Object.keys(select).sort(), ['bonusPoints', 'matchId', 'pointsEarned', 'userId']);
+        return [];
+      },
+    },
     poolPrediction: { findMany: async ({ where }) => (own(where), f.poolPredictions) },
     podiumPrediction: { findMany: async ({ where }) => (own(where), f.podiums) },
     challengePick: { findMany: async ({ where }) => (own(where), f.challengePicks) },
