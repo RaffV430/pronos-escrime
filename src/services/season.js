@@ -2,6 +2,7 @@
 // Fonctions pures : la route lit la base, ce module assemble et calcule.
 const { calculateMatchPoints } = require('./matchPoints');
 const { challengePoints } = require('./communityRules');
+const { adjustForAnnulled } = require('./poolRules');
 
 // Saison désignée par son année de début : 2026 = saison 2026-2027.
 function seasonOf(date) {
@@ -82,12 +83,20 @@ function poolRow(p) {
   };
   if (!pool.isFinal) return { ...base, outcome: 'pending', result: null, points: null, details: [] };
   const points = p.pointsEarned || 0;
+  // Tireur absent ou retiré : pas de bilan, pronostic sans objet.
+  if (f.wins === null || f.wins === undefined)
+    return { ...base, outcome: 'cancelled', result: 'Absent ou retrait : matchs annulés', points: 0, details: [] };
+  const adjusted = adjustForAnnulled(p, f, pool._count?.fencers ?? null);
   return {
     ...base,
     outcome: points === 8 ? 'exact' : points > 0 ? 'points' : 'miss',
     result: `${f.wins} V · indice ${f.indicator}`,
     points,
-    details: [],
+    details: adjusted
+      ? [
+          `Ajusté : ${adjusted.annulled} match${adjusted.annulled > 1 ? 's' : ''} annulé${adjusted.annulled > 1 ? 's' : ''} · comparé à ${adjusted.wins} V · indice ${adjusted.indicator > 0 ? '+' : ''}${adjusted.indicator}`,
+        ]
+      : [],
   };
 }
 

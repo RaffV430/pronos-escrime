@@ -188,7 +188,7 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
         { fencerId: f.id },
         predictions.filter((p) => p.fencerId === f.id),
         ['wins', 'indicator'],
-        (p) => poolPoints(p, r).total,
+        (p) => poolPoints(p, r, current.fencers.length).total,
       );
   }
   // A missing reciprocal score does not refresh source freshness, but certain first-result locks persist.

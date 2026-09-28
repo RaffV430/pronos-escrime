@@ -104,7 +104,7 @@ router.get('/predictions', async (req, res) => {
       for (const f of pool.fencers) {
         const p = f.predictions[0],
           closed = fencerClosed(pool, f);
-        const pts = p && pool.isFinal ? poolPoints(p, f) : null;
+        const pts = p && pool.isFinal ? poolPoints(p, f, pool.fencers.length) : null;
         rows.push({
           key: `pool-${f.id}`,
           type: 'Poule',
@@ -280,7 +280,10 @@ router.get('/season', async (req, res) => {
     }
     const [predictions, poolPredictions, podiums, challengePicks, adjustments] = await Promise.all([
       db.prediction.findMany({ where: { userId }, include: { match: true } }),
-      db.poolPrediction.findMany({ where: { userId }, include: { fencer: { include: { pool: true } } } }),
+      db.poolPrediction.findMany({
+        where: { userId },
+        include: { fencer: { include: { pool: { include: { _count: { select: { fencers: true } } } } } } },
+      }),
       db.podiumPrediction.findMany({ where: { userId }, include: { competition: true } }),
       db.challengePick.findMany({ where: { userId }, include: { challenge: true } }),
       db.pointAdjustment.findMany({ where: { userId } }),

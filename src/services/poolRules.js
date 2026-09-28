@@ -59,14 +59,16 @@ function validateSource(sourceUrl, sourcePoolNumber) {
     fail('Numéro de poule FencingTimeLive invalide.');
   return { sourceUrl: url.origin + url.pathname.replace(/\/$/, ''), sourcePoolNumber };
 }
-function comparison(prediction, fencer, final) {
+function comparison(prediction, fencer, final, size = null) {
   if (!final || !prediction) return null;
+  const points = poolPoints(prediction, fencer, size);
+  const compared = points.adjusted || prediction;
   return {
-    points: poolPoints(prediction, fencer),
-    winsCorrect: prediction.wins === fencer.wins,
+    points,
+    winsCorrect: compared.wins === fencer.wins,
     lossesCorrect: prediction.losses === fencer.losses,
-    indicatorCorrect: prediction.indicator === fencer.indicator,
-    indicatorDifference: prediction.indicator - fencer.indicator,
+    indicatorCorrect: compared.indicator === fencer.indicator,
+    indicatorDifference: compared.indicator - fencer.indicator,
   };
 }
 function validateResults(rows, fencers) {
@@ -92,16 +94,32 @@ function validateResults(rows, fencers) {
   }
   return results;
 }
-function poolPoints(prediction, result) {
-  const winDifference = Math.abs(prediction.wins - result.wins);
-  const indicatorDifference = Math.abs(prediction.indicator - result.indicator);
+// Matchs annulés (absent, retrait médical) : le tireur a tiré moins de matchs que prévu au pronostic.
+// Règle : victoires plafonnées au nombre de matchs tirés ; pour chaque match annulé, l'indice
+// pronostiqué perd 5 si le bilan pronostiqué est d'au moins la moitié des matchs tirés
+// (match annulé supposé gagné 5-0), sinon il gagne 5 (match supposé perdu 0-5).
+function adjustForAnnulled(prediction, result, size) {
+  if (!Number.isInteger(size) || !Number.isInteger(result?.wins) || !Number.isInteger(result?.losses)) return null;
+  const bouts = result.wins + result.losses,
+    annulled = size - 1 - bouts;
+  if (annulled <= 0 || bouts <= 0) return null;
+  const wins = Math.min(prediction.wins, bouts);
+  const indicator = prediction.indicator + annulled * (wins * 2 >= bouts ? -5 : 5);
+  return { wins, indicator, annulled };
+}
+function poolPoints(prediction, result, size = null) {
+  const adjusted = adjustForAnnulled(prediction, result, size);
+  const compared = adjusted || prediction;
+  const winDifference = Math.abs(compared.wins - result.wins);
+  const indicatorDifference = Math.abs(compared.indicator - result.indicator);
   const winsPoints = winDifference === 0 ? 3 : winDifference === 1 ? 1 : 0;
   const indicatorPoints =
     indicatorDifference === 0 ? 5 : indicatorDifference <= 3 ? 3 : indicatorDifference <= 5 ? 1 : 0;
-  return { winsPoints, indicatorPoints, total: winsPoints + indicatorPoints };
+  return { winsPoints, indicatorPoints, total: winsPoints + indicatorPoints, ...(adjusted ? { adjusted } : {}) };
 }
 module.exports = {
   poolPoints,
+  adjustForAnnulled,
   fail,
   id,
   validatePrediction,

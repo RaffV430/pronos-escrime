@@ -83,7 +83,7 @@ function createPoolRouter(db = prisma) {
             entryRanking: entryRankFor(roster, fencer.name),
             isClosed: fencerClosed(pool, fencer, now, start),
             prediction: predictions[0] || null,
-            comparison: comparison(predictions[0], fencer, pool.isFinal),
+            comparison: comparison(predictions[0], fencer, pool.isFinal, pool.fencers.length),
           })),
         })),
       );
@@ -217,7 +217,7 @@ function createPoolRouter(db = prisma) {
               { fencerId },
               predictions,
               ['wins', 'indicator'],
-              (p) => poolPoints(p, data).total,
+              (p) => poolPoints(p, data, pool.fencers.length).total,
             );
           }
           await tx.pool.update({ where: { id: pool.id }, data: { isLocked: true, isFinal: true } });
