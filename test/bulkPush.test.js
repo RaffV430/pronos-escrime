@@ -24,11 +24,11 @@ test('following a tournament includes future events but unrelated events stay ex
  assert.ok(push.follows({tournamentIds:[1],competitionIds:[]},{id:999,tournamentId:1}));assert.ok(!push.follows({tournamentIds:[1],competitionIds:[]},{id:999,tournamentId:2}));
  const data=push.payload({id:5,tournamentId:1,name:'Junior Team Women'},[{id:4},{id:9}],'batch');assert.match(data.url,/event=5&new=1&matches=4,9/);assert.equal(data.tag,'pronos-batch');
 });
-test('one grouped delivery only for open matches, with a durable cursor preventing repeated imports',async()=>{
+test('legacy event cursor advances without queuing per-import alerts',async()=>{
  const sub={id:'s',enabled:true,lastEventId:0,tournamentIds:[1],competitionIds:[]},deliveries=[];
  const events=[1,2,3].map(id=>({id,matchId:id,competitionId:5,createdAt:new Date()}));
  const db={$queryRaw:async()=>[],pushSubscription:{findUnique:async()=>sub,update:async({data})=>Object.assign(sub,data)},pushEvent:{findMany:async({where})=>events.filter(e=>e.id>where.id.gt)},competition:{findMany:async()=>[{id:5,tournamentId:1}]},match:{findMany:async()=>events.map(e=>({id:e.id,competitionId:5,round:'T4',isFinished:e.id===3,startsAt:new Date(Date.now()+3600000)}))},matchRound:{findMany:async()=>[{competitionId:5,round:'T4',previousRound:null,expectedMatchCount:3}]},pushDelivery:{create:async({data})=>deliveries.push(data)}};db.$transaction=f=>f(db);
- await push.queueForSubscription(db,'s');await push.queueForSubscription(db,'s');assert.equal(deliveries.length,1);assert.deepEqual(deliveries[0].matchIds,[1,2]);assert.equal(sub.lastEventId,3);
+ await push.queueForSubscription(db,'s');await push.queueForSubscription(db,'s');assert.equal(deliveries.length,0);assert.equal(sub.lastEventId,3);
 });
 test('delivery rechecks closure, disables expired endpoints and sends only once after success',async()=>{
  const sub={id:'s',enabled:true,tournamentIds:[1],competitionIds:[]};const row={id:'d',subscriptionId:'s',competitionId:5,matchIds:[7],status:'PENDING',attempts:0,createdAt:new Date(),nextAttemptAt:new Date(0)};

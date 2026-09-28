@@ -43,13 +43,7 @@ async function queueForSubscription(db,id){
   const sub=await tx.pushSubscription.findUnique({where:{id}});if(!sub?.enabled)return;
   const events=await tx.pushEvent.findMany({where:{id:{gt:sub.lastEventId}},orderBy:{id:'asc'},take:500});if(!events.length)return;
   const throughEventId=events.at(-1).id;
-  const competitions=await tx.competition.findMany({where:{id:{in:[...new Set(events.map(e=>e.competitionId))]}}});
-  for(const c of competitions.filter(c=>follows(sub,c))){
-   const matches=await timedMatches(tx,await tx.match.findMany({where:{competitionId:c.id}}));
-   const candidateIds=new Set(events.filter(e=>e.competitionId===c.id&&Date.now()-e.createdAt.getTime()<3600000).map(e=>e.matchId));
-   const matchIds=matches.filter(m=>candidateIds.has(m.id)&&!matchClosed(m)).map(m=>m.id);
-   if(matchIds.length&&preferences(sub.preferences||{}).newMatches&&!isQuiet(sub.preferences))await tx.pushDelivery.create({data:{subscriptionId:sub.id,competitionId:c.id,throughEventId,matchIds}});
-  }
+  // Event cursor retained for compatibility; round policy queues notifications below.
   await tx.pushSubscription.update({where:{id},data:{lastEventId:throughEventId}});
  },{timeout:15000});
 }
@@ -79,21 +73,33 @@ async function deliver(db,id,sender=send){
  }
 }
 
+function roundAlertPlan(matches,round,now=Date.now()){
+ const open=matches.filter(m=>m.round===round.round&&m.resultType!=='CANCELLED'&&m.player1?.trim()&&m.player2?.trim()&&!matchClosed(m,now));
+ const missing=open.filter(m=>!m.predictions?.length);
+ const urgent=missing.filter(m=>closesAt(m)&&Date.parse(closesAt(m))>now&&Date.parse(closesAt(m))-now<=600000);
+ return {threshold:Number.isSafeInteger(round.expectedMatchCount)&&round.expectedMatchCount>0&&open.length>=Math.ceil(round.expectedMatchCount/2),missing,urgent};
+}
 async function queueSpecial(db,id){
  return db.$transaction(async tx=>{
   await tx.$queryRaw`SELECT id FROM "PushSubscription" WHERE id=${id} FOR UPDATE`;
   const sub=await tx.pushSubscription.findUnique({where:{id}});if(!sub?.enabled)return;
-  const p=preferences(sub.preferences||{});if((!p.reminders&&!p.roundResults)||isQuiet(p))return;
+  const p=preferences(sub.preferences||{});if((!p.newMatches&&!p.reminders&&!p.roundResults)||isQuiet(p))return;
   const competitions=await tx.competition.findMany({where:{OR:[{id:{in:sub.competitionIds}},{tournamentId:{in:sub.tournamentIds}}]}});
   for(const c of competitions){
    const raw=await tx.match.findMany({where:{competitionId:c.id},include:{predictions:{where:{userId:sub.userId}}}}),matches=await timedMatches(tx,raw);
    const rounds=await tx.matchRound.findMany({where:{competitionId:c.id}});
    const recaps=roundSummaries(matches,rounds);
    for(const round of rounds){
-    const missing=matches.filter(m=>m.round===round.round&&!m.predictions.length&&!matchClosed(m)&&closesAt(m)&&Date.parse(closesAt(m))-Date.now()<=900000);
+    const plan=roundAlertPlan(matches,round);
+    const missing=plan.urgent;
+    // A reminder replaces a threshold alert queued in the same window.
+    if(p.reminders&&missing.length){
+     await tx.pushDelivery.updateMany({where:{subscriptionId:id,competitionId:c.id,round:round.round,kind:'AVAILABLE',status:'PENDING'},data:{status:'CANCELLED'}});
+     await tx.pushDelivery.upsert({where:{subscriptionId_competitionId_throughEventId_kind_round:{subscriptionId:id,competitionId:c.id,throughEventId:0,kind:'AVAILABLE',round:round.round}},create:{subscriptionId:id,competitionId:c.id,throughEventId:0,kind:'AVAILABLE',round:round.round,matchIds:[],status:'CANCELLED'},update:{}});
+    }
     const recap=recaps.find(r=>r.round===round.round);
     const recent=recap?.completedAt&&Date.parse(recap.completedAt)>=Math.max(Date.now()-86400000,new Date(sub.preferencesSince||sub.createdAt).getTime());
-    for(const [kind,active,ids] of [['REMINDER',p.reminders&&missing.length,missing.map(m=>m.id)],['ROUND',p.roundResults&&recap?.completed&&recap.saved>0&&recent,[]]]){
+    for(const [kind,active,ids] of [['AVAILABLE',p.newMatches&&plan.threshold&&plan.missing.length&&!(p.reminders&&missing.length),plan.missing.map(m=>m.id)],['REMINDER',p.reminders&&missing.length,missing.map(m=>m.id)],['ROUND',p.roundResults&&recap?.completed&&recap.saved>0&&recent,[]]]){
      if(!active)continue;
      await tx.pushDelivery.upsert({where:{subscriptionId_competitionId_throughEventId_kind_round:{subscriptionId:id,competitionId:c.id,throughEventId:0,kind,round:round.round}},create:{subscriptionId:id,competitionId:c.id,throughEventId:0,kind,round:round.round,matchIds:ids},update:{}});
     }
@@ -106,14 +112,25 @@ async function deliverSpecial(db,delivery,sub,c,matches,sender){
  const cancel=()=>db.pushDelivery.updateMany({where:{id,status:'SENDING'},data:{status:'CANCELLED'}});
  if(!sub?.enabled||!c||!follows(sub,c))return cancel();
  const prefs=preferences(sub.preferences||{});
- if(isQuiet(prefs)||(kind==='REMINDER'&&!prefs.reminders)||(kind==='ROUND'&&!prefs.roundResults))return cancel();
+ if(isQuiet(prefs)||(kind==='AVAILABLE'&&!prefs.newMatches)||(kind==='REMINDER'&&!prefs.reminders)||(kind==='ROUND'&&!prefs.roundResults))return cancel();
  let content,ttl;
- if(kind==='REMINDER'){
+ if(kind==='AVAILABLE'){
+  const rounds=await db.matchRound.findMany({where:{competitionId:c.id}}),manifest=rounds.find(r=>r.round===round);
+  if(!manifest)return cancel();
   const predictions=await db.prediction.findMany({where:{userId:sub.userId,matchId:{in:matches.map(m=>m.id)}},select:{matchId:true}}),saved=new Set(predictions.map(p=>p.matchId));
-  const missing=matches.filter(m=>m.round===round&&!saved.has(m.id)&&!matchClosed(m)&&closesAt(m)&&Date.parse(closesAt(m))-Date.now()<=900000);
+  const plan=roundAlertPlan(matches.map(m=>({...m,predictions:saved.has(m.id)?[{}]:[]})),manifest);
+  if(!plan.threshold||!plan.missing.length||Date.now()-delivery.createdAt.getTime()>900000)return cancel();
+  // If delayed into the reminder window, leave it to the reminder queue.
+  if(prefs.reminders&&plan.urgent.length)return cancel();
+  const deadlines=plan.missing.map(closesAt).filter(Boolean).map(Date.parse);
+  ttl=Math.max(1,Math.min(900,...deadlines.map(d=>Math.floor((d-Date.now())/1000))));
+  content={...payload(c,plan.missing,id),title:`${round} : des matchs vous attendent`,body:`${plan.missing.length} à pronostiquer · au moins la moitié du tour disponible · ${c.name}`};
+ }else if(kind==='REMINDER'){
+  const predictions=await db.prediction.findMany({where:{userId:sub.userId,matchId:{in:matches.map(m=>m.id)}},select:{matchId:true}}),saved=new Set(predictions.map(p=>p.matchId));
+  const missing=matches.filter(m=>m.round===round&&!saved.has(m.id)&&!matchClosed(m)&&closesAt(m)&&Date.parse(closesAt(m))-Date.now()<=600000);
   if(!missing.length||Date.now()-delivery.createdAt.getTime()>900000)return cancel();
   ttl=Math.max(1,Math.min(900,...missing.map(m=>Math.floor((Date.parse(closesAt(m))-Date.now())/1000))));
-  content={title:`${round} : derniers pronostics`,body:`${missing.length} rencontre(s) à compléter · ${c.name}`,tag:`pronos-${id}`,url:`/?tournament=${c.tournamentId}&event=${c.id}&new=1&matches=${missing.slice(0,64).map(m=>m.id).join(',')}`};
+  content={title:`${round} : 10 dernières minutes`,body:`${missing.length} rencontre(s) à compléter · ${c.name}`,tag:`pronos-${id}`,url:`/?tournament=${c.tournamentId}&event=${c.id}&new=1&matches=${missing.slice(0,64).map(m=>m.id).join(',')}`};
  }else if(kind==='ROUND'){
   if(Date.now()-delivery.createdAt.getTime()>86400000)return cancel();
   const raw=await db.match.findMany({where:{competitionId:c.id},include:{predictions:{where:{userId:sub.userId}}}}),rounds=await db.matchRound.findMany({where:{competitionId:c.id}});
@@ -124,9 +141,20 @@ async function deliverSpecial(db,delivery,sub,c,matches,sender){
  catch(e){if([404,410].includes(e.statusCode))await db.pushSubscription.update({where:{id:sub.id},data:{enabled:false}});const retry=![400,401,403,404,410].includes(e.statusCode)&&delivery.attempts<3;await db.pushDelivery.updateMany({where:{id,status:'SENDING'},data:{status:retry?'PENDING':'FAILED',nextAttemptAt:new Date(Date.now()+60000*2**delivery.attempts)}});}
 }
 let running=false;
+async function retireLegacy(db){
+ // Remember already announced rounds before retiring per-import alerts.
+ await db.$executeRaw`INSERT INTO "PushDelivery" (id,"subscriptionId","competitionId","throughEventId",kind,round,"matchIds",status,attempts,"nextAttemptAt","createdAt","sentAt")
+ SELECT gen_random_uuid()::text,d."subscriptionId",d."competitionId",0,'AVAILABLE',m.round,ARRAY[]::integer[],'SENT',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,MAX(d."sentAt")
+ FROM "PushDelivery" d JOIN "Match" m ON m.id=ANY(d."matchIds") AND m."competitionId"=d."competitionId"
+ WHERE d.kind='MATCHES' AND d.status='SENT'
+ GROUP BY d."subscriptionId",d."competitionId",m.round
+ ON CONFLICT ("subscriptionId","competitionId","throughEventId",kind,round) DO NOTHING`;
+ await db.pushDelivery.updateMany({where:{kind:'MATCHES',status:{in:['PENDING','SENDING']}},data:{status:'CANCELLED'}});
+}
 async function dispatch(db,sender=send){
  if(running)return;running=true;
  try{
+  await retireLegacy(db);
   // Resume interrupted sends with the same notification tag, never a new event.
   await db.pushDelivery.updateMany({where:{status:'SENDING',claimedAt:{lt:new Date(Date.now()-120000)}},data:{status:'PENDING'}});
   const subs=await db.pushSubscription.findMany({where:{enabled:true},select:{id:true}});
@@ -136,4 +164,4 @@ async function dispatch(db,sender=send){
  }finally{running=false;}
 }
 function startWorker(db){if(!configured())return()=>{};const tick=()=>dispatch(db).catch(()=>console.warn('Notifications temporairement indisponibles.'));const timer=setInterval(tick,30000);timer.unref();tick();return()=>clearInterval(timer);}
-module.exports={queueSpecial,deliverSpecial,configured,validateSubscription,validateScopes,subscribe,follows,queueForSubscription,payload,deliver,dispatch,startWorker,send};
+module.exports={retireLegacy,roundAlertPlan,queueSpecial,deliverSpecial,configured,validateSubscription,validateScopes,subscribe,follows,queueForSubscription,payload,deliver,dispatch,startWorker,send};
