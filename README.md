@@ -22,10 +22,6 @@ Variables obligatoires :
 
 La route `/health` vérifie réellement la connexion à PostgreSQL. La route `/` est uniquement une sonde de vie du processus.
 
-## Google Sheets
-
-Chaque `Competition.sheetTabName` doit contenir une URL CSV publiée en HTTPS sur `docs.google.com`. Les colonnes attendues sont `ID`, `Tireur1`, `Tireur2`, `Score1` et `Score2`. La synchronisation est réservée aux administrateurs.
-
 ## Base existante et installation neuve
 
 L'historique de migration est conservé sans modification. Il décrit une ancienne version incompatible avec le schéma actuel : ne pas lancer automatiquement migrate deploy en production.

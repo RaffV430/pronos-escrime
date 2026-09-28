@@ -2,7 +2,6 @@ const {withCountries}=require('../services/matchCountries');
 const express = require('express');
 const authMiddleware = require('../middleware/auth');
 const adminMiddleware = require('../middleware/admin');
-const { syncMatchesFromSheet } = require('../services/sheetSync'); 
 
 const router = express.Router();
 const prisma = require('../lib/prisma');
@@ -40,22 +39,6 @@ router.get('/', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Erreur matches:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des matchs.' });
-  }
-});
-
-// 2. Synchronisation Google Sheet
-router.post('/sync-sheet', authMiddleware, adminMiddleware, async (req, res) => {
-  const { competitionId } = req.body;
-  if (!competitionId) {
-    return res.status(400).json({ error: 'Veuillez sélectionner une compétition pour synchroniser.' });
-  }
-
-  try {
-    const result = await syncMatchesFromSheet(competitionId);
-    res.json({ message: 'Synchronisation terminée !', details: result });
-  } catch (error) {
-    console.error('Erreur synchro Sheet:', error);
-    res.status(500).json({ error: error.message || 'Échec de la synchronisation' });
   }
 });
 
