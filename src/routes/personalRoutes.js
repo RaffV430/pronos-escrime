@@ -7,6 +7,7 @@ const { fields, verifiedPodium, predictionIds } = require('../services/podiumRul
 const { timedMatches } = require('../services/roundTiming');
 const { standings } = require('../services/standings');
 const { buildSeason } = require('../services/season');
+const { computeBadges } = require('../services/badges');
 router.use(require('../middleware/auth'));
 router.get('/predictions', async (req, res) => {
   try {
@@ -326,21 +327,26 @@ router.get('/season', async (req, res) => {
         if (d && (!firstDates.has(r.competitionId) || new Date(d) < new Date(firstDates.get(r.competitionId))))
           firstDates.set(r.competitionId, d);
       }
-    res.json(
-      buildSeason(
-        {
-          predictions,
-          poolPredictions,
-          podiums,
-          challengePicks,
-          challengeMatches,
-          adjustments,
-          tournaments,
-          firstDates,
-        },
-        requested,
-      ),
+    const season = buildSeason(
+      { predictions, poolPredictions, podiums, challengePicks, challengeMatches, adjustments, tournaments, firstDates },
+      requested,
     );
+    // Trophées : matchs et pronostics de tous les joueurs sur les épreuves de la saison affichée.
+    const seasonCompetitions = season.tournaments.flatMap((t) => t.competitions.map((c) => c.id));
+    const seasonMatches = seasonCompetitions.length
+      ? await db.match.findMany({
+          where: { competitionId: { in: seasonCompetitions } },
+          select: { id: true, competitionId: true, round: true, isFinished: true, resultType: true },
+        })
+      : [];
+    const everyone = seasonMatches.length
+      ? await db.prediction.findMany({
+          where: { matchId: { in: seasonMatches.filter((m) => m.isFinished).map((m) => m.id) } },
+          select: { userId: true, matchId: true, pointsEarned: true, bonusPoints: true },
+        })
+      : [];
+    season.badges = computeBadges(season, { userId, matches: seasonMatches, predictions: everyone });
+    res.json(season);
   } catch (e) {
     console.error('Erreur saison:', e.code || e.message);
     res.status(500).json({ error: 'Historique de saison indisponible.' });
