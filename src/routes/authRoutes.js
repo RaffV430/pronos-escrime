@@ -159,4 +159,74 @@ router.post('/login', loginPerIp, loginPerIdentifier, async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------
+// Mot de passe oublié / réinitialisation / suppression de compte
+// ---------------------------------------------------------
+const { mailConfigured, sendMail } = require('../services/mailer');
+const account = require('../services/account');
+const forgotPerIp = limiter({ windowMs: 15 * 60 * 1000, limit: 10 });
+const forgotPerEmail = limiter({ windowMs: 60 * 60 * 1000, limit: 3, keyGenerator: identifierKey });
+const resetPerIp = limiter({ windowMs: 15 * 60 * 1000, limit: 20 });
+const validPassword = (password) => typeof password === 'string' && password.length >= 10 && password.length <= 128;
+
+router.get('/config', (req, res) => res.json({ passwordReset: mailConfigured() }));
+
+router.post('/forgot-password', forgotPerIp, forgotPerEmail, async (req, res) => {
+  // Réponse identique que le compte existe ou non : on ne révèle pas les adresses inscrites.
+  const done = () =>
+    res.json({
+      message: 'Si un compte correspond à cette adresse, un e-mail de réinitialisation vient d’être envoyé.',
+    });
+  if (!mailConfigured())
+    return res.status(503).json({ error: 'La réinitialisation par e-mail n’est pas encore disponible.' });
+  const email = String(req.body.email || '')
+    .trim()
+    .toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Adresse e-mail invalide.' });
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (user) await sendMail(account.resetEmail(user, account.createResetToken(user)));
+    done();
+  } catch (err) {
+    console.error('Erreur mot de passe oublié:', err);
+    res.status(502).json({ error: 'L’e-mail n’a pas pu être envoyé. Réessayez dans quelques minutes.' });
+  }
+});
+
+router.post('/reset-password', resetPerIp, async (req, res) => {
+  const { token, password } = req.body;
+  if (!validPassword(password))
+    return res.status(400).json({ error: 'Le mot de passe doit contenir entre 10 et 128 caractères.' });
+  try {
+    const user = await account.verifyResetToken(prisma, token);
+    if (!user) return res.status(400).json({ error: 'Ce lien a expiré ou a déjà servi. Refaites une demande.' });
+    await prisma.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash(password, 10) } });
+    res.json({ message: 'Mot de passe modifié. Vous pouvez vous connecter.' });
+  } catch (err) {
+    console.error('Erreur réinitialisation:', err);
+    res.status(500).json({ error: 'Réinitialisation impossible. Réessayez.' });
+  }
+});
+
+router.delete('/account', authMiddleware, async (req, res) => {
+  const { password, confirm } = req.body || {};
+  if (confirm !== 'SUPPRIMER' || typeof password !== 'string')
+    return res.status(400).json({ error: 'Saisissez votre mot de passe et tapez SUPPRIMER pour confirmer.' });
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user) return res.status(404).json({ error: 'Compte introuvable.' });
+    if (user.isAdmin)
+      return res
+        .status(409)
+        .json({ error: 'Un compte administrateur ne peut pas être supprimé ici. Retirez d’abord ses droits.' });
+    if (!(await bcrypt.compare(password, user.password)))
+      return res.status(400).json({ error: 'Mot de passe incorrect.' });
+    await prisma.$transaction((tx) => account.deleteAccount(tx, user.id));
+    res.json({ message: 'Votre compte et vos données ont été supprimés.' });
+  } catch (err) {
+    console.error('Erreur suppression de compte:', err);
+    res.status(500).json({ error: 'Suppression impossible. Réessayez.' });
+  }
+});
+
 module.exports = router;
