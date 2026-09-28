@@ -3,6 +3,7 @@ const { clean, norm } = require('./ftlParser');
 const { failure } = require('./ftlClient');
 const { poolPoints, validateResults } = require('./poolRules');
 const { rescore } = require('./rescore');
+const WITHDRAWALS = new Set(['Failed to Appear', 'Medical Withdrawal']);
 const pattern = /^https:\/\/www\.fencingtimelive\.com\/pools\/scores\/([a-f0-9]{32})\/[a-f0-9]{32}$/i;
 function parsePools(html) {
   const $ = load(html),
@@ -37,12 +38,15 @@ function parsePools(html) {
         .find('.poolResult')
         .map((j, el) => clean($(el).text()))
         .get();
-      const absent = clean($(tr).find('.poolResultWDX').text()) === 'Failed to Appear';
+      // Absence ou retrait : FencingTimeLive efface tous les matchs du tireur (annulés), les bilans
+      // des autres sont calculés sans lui. Libellés vérifiés sur des pages officielles uniquement.
+      const status = clean($(tr).find('.poolResultWDX').text());
+      const absent = WITHDRAWALS.has(status);
       if (absent && (cells.some(Boolean) || $(tr).find('td.poolScoreWDX').length !== n - 1 || stats.length))
         throw failure(`Absence incohérente dans la poule ${number}.`);
       if (!name || position !== i + 1 || cells.length !== n || cells[i] || (!absent && stats.length !== 5))
         throw failure(`Structure de la poule ${number} non reconnue.`);
-      return { name, position, cells, stats, absent };
+      return { name, position, cells, stats, absent, status: absent ? status : null };
     });
     if (new Set(rows.map((r) => norm(r.name))).size !== n) throw failure('Noms ambigus dans la poule.');
     const activeCount = rows.filter((r) => !r.absent).length;
@@ -122,7 +126,7 @@ function parsePools(html) {
         position: r.position,
         firstResult: evidence.has(r.position),
         ...values[i],
-        ...(r.absent ? { absent: true, wins: null, losses: null, indicator: null } : {}),
+        ...(r.absent ? { absent: true, status: r.status, wins: null, losses: null, indicator: null } : {}),
       })),
     };
   });
@@ -166,7 +170,8 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
       data.firstResultAt = checkedAt;
       locks++;
     }
-    if (r.hasResult) {
+    if (r.hasResult || r.absent) {
+      // Un retrait en cours de poule annule les matchs déjà tirés : le bilan provisoire est effacé.
       for (const k of ['wins', 'losses', 'indicator']) if (f[k] !== r[k]) data[k] = r[k];
       if (['wins', 'losses', 'indicator'].some((k) => k in data)) changed++;
     }
