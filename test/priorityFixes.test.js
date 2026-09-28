@@ -53,3 +53,23 @@ test('a username equal to another player’s e-mail cannot intercept that player
   const refused = await post('/register', { username: 'someone@example.com', email: 'new@example.com', password: 'long-enough-pass' });
   assert.equal(refused.status, 400);
 });
+
+test('invalid numeric identifiers return 400 instead of a database error', async t => {
+  const express = require('express');
+  const jwt = require('jsonwebtoken');
+  const db = new Proxy({}, { get: () => new Proxy({}, { get: () => async () => assert.fail('no database call for an invalid id') }) });
+  require.cache[require.resolve('../src/lib/prisma')] = { exports: db };
+  delete require.cache[require.resolve('../src/routes/matchRoutes')];
+  delete require.cache[require.resolve('../src/routes/podiumRoutes')];
+  const app = express(); app.use(express.json());
+  app.use('/matches', require('../src/routes/matchRoutes'));
+  app.use('/podium', require('../src/routes/podiumRoutes'));
+  const server = app.listen(0, '127.0.0.1'); await new Promise(r => server.once('listening', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const auth = { Authorization: `Bearer ${jwt.sign({ userId: 1 }, process.env.JWT_SECRET)}` };
+  const call = (path, method = 'GET') => fetch(`http://127.0.0.1:${server.address().port}${path}`, { method, headers: auth });
+  for (const [path, method] of [['/matches?competitionId=abc'], ['/matches/abc/predict', 'DELETE'], ['/matches/0/predict', 'DELETE'],
+    ['/podium/competitions/x'], ['/podium/leaderboard/-1'], ['/podium/options/1.5'], ['/podium/abc'], ['/podium/competition-status/NaN']]) {
+    assert.equal((await call(path, method)).status, 400, path);
+  }
+});

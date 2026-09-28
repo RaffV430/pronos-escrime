@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+require('../middleware/validateIds').validateIdParams(router, ['tournamentId', 'competitionId']);
 const prisma = require('../lib/prisma');
 const authMiddleware = require('../middleware/auth');
 const adminMiddleware = require('../middleware/admin');
@@ -14,7 +15,7 @@ async function isClosed(tx, competition) {
 // ---------------------------------------------------------
 router.get('/competitions/:tournamentId', authMiddleware, async (req, res) => {
   try {
-    const tournamentId = parseInt(req.params.tournamentId, 10);
+    const tournamentId = Number(req.params.tournamentId);
     const competitions = await prisma.competition.findMany({
       where: { tournamentId },
       include: {matches:{select:{id:true}}},
@@ -31,7 +32,7 @@ router.get('/competitions/:tournamentId', authMiddleware, async (req, res) => {
 // ---------------------------------------------------------
 router.get('/competition-status/:competitionId', authMiddleware, async (req, res) => {
   try {
-    const compId = parseInt(req.params.competitionId, 10);
+    const compId = Number(req.params.competitionId);
     const competition = await prisma.competition.findUnique({
       where: { id: compId }
     });
@@ -47,7 +48,7 @@ router.get('/competition-status/:competitionId', authMiddleware, async (req, res
 router.get('/all/competition/:competitionId', authMiddleware, async (req, res) => {
   const { competitionId } = req.params;
   try {
-    const compId = parseInt(competitionId, 10);
+    const compId = Number(competitionId);
     const competition = await prisma.competition.findUnique({ where: { id: compId } });
     if (!competition) return res.status(404).json({ error: 'Compétition introuvable.' });
     if (!(await isClosed(prisma, competition)) && !(await prisma.user.findUnique({ where: { id: req.user.userId }, select: { isAdmin: true } }))?.isAdmin) {
@@ -68,7 +69,7 @@ router.get('/all/competition/:competitionId', authMiddleware, async (req, res) =
 // ---------------------------------------------------------
 router.get('/leaderboard/:tournamentId', authMiddleware, async (req, res) => {
   try {
-    const tournamentId = parseInt(req.params.tournamentId, 10);
+    const tournamentId = Number(req.params.tournamentId);
     const competitions = await prisma.competition.findMany({
       where: { tournamentId },
       select: { id: true }
@@ -103,7 +104,7 @@ router.get('/leaderboard/:tournamentId', authMiddleware, async (req, res) => {
 router.put('/competition/:competitionId/toggle-lock', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) return res.status(403).json({ error: "Accès non autorisé." });
-    const compId = parseInt(req.params.competitionId, 10);
+    const compId = Number(req.params.competitionId);
     const { isLocked } = req.body;
 
     if (!Number.isInteger(compId) || typeof isLocked !== 'boolean') return res.status(400).json({ error: 'Verrouillage invalide.' });
@@ -174,7 +175,7 @@ router.post('/', authMiddleware, async (req, res) => {
 // ---------------------------------------------------------
 router.get('/:competitionId', authMiddleware, async (req, res) => {
   try {
-    const compId = parseInt(req.params.competitionId, 10);
+    const compId = Number(req.params.competitionId);
     const prediction = await prisma.podiumPrediction.findUnique({
       where: { userId_competitionId: { userId: req.user.userId, competitionId: compId } }
     });

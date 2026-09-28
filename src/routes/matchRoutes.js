@@ -4,6 +4,7 @@ const authMiddleware = require('../middleware/auth');
 const adminMiddleware = require('../middleware/admin');
 
 const router = express.Router();
+require('../middleware/validateIds').validateIdParams(router, ['id', 'competitionId']);
 const prisma = require('../lib/prisma');
 const { matchClosed, closesAt } = require('../lib/matchLock');
 const {timedMatches,timedMatch,reopenRound} = require('../services/roundTiming');
@@ -28,8 +29,8 @@ router.post('/sync-ftl',authMiddleware,adminMiddleware,async(req,res)=>{
 // 1. Liste de tous les matchs
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const { competitionId } = req.query;
-    const filter = {...(competitionId ? { competitionId: parseInt(competitionId, 10) } : {}),OR:[{resultType:null},{resultType:{not:'CANCELLED'}}]};
+    const competitionId = req.query.competitionId ? require('../services/poolRules').id(req.query.competitionId) : null;
+    const filter = {...(competitionId ? { competitionId } : {}),OR:[{resultType:null},{resultType:{not:'CANCELLED'}}]};
 
     const matches = await prisma.match.findMany({
       where: filter,
@@ -38,6 +39,7 @@ router.get('/', authMiddleware, async (req, res) => {
     });
     res.json((await timedMatches(prisma,matches)).map(match => ({ ...withCountries(match), maxScore: match.competition?.podiumFormat === 'TEAM' ? 45 : 15, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Erreur matches:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des matchs.' });
   }

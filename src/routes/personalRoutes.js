@@ -36,7 +36,7 @@ router.get('/summary/:tournamentId',async(req,res)=>{
  try{
   const tournamentId=id(req.params.tournamentId),userId=req.user.userId;
   const general=req.query.scope==='general',leagueId=req.query.leagueId?Number(req.query.leagueId):null;
-  if(leagueId&&!Number.isSafeInteger(leagueId))return res.status(400).json({error:'Groupe invalide.'});
+  if(leagueId!==null&&(!Number.isSafeInteger(leagueId)||leagueId<1))return res.status(400).json({error:'Groupe invalide.'});
   const league=leagueId?await db.league.findUnique({where:{id:leagueId},include:{members:true}}):null;
   if(leagueId&&(!league||league.tournamentId!==tournamentId||!league.members.some(m=>m.userId===userId)))return res.status(403).json({error:'Ce groupe est privé.'});
   let rows=await standings(db,general?{}:{tournamentId});
@@ -47,6 +47,7 @@ router.get('/summary/:tournamentId',async(req,res)=>{
   const winners=predictions.filter(p=>calculateMatchPoints(p.predictedScore1,p.predictedScore2,p.match.score1,p.match.score2,p.match.winner,p.match.resultType)>0).length;
   const progress=await require('../services/rankingHistory').rankProgress(db,tournamentId,userId);
   const tournament=await db.tournament.findUnique({where:{id:tournamentId},include:{competitions:{select:{id:true,name:true,podiumResolvedAt:true}}}});
+  if(!tournament&&!general)return res.status(404).json({error:'Tournoi introuvable.'});
   const scopeCompetitions=general?await db.competition.findMany({select:{id:true,name:true,podiumResolvedAt:true}}):tournament.competitions;
   const allRounds=await db.matchRound.findMany({where:{competitionId:{in:scopeCompetitions.map(c=>c.id)}}});
   const allMatches=await db.match.findMany({where:{competition:eventScope},include:{predictions:{where:{userId}}}});
@@ -54,6 +55,6 @@ router.get('/summary/:tournamentId',async(req,res)=>{
   const bestRound=perRound.sort((a,b)=>b.points-a.points)[0]||null;
   const complete=!general&&scopeCompetitions.length>0&&scopeCompetitions.every(c=>c.podiumResolvedAt);
   res.json({tournamentName:general?'Classement général':league?`${league.kind==='CLUB'?'Club':'Ligue'} · ${league.name} — ${tournament.name}`:tournament.name,complete,bestRound,progress,ranking:rows.find(r=>r.id===userId),players:rows.length,played:predictions.length,exact,winners,accuracy:predictions.length?Math.round(winners*100/predictions.length):null});
- }catch{res.status(500).json({error:'Bilan indisponible.'});}
+ }catch(e){res.status(e.status||500).json({error:e.status?e.message:'Bilan indisponible.'});}
 });
 module.exports=router;
