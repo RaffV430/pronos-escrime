@@ -27,7 +27,7 @@ test('Sniper: 3 exact scores in the same tournament, not spread over two', () =>
   const b = computeBadges(s, empty);
   assert.deepEqual(ids(b), ['sniper:1']);
   assert.deepEqual(b.find((x) => x.id === 'sniper').where, ['Challenge de Paris']);
-  assert.equal(b.length, 5, 'all trophies listed, earned or not');
+  assert.equal(b.length, 6, 'all trophies listed, earned or not');
   assert.deepEqual(
     ids(computeBadges(season([row(1, 'exact'), row(2, 'exact')], [row(3, 'exact', { competitionId: 20 })]), empty)),
     [],
@@ -100,4 +100,17 @@ test('Assidu: every non-cancelled match of a finished tournament predicted', () 
     ),
     [],
   );
+});
+
+test('Voyant: a perfect podium (every medal exact), individual or team', () => {
+  const podium = (perfect) => ({
+    type: 'Podium',
+    outcome: perfect ? 'exact' : 'points',
+    points: perfect ? 60 : 50,
+    perfect,
+  });
+  const b = computeBadges(season([podium(true)]), empty);
+  assert.deepEqual(ids(b), ['seer:1']);
+  assert.deepEqual(b.find((x) => x.id === 'seer').where, ['Challenge de Paris · Fleuret hommes']);
+  assert.deepEqual(ids(computeBadges(season([podium(false)]), empty)), []);
 });

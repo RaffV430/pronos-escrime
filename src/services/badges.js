@@ -4,12 +4,14 @@
 //  - Flair : un bonus outsider obtenu
 //  - Meilleur du tour : le plus de points de tous les joueurs sur un tour terminé
 //  - Assidu : tous les matchs d'un tournoi terminé pronostiqués
+//  - Voyant : un podium pronostiqué parfait (chaque médaille exacte)
 const DEFS = {
   sniper: { label: 'Sniper', icon: '🎯', description: '3 scores exacts dans un même tournoi' },
   streak: { label: 'Série de 10', icon: '🔥', description: '10 bons vainqueurs d’affilée' },
   flair: { label: 'Flair', icon: '🦊', description: 'Un outsider trouvé (bonus outsider)' },
   bestRound: { label: 'Meilleur du tour', icon: '👑', description: 'Le plus de points sur un tour terminé' },
   assiduous: { label: 'Assidu', icon: '📋', description: 'Tous les matchs d’un tournoi pronostiqués' },
+  seer: { label: 'Voyant', icon: '🔮', description: 'Un podium pronostiqué parfait' },
 };
 const roundName = (r) => (r === 'T2' ? 'Finale' : r === 'T4' ? 'Demi-finales' : r || 'Tour');
 
@@ -61,6 +63,11 @@ function computeBadges(season, { userId, matches, predictions }) {
       streak = 0; // une nouvelle série de 10 sera de nouveau récompensée
     }
   }
+
+  // Voyant : podium parfait.
+  for (const t of season.tournaments)
+    for (const c of t.competitions)
+      for (const r of c.rows) if (r.type === 'Podium' && r.perfect) award('seer', `${t.name} · ${c.name}`);
 
   // Flair.
   for (const r of matchRows) if (r.bonus > 0) award('flair', r.tournament.name);
