@@ -24,6 +24,6 @@ test('one threshold alert per round, reminder replaces coincident threshold, no 
 test('threshold send rechecks missing predictions and sends only outstanding match links',async()=>{
  let sent,status,saved=[{matchId:1}];const db={matchRound:{findMany:async()=>[{round:'T8',expectedMatchCount:4}]},prediction:{findMany:async()=>saved},pushDelivery:{updateMany:async({data})=>status=data.status}};
  const d={id:'d',kind:'AVAILABLE',round:'T8',createdAt:new Date()},s={enabled:true,userId:1,preferences:{},tournamentIds:[1],competitionIds:[]},c={id:5,tournamentId:1,name:'Test'};
- await push.deliverSpecial(db,d,s,c,[bout(1),bout(2)],async(_,p)=>sent=p);assert.equal(status,'SENT');assert.match(sent.url,/matches=2$/);
+ await push.deliverSpecial(db,d,s,c,[bout(1),bout(2)],async(_,p)=>sent=p);assert.equal(status,'SENT');assert.equal(sent.title,'T8 - Test : 1 nouveau match');assert.match(sent.url,/matches=2$/);
  saved.push({matchId:2});await push.deliverSpecial(db,d,s,c,[bout(1),bout(2)],()=>assert.fail('already saved'));assert.equal(status,'CANCELLED');
 });
