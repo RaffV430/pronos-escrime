@@ -6,6 +6,7 @@ const { calculateMatchPoints } = require('../services/matchPoints');
 const { fields, verifiedPodium, predictionIds } = require('../services/podiumRules');
 const { timedMatches } = require('../services/roundTiming');
 const { standings } = require('../services/standings');
+const { buildSeason } = require('../services/season');
 router.use(require('../middleware/auth'));
 router.get('/predictions', async (req, res) => {
   try {
@@ -263,6 +264,85 @@ router.get('/summary/:tournamentId', async (req, res) => {
     });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Bilan indisponible.' });
+  }
+});
+// Historique complet d'une saison (1er septembre → 31 août), tous tournois confondus.
+router.get('/season', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    let requested = null;
+    if (req.query.season !== undefined) {
+      requested = Number(req.query.season);
+      if (!Number.isInteger(requested) || requested < 2000 || requested > 2100)
+        return res.status(400).json({ error: 'Saison invalide.' });
+    }
+    const [predictions, poolPredictions, podiums, challengePicks, adjustments] = await Promise.all([
+      db.prediction.findMany({ where: { userId }, include: { match: true } }),
+      db.poolPrediction.findMany({ where: { userId }, include: { fencer: { include: { pool: true } } } }),
+      db.podiumPrediction.findMany({ where: { userId }, include: { competition: true } }),
+      db.challengePick.findMany({ where: { userId }, include: { challenge: true } }),
+      db.pointAdjustment.findMany({ where: { userId } }),
+    ]);
+    const challengeMatches = challengePicks.length
+      ? await db.match.findMany({ where: { id: { in: challengePicks.map((p) => p.challenge.matchId) } } })
+      : [];
+    const competitionIds = [
+      ...new Set([
+        ...predictions.map((p) => p.match.competitionId),
+        ...poolPredictions.map((p) => p.fencer.pool.competitionId),
+        ...podiums.map((p) => p.competitionId),
+        ...challengeMatches.map((m) => m.competitionId),
+        ...adjustments.map((a) => a.competitionId).filter(Boolean),
+      ]),
+    ];
+    const tournamentIds = adjustments.map((a) => a.tournamentId).filter(Boolean);
+    const tournaments = await db.tournament.findMany({
+      where: { OR: [{ competitions: { some: { id: { in: competitionIds } } } }, { id: { in: tournamentIds } }] },
+      include: { competitions: { select: { id: true, name: true } } },
+    });
+    const allCompetitionIds = tournaments.flatMap((t) => t.competitions.map((c) => c.id));
+    const [firstMatches, firstPools] = allCompetitionIds.length
+      ? await Promise.all([
+          db.match.groupBy({
+            by: ['competitionId'],
+            where: { competitionId: { in: allCompetitionIds }, startsAt: { not: null } },
+            _min: { startsAt: true },
+          }),
+          db.pool.groupBy({
+            by: ['competitionId'],
+            where: { competitionId: { in: allCompetitionIds } },
+            _min: { closesAt: true },
+          }),
+        ])
+      : [[], []];
+    const firstDates = new Map();
+    for (const [rows, field] of [
+      [firstMatches, 'startsAt'],
+      [firstPools, 'closesAt'],
+    ])
+      for (const r of rows) {
+        const d = r._min[field];
+        if (d && (!firstDates.has(r.competitionId) || new Date(d) < new Date(firstDates.get(r.competitionId))))
+          firstDates.set(r.competitionId, d);
+      }
+    res.json(
+      buildSeason(
+        {
+          predictions,
+          poolPredictions,
+          podiums,
+          challengePicks,
+          challengeMatches,
+          adjustments,
+          tournaments,
+          firstDates,
+        },
+        requested,
+      ),
+    );
+  } catch (e) {
+    console.error('Erreur saison:', e.code || e.message);
+    res.status(500).json({ error: 'Historique de saison indisponible.' });
   }
 });
 module.exports = router;
