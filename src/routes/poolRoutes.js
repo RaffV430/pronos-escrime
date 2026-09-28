@@ -3,6 +3,7 @@ const prisma = require('../lib/prisma');
 const auth = require('../middleware/auth');
 const { createAdminMiddleware } = require('../middleware/admin');
 const { fail, id, validatePrediction, closed, fencerClosed, sourceUnavailable, validateSource, comparison, validateResults, poolPoints } = require('../services/poolRules');
+const { rescore } = require('../services/rescore');
 
 function createPoolRouter(db = prisma) {
   const admin = createAdminMiddleware(db);
@@ -19,12 +20,12 @@ function createPoolRouter(db = prisma) {
   };
   // All mutations for a pool acquire the same lock, preventing a save from
   // racing a manual closure or result publication. No migration is run here.
-  const withPool = (poolId, fn) => db.$transaction(async tx => {
+  const withPool = (poolId, fn, options) => db.$transaction(async tx => {
     const rows = await tx.$queryRaw`SELECT "id" FROM "Pool" WHERE "id" = ${poolId} FOR UPDATE`;
     if (!rows.length) fail('Poule introuvable.', 404);
     const pool = await tx.pool.findUnique({ where: { id: poolId }, include: { fencers: true } });
     return fn(tx, pool);
-  });
+  }, options);
 
   router.get('/', handle(async (req, res) => {
     const competitionId = id(req.query.competitionId);
@@ -105,12 +106,10 @@ function createPoolRouter(db = prisma) {
       for (const { fencerId, ...data } of results) {
         await tx.poolFencer.update({ where: { id: fencerId }, data });
         const predictions = await tx.poolPrediction.findMany({ where: { fencerId } });
-        for (const prediction of predictions) {
-          await tx.poolPrediction.update({ where: { id: prediction.id }, data: { pointsEarned: poolPoints(prediction, data).total } });
-        }
+        await rescore(tx.poolPrediction, { fencerId }, predictions, ['wins', 'indicator'], p => poolPoints(p, data).total);
       }
       await tx.pool.update({ where: { id: pool.id }, data: { isLocked: true, isFinal: true } });
-    });
+    }, { timeout: 30000 });
     res.json({ message: 'Résultats publiés. Comparaisons et points recalculés.' });
   }));
   return router;

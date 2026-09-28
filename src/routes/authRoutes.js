@@ -49,10 +49,19 @@ router.post('/register', async (req, res) => {
     if (nameToSave.length < 2 || nameToSave.length > 40) {
       return res.status(400).json({ error: 'Le nom doit contenir entre 2 et 40 caractères.' });
     }
+    if (nameToSave.includes('@')) {
+      return res.status(400).json({ error: 'Le nom d’utilisateur ne peut pas contenir « @ ».' });
+    }
 
+    // Le nom ne doit correspondre ni à un nom ni à l'e-mail d'un compte existant.
     const existingUser = await prisma.user.findFirst({
       where: {
-        OR: [{ email: { equals: email, mode: 'insensitive' } }, { name: { equals: nameToSave, mode: 'insensitive' } }] // On cherche dans 'name'
+        OR: [
+          { email: { equals: email, mode: 'insensitive' } },
+          { name: { equals: nameToSave, mode: 'insensitive' } },
+          { email: { equals: nameToSave, mode: 'insensitive' } },
+          { name: { equals: email, mode: 'insensitive' } },
+        ]
       }
     });
 
@@ -99,15 +108,14 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Identifiant et mot de passe requis.' });
     }
 
-    // 🛡️ On cherche dans la colonne 'email' OU dans la colonne 'name' (selon pgAdmin)
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: email.toLowerCase() },
-          { name: email }
-        ]
-      }
-    });
+    // Un identifiant avec « @ » désigne d'abord une adresse e-mail : un nom
+    // d'utilisateur identique à l'e-mail d'un autre joueur ne peut plus
+    // intercepter sa connexion. Repli sur le nom pour les anciens comptes dont
+    // le nom contient « @ ».
+    let user = email.includes('@')
+      ? await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
+      : null;
+    if (!user) user = await prisma.user.findFirst({ where: { name: email } });
 
     if (!user || !user.password) {
       return res.status(400).json({ error: 'Identifiant ou mot de passe incorrect.' });

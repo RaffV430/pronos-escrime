@@ -32,6 +32,7 @@ function fixture() {
       deleteMany: async ({ where }) => { const i = predictions.findIndex(p => p.userId === where.userId && p.fencerId === where.fencerId); if (i >= 0) predictions.splice(i, 1); },
       findMany: async ({ where }) => predictions.filter(p => p.fencerId === where.fencerId),
       update: async ({ where, data }) => Object.assign(predictions.find(p => p.id === where.id), data),
+      updateMany: async ({where,data})=>{const rows=predictions.filter(p=>Object.entries(where).every(([k,v])=>p[k]===v));rows.forEach(p=>Object.assign(p,data));return {count:rows.length};},
     },
   };
   db.$transaction = async fn => { locked = false; return fn(db); };

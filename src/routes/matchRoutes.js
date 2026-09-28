@@ -7,6 +7,7 @@ const router = express.Router();
 const prisma = require('../lib/prisma');
 const { matchClosed, closesAt } = require('../lib/matchLock');
 const {timedMatches,timedMatch,reopenRound} = require('../services/roundTiming');
+const {rescore} = require('../services/rescore');
 
 router.get('/freshness/:competitionId',authMiddleware,async(req,res)=>{
  const competitionId=Number(req.params.competitionId);if(!Number.isSafeInteger(competitionId)||competitionId<1)return res.status(400).json({error:'Épreuve invalide.'});
@@ -164,10 +165,10 @@ router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (re
       const match = await tx.match.update({ where: { id }, data: { winner, resultType: 'MEDICAL_WITHDRAWAL', score1: null, score2: null, isFinished: true, isLocked: true, manualUnlock: false } });
       const predictions = await tx.prediction.findMany({ where: { matchId: id } });
       const { calculateMatchPoints } = require('../services/matchPoints');
-      for (const p of predictions) await tx.prediction.update({ where: { id: p.id }, data: { pointsEarned: calculateMatchPoints(p.predictedScore1, p.predictedScore2, null, null, winner, 'MEDICAL_WITHDRAWAL') } });
+      await rescore(tx.prediction, { matchId: id }, predictions, ['predictedScore1', 'predictedScore2'], p => calculateMatchPoints(p.predictedScore1, p.predictedScore2, null, null, winner, 'MEDICAL_WITHDRAWAL'));
       await tx.auditLog.create({data:{actorId:req.user.userId,action:'Retrait médical',targetType:'Match',targetId:id,after:{winner}}});
       return { match };
-    });
+    }, { timeout: 30000 });
     res.status(result.status || 200).json(result);
   } catch { res.status(500).json({ error: 'Impossible de valider le retrait médical.' }); }
 });
@@ -187,10 +188,10 @@ router.put('/:id/result', authMiddleware, adminMiddleware, async (req,res)=>{
    const winner=score1>score2?1:2;
    const match=await tx.match.update({where:{id},data:{score1,score2,winner,resultType:'NORMAL',isFinished:true,isLocked:true,manualUnlock:false}});
    const predictions=await tx.prediction.findMany({where:{matchId:id}});
-   for(const p of predictions)await tx.prediction.update({where:{id:p.id},data:{pointsEarned:require('../services/matchPoints').calculateMatchPoints(p.predictedScore1,p.predictedScore2,score1,score2)}});
+   await rescore(tx.prediction,{matchId:id},predictions,['predictedScore1','predictedScore2'],p=>require('../services/matchPoints').calculateMatchPoints(p.predictedScore1,p.predictedScore2,score1,score2));
    await tx.auditLog.create({data:{actorId:req.user.userId,action:'Correction du résultat officiel',targetType:'Match',targetId:id,before:{score1:current.score1,score2:current.score2,winner:current.winner,resultType:current.resultType},after:{score1,score2,winner,reason:reason.trim(),sourceUrl}}});
    return {match};
-  });res.status(outcome.status||200).json(outcome);
+  },{timeout:30000});res.status(outcome.status||200).json(outcome);
  }catch{res.status(500).json({error:'Correction impossible.'});}
 });
 module.exports = router;
