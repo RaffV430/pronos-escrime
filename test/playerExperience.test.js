@@ -3,7 +3,7 @@ const { test } = require('node:test'),
 const { preferences, isQuiet, roundSummaries, freshness } = require('../src/services/playerExperience');
 const push = require('../src/services/pushNotifications');
 test('new notification categories are opt-in and preferences reject invalid times/types', () => {
-  assert.equal(preferences().reminders, false);
+  assert.equal(preferences().reminders, true);
   assert.equal(preferences().newMatches, true);
   for (const p of [
     { quietStart: '25:00' },

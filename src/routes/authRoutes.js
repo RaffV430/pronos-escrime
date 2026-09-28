@@ -6,6 +6,28 @@ const prisma = require('../lib/prisma');
 const { getJwtSecret } = require('../config');
 
 const authMiddleware = require('../middleware/auth');
+const { rateLimit } = require('express-rate-limit');
+
+// Limites anti-abus pensées pour une salle d'armes : tous les joueurs y partagent
+// souvent la même adresse IP (wifi du club). On ne compte donc que les échecs,
+// par identifiant visé, avec un plafond par IP beaucoup plus large.
+const tooMany = { error: 'Trop de tentatives. Réessayez dans quelques minutes.' };
+const limiter = (options) =>
+  rateLimit({ standardHeaders: 'draft-8', legacyHeaders: false, message: tooMany, ...options });
+const identifierKey = (req) =>
+  'id:' +
+  String(req.body?.email || '')
+    .trim()
+    .toLowerCase()
+    .slice(0, 200);
+const loginPerIdentifier = limiter({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: true,
+  keyGenerator: identifierKey,
+});
+const loginPerIp = limiter({ windowMs: 15 * 60 * 1000, limit: 200, skipSuccessfulRequests: true });
+const registerPerIp = limiter({ windowMs: 60 * 60 * 1000, limit: 60 });
 
 // ---------------------------------------------------------
 // 2. Route GET /api/auth/me (Vérification de la session)
@@ -29,7 +51,7 @@ router.get('/me', authMiddleware, async (req, res) => {
 // ---------------------------------------------------------
 // 3. Route POST /api/auth/register (Inscription)
 // ---------------------------------------------------------
-router.post('/register', async (req, res) => {
+router.post('/register', registerPerIp, async (req, res) => {
   try {
     const username = String(req.body.username || '')
       .normalize('NFC')
@@ -100,7 +122,7 @@ router.post('/register', async (req, res) => {
 // ---------------------------------------------------------
 // 4. Route POST /api/auth/login (Connexion)
 // ---------------------------------------------------------
-router.post('/login', async (req, res) => {
+router.post('/login', loginPerIp, loginPerIdentifier, async (req, res) => {
   try {
     const email = String(req.body.email || '').trim();
     const password = String(req.body.password || '');

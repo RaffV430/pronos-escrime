@@ -2,7 +2,7 @@ const { failure } = require('./ftlClient');
 const { calculateMatchPoints } = require('./matchPoints');
 const defaults = {
   newMatches: true,
-  reminders: false,
+  reminders: true,
   roundResults: false,
   quietEnabled: false,
   quietStart: '22:00',

@@ -1,4 +1,4 @@
-const { standings } = require('./standings');
+const { computeStandings: standings } = require('./standings');
 const ACTION = 'Classement après import';
 // Snapshots live in Neon’s append-only audit journal, with no client-specific state.
 async function captureRankings(db, c, actorId) {

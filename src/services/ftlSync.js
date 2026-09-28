@@ -635,8 +635,16 @@ async function syncStatus(db, competitionId) {
     },
   };
 }
+// Un contrôle (manuel ou automatique) peut changer les points : on vide le cache du classement.
+async function syncAndRefresh(...args) {
+  try {
+    return await syncCompetition(...args);
+  } finally {
+    require('./standings').invalidateStandings();
+  }
+}
 module.exports = {
-  syncCompetition,
+  syncCompetition: syncAndRefresh,
   syncStatus,
   observe,
   planMatches,
