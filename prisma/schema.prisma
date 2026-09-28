@@ -11,10 +11,12 @@ model User {
   id                Int                @id @default(autoincrement())
   email             String             @unique
   password          String
-  name              String
+  name              String             @unique
   totalPoints       Int                @default(0)
   isAdmin           Boolean            @default(false)
+  pushSubscriptions PushSubscription[]
   predictions       Prediction[]
+  poolPredictions   PoolPrediction[]
   podiumPredictions PodiumPrediction[] 
   pointAdjustments  PointAdjustment[]
   createdAt         DateTime           @default(now())
@@ -22,14 +24,27 @@ model User {
 
 model Match {
   id            Int          @id @default(autoincrement())
-  competitionId Int?         
-  competition   Competition? @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  competitionId Int
+  competition   Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
   player1       String
   player2       String
   score1        Int?
   score2        Int?
   isFinished    Boolean      @default(false)
   predictions   Prediction[]
+  isLocked      Boolean      @default(false)
+  startsAt      DateTime?
+  sourceUrl     String?
+  sourceKey     String?
+  sourceCheckedAt DateTime?
+  round         String?
+  manualUnlock  Boolean      @default(false)
+  winner        Int?
+  resultType    String?
+  resultRegisteredAt DateTime?
+  syncIssue String?
+
+  @@unique([competitionId, sourceKey])
 }
 
 model Prediction {
@@ -47,6 +62,9 @@ model Prediction {
 }
 
 model Tournament {
+  archivedAt DateTime?
+  completionNextCheckAt DateTime?
+  ftlSourceUrl String? @unique
   id           Int           @id @default(autoincrement())
   name         String        
   isLocked     Boolean       @default(false) 
@@ -55,14 +73,26 @@ model Tournament {
 }
 
 model Competition {
+  ftlEventId String? @unique
   id                Int                @id @default(autoincrement())
   tournamentId      Int
   tournament        Tournament         @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   name              String             
   sheetTabName      String?            
-  isPodiumLocked    Boolean            @default(false) 
+  isPodiumLocked    Boolean            @default(false)
+  podiumManualUnlock Boolean           @default(false) 
+  podiumFormat String @default("INDIVIDUAL")
+  podiumRoster Json?
+  rosterSourceUrl String?
+  rosterCheckedAt DateTime?
+  officialPodium Json?
+  resultsSourceUrl String?
+  resultsVerifiedAt DateTime?
+  podiumResolvedAt DateTime?
   podiumPredictions PodiumPrediction[]
   matches           Match[]
+  matchRounds       MatchRound[]
+  pools             Pool[]
   createdAt         DateTime           @default(now())
 }
 
@@ -70,19 +100,23 @@ model PodiumPrediction {
   id            Int          @id @default(autoincrement())
   userId        Int
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  competitionId Int?         
-  competition   Competition? @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  competitionId Int
+  competition   Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
   
   gold          String
   silver        String
   bronze1       String
   bronze2       String
+  selectionIds Json?
   pointsEarned  Int          @default(0)
 
   @@unique([userId, competitionId])
+  @@index([competitionId])
 }
 
 model PointAdjustment {
+  requestKey String? @unique
+  actorId Int?
   id            Int      @id @default(autoincrement())
   userId        Int
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -91,4 +125,186 @@ model PointAdjustment {
   points        Int      
   reason        String?  
   createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([tournamentId])
+  @@index([competitionId])
+}
+
+model Pool {
+  id            Int          @id @default(autoincrement())
+  competitionId Int
+  competition   Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  name          String
+  closesAt      DateTime
+  lockMode      String       @default("FIRST_RESULT")
+  sourceUrl     String?
+  sourcePoolNumber Int?
+  sourceCheckedAt DateTime?
+  rankingSystem String?
+  rankingSourceUrl String?
+  rankingAsOf DateTime?
+  isLocked      Boolean      @default(false)
+  isFinal       Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  fencers       PoolFencer[]
+
+  @@unique([competitionId, name])
+}
+
+model PoolFencer {
+  id            Int              @id @default(autoincrement())
+  poolId        Int
+  pool          Pool             @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  name          String
+  position      Int
+  wins          Int?
+  losses        Int?
+  indicator     Int?
+  firstResultAt DateTime?
+  countryCode   String?
+  ranking       Int?
+  predictions   PoolPrediction[]
+
+  @@unique([poolId, position])
+}
+
+model PoolPrediction {
+  id            Int         @id @default(autoincrement())
+  userId        Int
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fencerId      Int
+  fencer        PoolFencer  @relation(fields: [fencerId], references: [id], onDelete: Cascade)
+  wins          Int
+  losses        Int
+  indicator     Int
+  createdAt     DateTime     @default(now())
+  pointsEarned  Int          @default(0)
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([userId, fencerId])
+  @@index([fencerId])
+}
+
+model AuditLog {
+  id Int @id @default(autoincrement())
+  actorId Int
+  action String
+  targetType String
+  targetId Int
+  before Json?
+  after Json?
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
+model League {
+  id Int @id @default(autoincrement())
+  name String
+  kind String @default("PRIVATE")
+  ownerId Int
+  tournamentId Int
+  startsAt DateTime
+  code String @unique
+  members LeagueMember[]
+  createdAt DateTime @default(now())
+  @@index([tournamentId])
+}
+model LeagueMember {
+  id Int @id @default(autoincrement())
+  leagueId Int
+  league League @relation(fields:[leagueId],references:[id])
+  userId Int
+  joinedAt DateTime @default(now())
+  @@unique([leagueId,userId])
+  @@index([userId])
+}
+model Challenge {
+  id Int @id @default(autoincrement())
+  name String
+  matchId Int @unique
+  closesAt DateTime
+  bonus Int @default(3)
+  createdBy Int
+  picks ChallengePick[]
+  createdAt DateTime @default(now())
+}
+model ChallengePick {
+  id Int @id @default(autoincrement())
+  challengeId Int
+  challenge Challenge @relation(fields:[challengeId],references:[id])
+  userId Int
+  winner Int
+  updatedAt DateTime @updatedAt
+  @@unique([challengeId,userId])
+}
+
+// Official manifest: counts exclude exemptions; previousRound is null only for the first round.
+model MatchRound {
+  competitionId Int
+  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  round String
+  previousRound String?
+  expectedMatchCount Int
+  sourceUrl String
+  verifiedAt DateTime
+  manualUnlockUntil DateTime?
+  @@id([competitionId, round])
+}
+
+// A renewable claim shared by manual and automatic controls; survives restarts.
+model FtlSyncState {
+ competitionId Int @id
+ leaseToken String?
+ leaseUntil DateTime?
+ lastStartedAt DateTime?
+ lastFinishedAt DateTime?
+ nextAutomaticAt DateTime? @default(now())
+ failures Int @default(0)
+ status String @default("PENDING")
+ lastError String?
+ @@index([nextAutomaticAt])
+}
+
+model PushSubscription {
+ id String @id @default(uuid())
+ userId Int
+ user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+ endpoint String @unique
+ p256dh String
+ auth String
+ enabled Boolean @default(true)
+ tournamentIds Int[]
+ competitionIds Int[]
+ preferences Json?
+ preferencesSince DateTime @default(now())
+ lastEventId Int @default(0)
+ deliveries PushDelivery[]
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@index([userId])
+}
+model PushEvent {
+ id Int @id @default(autoincrement())
+ matchId Int @unique
+ competitionId Int
+ createdAt DateTime @default(now())
+ @@index([createdAt])
+}
+model PushDelivery {
+ id String @id @default(uuid())
+ subscriptionId String
+ subscription PushSubscription @relation(fields:[subscriptionId],references:[id],onDelete:Cascade)
+ competitionId Int
+ throughEventId Int
+ kind String @default("MATCHES")
+ round String @default("")
+ matchIds Int[]
+ status String @default("PENDING")
+ attempts Int @default(0)
+ nextAttemptAt DateTime @default(now())
+ claimedAt DateTime?
+ sentAt DateTime?
+ createdAt DateTime @default(now())
+ @@unique([subscriptionId,competitionId,throughEventId,kind,round], map:"PushDelivery_scope_event_kind_round_key")
+ @@index([status,nextAttemptAt])
 }

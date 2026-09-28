@@ -1,63 +1,52 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const { rateLimit } = require('express-rate-limit');
 require('dotenv').config();
 
-// Ajout de Prisma pour la route d'ajustement manuel
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
-
-// 1. Imports des routes
+const prisma = require('./lib/prisma');
+const { getAllowedOrigins, validateRuntimeConfig } = require('./config');
+const authMiddleware = require('./middleware/auth');
+const adminMiddleware = require('./middleware/admin');
 const authRoutes = require('./routes/authRoutes');
 const matchRoutes = require('./routes/matchRoutes');
-const userRoutes = require('./routes/userRoutes');
 const podiumRoutes = require('./routes/podiumRoutes');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use(helmet());
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || getAllowedOrigins().includes(origin)) return callback(null, true);
+    return callback(new Error('Origine non autorisée par CORS.'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+app.use(express.json({ limit: '100kb' }));
 
-// 2. Middlewares globaux
-app.use(cors());
-app.use(express.json());
-
-// 3. Déclaration des routes API
-app.use('/api/auth', authRoutes);
-app.use('/api/matches', matchRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/podium', podiumRoutes);
-
-// ==========================================
-// ROUTE : AJUSTEMENT MANUEL DES POINTS
-// ==========================================
-app.post('/api/admin/adjust-points', async (req, res) => {
-  try {
-    const { userId, points, reason, tournamentId, competitionId } = req.body;
-
-    if (!userId || points === undefined) {
-      return res.status(400).json({ error: "L'ID du joueur et les points sont obligatoires." });
-    }
-
-    const adjustment = await prisma.pointAdjustment.create({
-      data: {
-        userId: parseInt(userId, 10),
-        points: parseInt(points, 10),
-        reason: reason || "Ajustement manuel admin",
-        tournamentId: tournamentId ? parseInt(tournamentId, 10) : null,
-        competitionId: competitionId ? parseInt(competitionId, 10) : null,
-      },
-    });
-
-    res.status(200).json({ success: true, adjustment });
-  } catch (error) {
-    console.error("❌ Erreur lors de l'ajustement des points :", error);
-    res.status(500).json({ error: "Erreur lors de l'enregistrement de l'ajustement." });
-  }
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives. Réessayez dans quelques minutes.' },
 });
-// ==========================================
 
-// ROUTE POUR RÉCUPÉRER LA LISTE DES TOURNOIS
-app.get('/api/tournaments', async (req, res) => {
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/matches', matchRoutes);
+app.use('/api/podium', podiumRoutes);
+app.use('/api/pools', require('./routes/poolRoutes'));
+
+app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/community', require('./routes/communityRoutes'));
+app.use('/api/me', require('./routes/personalRoutes'));
+
+app.get('/api/tournaments', authMiddleware, async (req, res) => {
   try {
-    const tournaments = await prisma.tournament.findMany();
+    const tournaments = await prisma.tournament.findMany({ where:req.query.active==='true'?{archivedAt:null}:{}, orderBy: { createdAt: 'desc' } });
     res.json(tournaments);
   } catch (error) {
     console.error('Erreur récupération tournois:', error);
@@ -65,13 +54,42 @@ app.get('/api/tournaments', async (req, res) => {
   }
 });
 
-
-// Route de test de santé
-app.get('/', (req, res) => {
-  res.json({ message: '🤺 API MPP Escrime opérationnelle !' });
+app.get('/', (req, res) => res.json({ message: '🤺 API MPP Escrime opérationnelle !' }));
+app.get('/health', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', database: 'connected' });
+  } catch (error) {
+    res.status(503).json({ status: 'degraded', database: 'unavailable' });
+  }
 });
 
-// 4. Lancement du serveur (TOUJOURS À LA FIN)
-app.listen(PORT, () => {
-  console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+app.use((req, res) => res.status(404).json({ error: 'Route introuvable.' }));
+app.use((error, req, res, next) => {
+  console.error('Erreur non gérée:', error);
+  res.status(error.message?.includes('CORS') ? 403 : 500).json({ error: 'Erreur serveur.' });
 });
+
+function start() {
+  validateRuntimeConfig();
+  const port = Number(process.env.PORT) || 5000;
+  const server = app.listen(port, () => console.log(`Serveur démarré sur le port ${port}`));
+
+  const stopNotifications = require('./services/pushNotifications').startWorker(prisma);
+  const stopFtl = require('./services/ftlScheduler').startWorker(prisma);
+  const shutdown = async () => {
+    stopFtl();
+    stopNotifications();
+    server.close(async () => {
+      await prisma.$disconnect();
+      process.exit(0);
+    });
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+  return server;
+}
+
+if (require.main === module) start();
+
+module.exports = { app, start };

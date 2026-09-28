@@ -2,8 +2,8 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
+const { getJwtSecret } = require('../config');
 
 const authMiddleware = require('../middleware/auth');
 
@@ -14,7 +14,7 @@ router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, name: true, email: true, isAdmin: true, totalPoints: true } // On sélectionne bien 'name' ici
+      select: { id: true, name: true, email: true, isAdmin: true } // On sélectionne bien 'name' ici
     });
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
     
@@ -31,17 +31,28 @@ router.get('/me', authMiddleware, async (req, res) => {
 // ---------------------------------------------------------
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const username = String(req.body.username || '').normalize('NFC').trim();
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const password = String(req.body.password || '');
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email/Identifiant et mot de passe requis.' });
     }
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ error: 'Adresse e-mail invalide.' });
+    }
+    if (password.length < 10 || password.length > 128) {
+      return res.status(400).json({ error: 'Le mot de passe doit contenir entre 10 et 128 caractères.' });
+    }
 
     const nameToSave = username || email.split('@')[0];
+    if (nameToSave.length < 2 || nameToSave.length > 40) {
+      return res.status(400).json({ error: 'Le nom doit contenir entre 2 et 40 caractères.' });
+    }
 
     const existingUser = await prisma.user.findFirst({
       where: {
-        OR: [{ email: email }, { name: nameToSave }] // On cherche dans 'name'
+        OR: [{ email: { equals: email, mode: 'insensitive' } }, { name: { equals: nameToSave, mode: 'insensitive' } }] // On cherche dans 'name'
       }
     });
 
@@ -61,7 +72,7 @@ router.post('/register', async (req, res) => {
 
     const token = jwt.sign(
       { userId: newUser.id, isAdmin: newUser.isAdmin },
-      process.env.JWT_SECRET || 'supersecretkey',
+      getJwtSecret(),
       { expiresIn: '24h' }
     );
 
@@ -70,6 +81,7 @@ router.post('/register', async (req, res) => {
       user: { id: newUser.id, username: newUser.name, email: newUser.email, isAdmin: newUser.isAdmin },
     });
   } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Ce nom ou cette adresse e-mail est déjà utilisé.' });
     console.error('Erreur Register:', err);
     res.status(500).json({ error: "Erreur lors de l'inscription." });
   }
@@ -80,7 +92,8 @@ router.post('/register', async (req, res) => {
 // ---------------------------------------------------------
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const email = String(req.body.email || '').trim();
+    const password = String(req.body.password || '');
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Identifiant et mot de passe requis.' });
@@ -90,7 +103,7 @@ router.post('/login', async (req, res) => {
     const user = await prisma.user.findFirst({
       where: {
         OR: [
-          { email: email },
+          { email: email.toLowerCase() },
           { name: email }
         ]
       }
@@ -107,7 +120,7 @@ router.post('/login', async (req, res) => {
 
     const token = jwt.sign(
       { userId: user.id, isAdmin: user.isAdmin },
-      process.env.JWT_SECRET || 'supersecretkey',
+      getJwtSecret(),
       { expiresIn: '24h' }
     );
 
