@@ -26,6 +26,16 @@ function fixture() {
       return [{ id: 1 }];
     },
     user: { findUnique: async ({ where }) => ({ isAdmin: where.id === 3 }) },
+    // Liste des engagés de l'épreuve : nation (code CIO → ISO) et rang d'entrée.
+    competition: {
+      findUnique: async () => ({
+        id: 1,
+        podiumRoster: [
+          { id: 'a1', name: 'Alice', country: 'GER', entryRanking: 12 },
+          { id: 'b2', name: 'Bob', country: 'FRA', entryRanking: null },
+        ],
+      }),
+    },
     pool: {
       findUnique: async () => pool,
       update: async ({ data }) => Object.assign(pool, data),
@@ -116,6 +126,14 @@ test('HTTP authentication, ownership, closure and corrected results', async (t) 
   const own = await (await request('?competitionId=1')).json();
   assert.equal(own[0].fencers[0].prediction.userId, 1);
   assert.equal(own[0].fencers[0].predictions, undefined);
+  assert.deepEqual(
+    own[0].fencers.map((f) => [f.name, f.countryCode, f.entryRanking]),
+    [
+      ['Alice', 'DEU', 12],
+      ['Bob', 'FRA', null],
+    ],
+    'nationality (ISO) and entry ranking from the event entry list',
+  );
   const results = [
     { fencerId: 10, wins: 1, losses: 0, indicator: 3 },
     { fencerId: 20, wins: 0, losses: 1, indicator: -3 },
