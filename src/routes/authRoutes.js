@@ -1,11 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
-const { getJwtSecret } = require('../config');
 
 const authMiddleware = require('../middleware/auth');
+const session = require('../services/session');
 const { rateLimit } = require('express-rate-limit');
 
 // Limites anti-abus pensées pour une salle d'armes : tous les joueurs y partagent
@@ -106,7 +105,7 @@ router.post('/register', registerPerIp, async (req, res) => {
       },
     });
 
-    const token = jwt.sign({ userId: newUser.id, isAdmin: newUser.isAdmin }, getJwtSecret(), { expiresIn: '24h' });
+    const token = session.issueToken(newUser);
 
     res.json({
       token,
@@ -244,7 +243,7 @@ router.post('/login', loginPerIp, loginPerIdentifier, async (req, res) => {
           .json({ twoFactorRequired: true, error: 'Code de vérification incorrect ou déjà utilisé.' });
     }
 
-    const token = jwt.sign({ userId: user.id, isAdmin: user.isAdmin }, getJwtSecret(), { expiresIn: '24h' });
+    const token = session.issueToken(user);
 
     res.json({
       token,
@@ -298,6 +297,8 @@ router.post('/reset-password', resetPerIp, async (req, res) => {
     const user = await account.verifyResetToken(prisma, token);
     if (!user) return res.status(400).json({ error: 'Ce lien a expiré ou a déjà servi. Refaites une demande.' });
     await prisma.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash(password, 10) } });
+    // Toutes les sessions ouvertes avec l'ancien mot de passe sont coupées.
+    await session.revokeSessions(prisma, user.id);
     res.json({ message: 'Mot de passe modifié. Vous pouvez vous connecter.' });
   } catch (err) {
     console.error('Erreur réinitialisation:', err);
@@ -323,6 +324,50 @@ router.delete('/account', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Erreur suppression de compte:', err);
     res.status(500).json({ error: 'Suppression impossible. Réessayez.' });
+  }
+});
+
+// ---------------------------------------------------------
+// Sessions : renouvellement, changement de mot de passe, déconnexion des autres appareils
+// ---------------------------------------------------------
+router.post('/refresh', authMiddleware, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user) return res.status(401).json({ error: 'Session expirée.' });
+    res.json({ token: session.issueToken(user) });
+  } catch (err) {
+    console.error('Erreur refresh:', err);
+    res.status(500).json({ error: 'Renouvellement impossible.' });
+  }
+});
+
+router.post('/change-password', authMiddleware, loginPerIp, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!validPassword(newPassword))
+    return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir entre 10 et 128 caractères.' });
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user || !(await bcrypt.compare(String(currentPassword || ''), user.password)))
+      return res.status(400).json({ error: 'Mot de passe actuel incorrect.' });
+    await prisma.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash(newPassword, 10) } });
+    const updated = await session.revokeSessions(prisma, user.id);
+    res.json({
+      message: 'Mot de passe modifié. Vos autres appareils ont été déconnectés.',
+      token: session.issueToken(updated),
+    });
+  } catch (err) {
+    console.error('Erreur changement de mot de passe:', err);
+    res.status(500).json({ error: 'Modification impossible. Réessayez.' });
+  }
+});
+
+router.post('/logout-others', authMiddleware, async (req, res) => {
+  try {
+    const updated = await session.revokeSessions(prisma, req.user.userId);
+    res.json({ message: 'Vos autres appareils ont été déconnectés.', token: session.issueToken(updated) });
+  } catch (err) {
+    console.error('Erreur déconnexion des appareils:', err);
+    res.status(500).json({ error: 'Déconnexion impossible. Réessayez.' });
   }
 });
 
