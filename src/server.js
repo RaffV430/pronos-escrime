@@ -5,7 +5,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 
 const prisma = require('./lib/prisma');
-const { getAllowedOrigins, validateRuntimeConfig } = require('./config');
+const { originAllowed, validateRuntimeConfig } = require('./config');
 const authMiddleware = require('./middleware/auth');
 const adminMiddleware = require('./middleware/admin');
 const authRoutes = require('./routes/authRoutes');
@@ -19,7 +19,7 @@ app.use(helmet());
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || getAllowedOrigins().includes(origin)) return callback(null, true);
+      if (!origin || originAllowed(origin)) return callback(null, true);
       return callback(new Error('Origine non autorisée par CORS.'));
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
