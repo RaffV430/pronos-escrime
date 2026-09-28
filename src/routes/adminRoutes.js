@@ -144,4 +144,36 @@ router.post(
     res.json(await require('../services/ftlTournament').save(prisma, req.body, req.user.userId)),
   ),
 );
+
+// Archivage d'un tournoi entier depuis l'administration.
+router.get(
+  '/tournaments/:tournamentId/archive',
+  wrap(async (req, res) => {
+    const status = await require('../services/tournamentArchive').archiveStatus(prisma, id(req.params.tournamentId));
+    if (!status) return res.status(404).json({ error: 'Tournoi introuvable.' });
+    res.json(status);
+  }),
+);
+router.post(
+  '/tournaments/:tournamentId/archive',
+  wrap(async (req, res) => {
+    if (req.body?.confirm !== true) return res.status(400).json({ error: 'Confirmation requise.' });
+    res.json(
+      await require('../services/tournamentArchive').archiveManually(
+        prisma,
+        id(req.params.tournamentId),
+        req.user.userId,
+      ),
+    );
+  }),
+);
+router.post(
+  '/tournaments/:tournamentId/unarchive',
+  wrap(async (req, res) => {
+    res.json(
+      await require('../services/tournamentArchive').unarchive(prisma, id(req.params.tournamentId), req.user.userId),
+    );
+  }),
+);
+
 module.exports = router;
