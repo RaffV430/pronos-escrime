@@ -2,7 +2,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const {eventComplete,scheduleFinished,archiveCompleted}=require('../src/services/tournamentArchive');
 const complete=()=>({podiumResolvedAt:new Date(),resultsVerifiedAt:new Date(),officialPodium:{finalConfirmed:true},matches:[{id:1,round:'T2',isFinished:true}],pools:[{isFinal:true}],matchRounds:[{round:'T2',expectedMatchCount:1}]});
 test('archive requires official podium, all pools, complete rounds and team bronze',()=>{
- const c=complete();assert.equal(eventComplete(c),true);
+ const c=complete();assert.equal(eventComplete(c),true);assert.equal(eventComplete({...c,matches:[],matchRounds:[]}),true);
  for(const patch of [{resultsVerifiedAt:null},{podiumResolvedAt:null},{pools:[{isFinal:false}]},{matches:[{round:'T2',isFinished:false}]},{matchRounds:[{round:'T2',expectedMatchCount:2}]},{podiumFormat:'TEAM'}])assert.equal(eventComplete({...c,...patch}),false);
 });
 test('entire official schedule must be finished including events not imported',()=>{

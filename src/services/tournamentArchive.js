@@ -7,9 +7,11 @@ const {norm,clean}=require('./ftlParser');
 const include={competitions:{orderBy:{id:'asc'},include:{matches:{orderBy:{id:'asc'}},pools:{orderBy:{id:'asc'}},matchRounds:{orderBy:{round:'asc'}}}}};
 function eventComplete(c){
  const matches=(c.matches||[]).filter(m=>m.resultType!=='CANCELLED');
- return Boolean(c.podiumResolvedAt&&c.resultsVerifiedAt&&c.officialPodium?.finalConfirmed&&matches.length&&matches.every(m=>m.isFinished&&!m.syncIssue)&&
- (c.pools||[]).every(p=>p.isFinal)&&c.matchRounds?.length&&c.matchRounds.every(r=>matches.filter(m=>m.round===r.round).length===r.expectedMatchCount)&&
- matches.some(m=>m.round==='T2')&&(c.podiumFormat!=='TEAM'||matches.some(m=>m.round==='Bronze')));
+ const podium=Boolean(c.podiumResolvedAt&&c.resultsVerifiedAt&&c.officialPodium?.finalConfirmed&&(c.podiumFormat!=='TEAM'||c.officialPodium.bronzeMatchConfirmed));
+ if(!podium||!(c.pools||[]).every(p=>p.isFinal))return false;
+ // Legacy podium-only events have no match imports to finish.
+ if(!matches.length)return !(c.matchRounds||[]).length;
+ return matches.every(m=>m.isFinished&&!m.syncIssue)&&Boolean(c.matchRounds?.length)&&c.matchRounds.every(r=>matches.filter(m=>m.round===r.round).length===r.expectedMatchCount)&&matches.some(m=>m.round==='T2')&&(c.podiumFormat!=='TEAM'||matches.some(m=>m.round==='Bronze'));
 }
 function scheduleFinished(html,source,timezone){
  const parsed=parseSchedule(html,source,timezone),$=load(html);
@@ -33,7 +35,11 @@ async function checkTournament(db,t,client=createClient(),now=new Date()){
  const observed=scheduleFinished(await client.get(source),source,configs.find(c=>c?.timezone)?.timezone||'UTC');
  if(!observed.finished)return false;
  for(let i=0;i<t.competitions.length;i++){
-  const c=t.competitions[i],cfg=configs[i]||require('./ftlEvents')[c.rosterSourceUrl?.split('/').at(-1)?.toUpperCase()];
+  const c=t.competitions[i];let cfg=configs[i]||require('./ftlEvents')[c.rosterSourceUrl?.split('/').at(-1)?.toUpperCase()];
+  if(!cfg&&c.rosterSourceUrl){
+   const $=load(await client.get(c.rosterSourceUrl));const stamp=Date.parse(clean($('.desktop.eventTime').text())+' UTC');
+   if(Number.isFinite(stamp))cfg={event:clean($('.desktop.eventName').text()),tournament:clean($('.desktop.tournName').text()),date:new Date(stamp).toISOString().slice(0,10)};
+  }
   const id=c.ftlEventId||c.rosterSourceUrl?.split('/').at(-1)?.toUpperCase(),e=observed.events.find(e=>e.eventId===id);
   if(!cfg||!e||norm(e.event)!==norm(cfg.event)||norm(observed.tournament)!==norm(cfg.tournament)||e.date!==cfg.date)return false;
  }
