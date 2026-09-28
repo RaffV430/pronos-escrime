@@ -63,13 +63,20 @@ router.get('/', authMiddleware, async (req, res) => {
       },
       orderBy: { id: 'asc' },
     });
+    const timed = (await timedMatches(prisma, matches)).map((match) => ({ match, isClosed: matchClosed(match) }));
+    // Tendances des autres joueurs : uniquement pour les matchs clos, jamais avant.
+    const crowd = await require('../services/crowd').crowdFor(
+      prisma,
+      timed.filter((t) => t.isClosed).map((t) => t.match.id),
+    );
     res.json(
-      (await timedMatches(prisma, matches)).map((match) => ({
+      timed.map(({ match, isClosed }) => ({
         ...withCountries(match),
         maxScore: match.competition?.podiumFormat === 'TEAM' ? 45 : 15,
-        isClosed: matchClosed(match),
+        isClosed,
         closesAt: closesAt(match),
         winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null,
+        crowd: isClosed ? crowd[match.id] || null : null,
       })),
     );
   } catch (error) {
