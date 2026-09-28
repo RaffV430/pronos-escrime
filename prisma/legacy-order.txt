@@ -1,0 +1,16 @@
+# Ordre de rejeu de l'historique manuel pour reconstruire une base identique à la production (tests d'intégration).
+prisma/baseline-current.sql
+prisma/changes/20260925-pool-predictions.sql
+prisma/changes/20260926-community.sql
+prisma/changes/20260926-direct-elimination.sql
+prisma/changes/20260926-individual-pool-locks.sql
+prisma/changes/20260926-podium-identities.sql
+prisma/changes/20260926-pool-fencer-info.sql
+prisma/changes/20260926-prediction-controls.sql
+prisma/changes/20260926-round-deadlines.sql
+prisma/migrations/20260927120000_bulk_setup_web_push/migration.sql
+prisma/migrations/20260928090000_ftl_sync_state/migration.sql
+prisma/migrations/20260928093000_player_experience/migration.sql
+prisma/migrations/20260928130000_tournament_archive/migration.sql
+prisma/changes/20260928-admin-2fa.sql
+prisma/changes/20260928-performance-indexes.sql

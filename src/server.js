@@ -82,6 +82,11 @@ async function start() {
   validateRuntimeConfig();
   // Refuse de démarrer si la base ne contient pas toutes les colonnes du schéma
   // (SKIP_SCHEMA_CHECK=true pour désactiver en cas d'urgence).
+  // Applique d'abord les migrations automatiques de prisma/auto/ (SKIP_AUTO_MIGRATIONS=true pour désactiver).
+  if (process.env.SKIP_AUTO_MIGRATIONS !== 'true') {
+    const { applied, total } = await require('./services/migrations').runMigrations(prisma);
+    console.log(`Migrations : ${applied.length} appliquée(s), ${total} au total.`);
+  }
   if (process.env.SKIP_SCHEMA_CHECK !== 'true') {
     const { tables } = await require('./services/schemaCheck').checkSchema(prisma);
     console.log(`Schéma de la base vérifié (${tables} tables).`);
