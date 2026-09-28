@@ -328,8 +328,15 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
   const cancel = () => db.pushDelivery.updateMany({ where: { id, status: 'SENDING' }, data: { status: 'CANCELLED' } });
   if (!sub?.enabled || !c || !follows(sub, c)) return cancel();
   const prefs = preferences(sub.preferences || {});
+  // Une recomposition annoncée pendant les heures calmes attend leur fin plutôt que d'être perdue.
+  if (kind === 'POOLS' && prefs.newMatches && isQuiet(prefs) && Date.now() - delivery.createdAt.getTime() < 86400000)
+    return db.pushDelivery.updateMany({
+      where: { id, status: 'SENDING' },
+      data: { status: 'PENDING', attempts: { decrement: 1 }, nextAttemptAt: new Date(Date.now() + 15 * 60000) },
+    });
   if (
     isQuiet(prefs) ||
+    (kind === 'POOLS' && !prefs.newMatches) ||
     (kind === 'AVAILABLE' && !prefs.newMatches) ||
     (kind === 'REMINDER' && !prefs.reminders) ||
     (kind === 'ROUND' && !prefs.roundResults)
@@ -395,6 +402,16 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
       tag: `pronos-${id}`,
       url: `/?tournament=${c.tournamentId}&event=${c.id}&view=mine`,
     };
+  } else if (kind === 'POOLS') {
+    // Poules recomposées sur FencingTimeLive : prévenir tant que les poules concernées restent ouvertes.
+    if (Date.now() - delivery.createdAt.getTime() > 86400000) return cancel();
+    const pools = await db.pool.findMany({
+      where: { id: { in: delivery.matchIds }, competitionId: c.id, isLocked: false, isFinal: false },
+      select: { name: true },
+    });
+    if (delivery.matchIds.length && !pools.length) return cancel();
+    ttl = 3600;
+    content = { ...require('./poolRecompose').poolsNotification(c, pools), tag: `pronos-${id}` };
   } else return cancel();
   try {
     await sender(sub, content, ttl);

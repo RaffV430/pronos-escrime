@@ -46,7 +46,7 @@ test('event start follows the venue time zone, with a safe fallback', () => {
   assert.equal(eventStart({ date: 'bad' }), null);
 });
 
-test('pace: 15 min the evening before, 2 min from 30 min before the day while pools are open, even with warnings', async () => {
+test('pace: 15 min before the start (last check 1 min before), then 2 min while pools are open, even with warnings', async () => {
   const eventStart = '2026-10-09T22:00:00.000Z';
   const pace = async (at, summary) => {
     const db = fakeDb();
@@ -55,7 +55,7 @@ test('pace: 15 min the evening before, 2 min from 30 min before the day while po
     return (db.state.nextAutomaticAt - when) / 60000;
   };
   assert.equal(await pace('2026-10-09T21:00:00Z', { openFirstResultPools: 3 }), 15);
-  assert.equal(await pace('2026-10-09T21:35:00Z', { openFirstResultPools: 3 }), 2);
+  assert.equal(await pace('2026-10-09T21:50:00Z', { openFirstResultPools: 3 }), 9);
   assert.equal(await pace('2026-10-10T08:00:00Z', { openFirstResultPools: 3, warnings: ['x'] }), 2);
   assert.equal(await pace('2026-10-10T08:00:00Z', { openFirstResultPools: 0, warnings: ['x'] }), 5);
 });

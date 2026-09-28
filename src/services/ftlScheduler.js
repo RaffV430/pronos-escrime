@@ -4,7 +4,8 @@ const events = require('./ftlEvents');
 const { eventComplete, archiveCompleted } = require('./tournamentArchive');
 const { configuration } = require('./ftlConfiguration');
 const INTERVAL = 120000,
-  LEASE = 180000;
+  LEASE = 180000,
+  LEAD = 60000;
 const enabled = () => process.env.FTL_AUTO_SYNC === 'true';
 
 async function claim(db, competitionId, { automatic = false, now = new Date() } = {}) {
@@ -39,15 +40,15 @@ async function finish(db, competitionId, token, summary, error = null, now = new
   const issues = summary?.warnings?.length || summary?.conflicts?.length;
   const complete = Boolean(summary?.podium && !issues);
   const failures = error ? state.failures + 1 : 0;
-  // Rythme lent seulement jusqu'à 30 min avant le début de la journée d'épreuve (heure locale),
-  // pour que les poules ouvertes aient déjà un contrôle récent quand la fraîcheur devient exigée.
+  // Rythme lent (15 min) jusqu'au début des poules (heure FencingTimeLive, heure locale du lieu) ;
+  // le dernier contrôle lent est calé 1 min avant, pour que la saisie reste ouverte sans à-coup.
   const start = summary?.eventStart ? Date.parse(summary.eventStart) : Date.parse(`${summary?.eventDate}T00:00:00Z`);
-  const beforeEvent = start - 30 * 60000 > now.getTime();
+  const beforeEvent = start - LEAD > now.getTime();
   const openPools = summary?.openFirstResultPools > 0;
   const delay = error
     ? Math.min(30 * 60000, INTERVAL * 2 ** Math.min(failures - 1, 4))
     : beforeEvent
-      ? 15 * 60000
+      ? Math.min(15 * 60000, start - LEAD - now.getTime())
       : issues && !openPools
         ? 5 * 60000
         : INTERVAL;

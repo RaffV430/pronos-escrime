@@ -386,6 +386,7 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
 
   return summary;
 }
+const recompose = require('./poolRecompose');
 async function syncPools(db, c, config, actorId, client, leaseToken = null) {
   const pools = await db.pool.findMany({
     where: { competitionId: c.id },
@@ -408,6 +409,32 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
       if (!tables.length) throw failure('Matrices de poules non encore publiées.');
       const poolNumbers = tables.map((t) => clean($(t).parent().find('.poolNum').text()));
       if (new Set(poolNumbers).size !== poolNumbers.length) throw failure('Numéros de poules ambigus.');
+      // Poules modifiées sur FencingTimeLive avant leur début : remplacer uniquement celles qui ont changé.
+      let observedAll = null;
+      try {
+        observedAll = tables.map((table) => parsePools($.html($(table).parent()))[0]);
+      } catch {
+        observedAll = null; // l'import poule par poule ci-dessous signalera la poule illisible.
+      }
+      if (observedAll) {
+        try {
+          const plan = recompose.planRecomposition(pools, url, observedAll, c.podiumRoster);
+          if (plan) {
+            if (leaseToken) await db.$transaction((tx) => require('./ftlScheduler').assertClaim(tx, c.id, leaseToken));
+            const result = await recompose.applyRecomposition(db, c, url, plan, config);
+            summary.recomposed = [...(summary.recomposed || []), result];
+            summary.notes = [...(summary.notes || []), recompose.describe(result)];
+            const fresh = await db.pool.findMany({
+              where: { competitionId: c.id },
+              include: { fencers: { orderBy: { position: 'asc' } } },
+              orderBy: { id: 'asc' },
+            });
+            pools.splice(0, pools.length, ...fresh);
+          }
+        } catch (e) {
+          summary.warnings.push(e.status ? e.message : 'Recomposition des poules à vérifier.');
+        }
+      }
       for (const table of tables) {
         try {
           const observed = parsePools($.html($(table).parent()))[0];
@@ -595,6 +622,7 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     summary.pools = poolSummary;
     summary.pointsUpdated += poolSummary.pointsUpdated;
     summary.warnings.push(...poolSummary.warnings);
+    if (poolSummary.notes?.length) summary.notes = [...(summary.notes || []), ...poolSummary.notes];
     // Ranking history must never roll back a certain score or first-result lock.
     try {
       await db.$transaction(
