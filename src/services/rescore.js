@@ -13,7 +13,7 @@
 async function rescore(model, scope, predictions, keys, compute) {
   const groups = new Map();
   for (const prediction of predictions) {
-    const key = JSON.stringify(keys.map(k => prediction[k]));
+    const key = JSON.stringify(keys.map((k) => prediction[k]));
     if (!groups.has(key)) groups.set(key, { values: prediction, points: compute(prediction), changed: 0 });
     const group = groups.get(key);
     if (prediction.pointsEarned !== group.points) group.changed++;

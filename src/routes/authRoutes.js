@@ -14,10 +14,10 @@ router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, name: true, email: true, isAdmin: true } // On sélectionne bien 'name' ici
+      select: { id: true, name: true, email: true, isAdmin: true }, // On sélectionne bien 'name' ici
     });
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
-    
+
     // On renvoie 'username' pour le frontend qui attend cette variable
     res.json({ ...user, username: user.name });
   } catch (err) {
@@ -31,8 +31,12 @@ router.get('/me', authMiddleware, async (req, res) => {
 // ---------------------------------------------------------
 router.post('/register', async (req, res) => {
   try {
-    const username = String(req.body.username || '').normalize('NFC').trim();
-    const email = String(req.body.email || '').trim().toLowerCase();
+    const username = String(req.body.username || '')
+      .normalize('NFC')
+      .trim();
+    const email = String(req.body.email || '')
+      .trim()
+      .toLowerCase();
     const password = String(req.body.password || '');
 
     if (!email || !password) {
@@ -61,8 +65,8 @@ router.post('/register', async (req, res) => {
           { name: { equals: nameToSave, mode: 'insensitive' } },
           { email: { equals: nameToSave, mode: 'insensitive' } },
           { name: { equals: email, mode: 'insensitive' } },
-        ]
-      }
+        ],
+      },
     });
 
     if (existingUser) {
@@ -79,18 +83,15 @@ router.post('/register', async (req, res) => {
       },
     });
 
-    const token = jwt.sign(
-      { userId: newUser.id, isAdmin: newUser.isAdmin },
-      getJwtSecret(),
-      { expiresIn: '24h' }
-    );
+    const token = jwt.sign({ userId: newUser.id, isAdmin: newUser.isAdmin }, getJwtSecret(), { expiresIn: '24h' });
 
     res.json({
       token,
       user: { id: newUser.id, username: newUser.name, email: newUser.email, isAdmin: newUser.isAdmin },
     });
   } catch (err) {
-    if (err.code === 'P2002') return res.status(409).json({ error: 'Ce nom ou cette adresse e-mail est déjà utilisé.' });
+    if (err.code === 'P2002')
+      return res.status(409).json({ error: 'Ce nom ou cette adresse e-mail est déjà utilisé.' });
     console.error('Erreur Register:', err);
     res.status(500).json({ error: "Erreur lors de l'inscription." });
   }
@@ -112,9 +113,7 @@ router.post('/login', async (req, res) => {
     // d'utilisateur identique à l'e-mail d'un autre joueur ne peut plus
     // intercepter sa connexion. Repli sur le nom pour les anciens comptes dont
     // le nom contient « @ ».
-    let user = email.includes('@')
-      ? await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
-      : null;
+    let user = email.includes('@') ? await prisma.user.findUnique({ where: { email: email.toLowerCase() } }) : null;
     if (!user) user = await prisma.user.findFirst({ where: { name: email } });
 
     if (!user || !user.password) {
@@ -126,11 +125,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Identifiant ou mot de passe incorrect.' });
     }
 
-    const token = jwt.sign(
-      { userId: user.id, isAdmin: user.isAdmin },
-      getJwtSecret(),
-      { expiresIn: '24h' }
-    );
+    const token = jwt.sign({ userId: user.id, isAdmin: user.isAdmin }, getJwtSecret(), { expiresIn: '24h' });
 
     res.json({
       token,

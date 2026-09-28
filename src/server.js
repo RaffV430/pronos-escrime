@@ -16,14 +16,16 @@ const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet());
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || getAllowedOrigins().includes(origin)) return callback(null, true);
-    return callback(new Error('Origine non autorisée par CORS.'));
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || getAllowedOrigins().includes(origin)) return callback(null, true);
+      return callback(new Error('Origine non autorisée par CORS.'));
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }),
+);
 app.use(express.json({ limit: '100kb' }));
 
 const authLimiter = rateLimit({
@@ -46,7 +48,10 @@ app.use('/api/me', require('./routes/personalRoutes'));
 
 app.get('/api/tournaments', authMiddleware, async (req, res) => {
   try {
-    const tournaments = await prisma.tournament.findMany({ where:req.query.active==='true'?{archivedAt:null}:{}, orderBy: { createdAt: 'desc' } });
+    const tournaments = await prisma.tournament.findMany({
+      where: req.query.active === 'true' ? { archivedAt: null } : {},
+      orderBy: { createdAt: 'desc' },
+    });
     res.json(tournaments);
   } catch (error) {
     console.error('Erreur récupération tournois:', error);

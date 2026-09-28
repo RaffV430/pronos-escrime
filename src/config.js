@@ -11,8 +11,7 @@ function getJwtSecret() {
 }
 
 function getAllowedOrigins() {
-  const configured = process.env.CORS_ORIGINS
-    ?.split(',')
+  const configured = process.env.CORS_ORIGINS?.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
 

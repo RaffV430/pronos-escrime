@@ -1,17 +1,48 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validatePrediction, validateResults, closed, comparison, poolPoints, id } = require('../src/services/poolRules');
+const {
+  validatePrediction,
+  validateResults,
+  closed,
+  comparison,
+  poolPoints,
+  id,
+} = require('../src/services/poolRules');
 
 test('pool predictions accept zero wins and negative indicators; reject empty or impossible values', () => {
-  assert.deepEqual(validatePrediction({ wins: 0, losses: 6, indicator: -30 }, 7), { wins: 0, losses: 6, indicator: -30 });
+  assert.deepEqual(validatePrediction({ wins: 0, losses: 6, indicator: -30 }, 7), {
+    wins: 0,
+    losses: 6,
+    indicator: -30,
+  });
   assert.deepEqual(validatePrediction({ wins: 6, losses: 0, indicator: 30 }, 7), { wins: 6, losses: 0, indicator: 30 });
-  for (const value of [null, { wins: '', losses: 6, indicator: 0 }, { wins: 1.5, losses: 4.5, indicator: 0 }, { wins: 3, losses: 2, indicator: 0 }, { wins: 6, losses: 0, indicator: 0 }, { wins: 0, losses: 6, indicator: 1 }, { wins: -1, losses: 7, indicator: 0 }]) assert.throws(() => validatePrediction(value, 7));
+  for (const value of [
+    null,
+    { wins: '', losses: 6, indicator: 0 },
+    { wins: 1.5, losses: 4.5, indicator: 0 },
+    { wins: 3, losses: 2, indicator: 0 },
+    { wins: 6, losses: 0, indicator: 0 },
+    { wins: 0, losses: 6, indicator: 1 },
+    { wins: -1, losses: 7, indicator: 0 },
+  ])
+    assert.throws(() => validatePrediction(value, 7));
 });
 test('score tiers are exclusive, symmetric, and include boundaries', () => {
   const result = { wins: 3, losses: 3, indicator: 0 };
   for (const sign of [-1, 1]) {
-    for (const [gap, points] of [[0,5],[1,3],[3,3],[4,1],[5,1],[6,0]]) {
-      assert.deepEqual(poolPoints({ wins: 3, indicator: sign * gap }, result), { winsPoints: 3, indicatorPoints: points, total: 3 + points });
+    for (const [gap, points] of [
+      [0, 5],
+      [1, 3],
+      [3, 3],
+      [4, 1],
+      [5, 1],
+      [6, 0],
+    ]) {
+      assert.deepEqual(poolPoints({ wins: 3, indicator: sign * gap }, result), {
+        winsPoints: 3,
+        indicatorPoints: points,
+        total: 3 + points,
+      });
     }
     assert.equal(poolPoints({ wins: 3 + sign, indicator: 6 }, result).total, 1);
     assert.equal(poolPoints({ wins: 3 + 2 * sign, indicator: 6 }, result).total, 0);
@@ -33,12 +64,21 @@ test('closes exactly at deadline and remains closed after finalization', () => {
 });
 test('official results require complete, unique, internally consistent rows', () => {
   const fencers = [{ id: 1 }, { id: 2 }, { id: 3 }];
-  const rows = [{ fencerId: 1, wins: 2, losses: 0, indicator: 6 }, { fencerId: 2, wins: 1, losses: 1, indicator: 0 }, { fencerId: 3, wins: 0, losses: 2, indicator: -6 }];
+  const rows = [
+    { fencerId: 1, wins: 2, losses: 0, indicator: 6 },
+    { fencerId: 2, wins: 1, losses: 1, indicator: 0 },
+    { fencerId: 3, wins: 0, losses: 2, indicator: -6 },
+  ];
   assert.equal(validateResults(rows, fencers).length, 3);
   assert.throws(() => validateResults(rows.slice(1), fencers));
   assert.throws(() => validateResults([rows[0], rows[0], rows[2]], fencers));
-  assert.throws(() => validateResults([...rows.slice(0,2), { ...rows[2], indicator: -5 }], fencers));
-  assert.throws(() => validateResults(rows.map(r => ({ ...r, wins: 2, losses: 0, indicator: 3 })), fencers));
+  assert.throws(() => validateResults([...rows.slice(0, 2), { ...rows[2], indicator: -5 }], fencers));
+  assert.throws(() =>
+    validateResults(
+      rows.map((r) => ({ ...r, wins: 2, losses: 0, indicator: 3 })),
+      fencers,
+    ),
+  );
 });
 test('ids do not accept permissive parseInt values or coercion', () => {
   assert.equal(id('123'), 123);
@@ -61,6 +101,12 @@ test('source mapping accepts only official pool pages and an explicit pool numbe
   const { validateSource } = require('../src/services/poolRules');
   const url = 'https://www.fencingtimelive.com/pools/scores/' + 'A'.repeat(32) + '/' + 'B'.repeat(32);
   assert.deepEqual(validateSource(url + '#test', 2), { sourceUrl: url, sourcePoolNumber: 2 });
-  for (const source of ['https://evil.example/pools/scores/a/b', url.replace('https:', 'http:'), url.replace('www.', 'user:pass@www.'), url.replace('/pools/', '/other/')]) assert.throws(() => validateSource(source, 2));
+  for (const source of [
+    'https://evil.example/pools/scores/a/b',
+    url.replace('https:', 'http:'),
+    url.replace('www.', 'user:pass@www.'),
+    url.replace('/pools/', '/other/'),
+  ])
+    assert.throws(() => validateSource(source, 2));
   for (const number of [0, -1, 1.5, '2', 1001]) assert.throws(() => validateSource(url, number));
 });
