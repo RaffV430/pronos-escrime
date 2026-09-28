@@ -1,3 +1,4 @@
+const roundLabel=round=>({T4:'Semi-finales',T2:'Finale'})[round]||(/^T\d+$/.test(round)?`Tableau de ${round.slice(1)}`:round);
 const webpush=require('web-push');
 const {preferences,isQuiet,roundSummaries}=require('./playerExperience');
 const {failure}=require('./ftlClient');
@@ -124,18 +125,18 @@ async function deliverSpecial(db,delivery,sub,c,matches,sender){
   if(prefs.reminders&&plan.urgent.length)return cancel();
   const deadlines=plan.missing.map(closesAt).filter(Boolean).map(Date.parse);
   ttl=Math.max(1,Math.min(900,...deadlines.map(d=>Math.floor((d-Date.now())/1000))));
-  content={...payload(c,plan.missing,id),title:`${round} : des matchs vous attendent`,body:`${plan.missing.length} à pronostiquer · au moins la moitié du tour disponible · ${c.name}`};
+  content={...payload(c,plan.missing,id),title:`${roundLabel(round)} : des matchs vous attendent`,body:`${plan.missing.length} à pronostiquer · au moins la moitié du tour disponible · ${c.name}`};
  }else if(kind==='REMINDER'){
   const predictions=await db.prediction.findMany({where:{userId:sub.userId,matchId:{in:matches.map(m=>m.id)}},select:{matchId:true}}),saved=new Set(predictions.map(p=>p.matchId));
   const missing=matches.filter(m=>m.round===round&&!saved.has(m.id)&&!matchClosed(m)&&closesAt(m)&&Date.parse(closesAt(m))-Date.now()<=600000);
   if(!missing.length||Date.now()-delivery.createdAt.getTime()>900000)return cancel();
   ttl=Math.max(1,Math.min(900,...missing.map(m=>Math.floor((Date.parse(closesAt(m))-Date.now())/1000))));
-  content={title:`${round} : 10 dernières minutes`,body:`${missing.length} rencontre(s) à compléter · ${c.name}`,tag:`pronos-${id}`,url:`/?tournament=${c.tournamentId}&event=${c.id}&new=1&matches=${missing.slice(0,64).map(m=>m.id).join(',')}`};
+  content={title:`${roundLabel(round)} : 10 dernières minutes`,body:`${missing.length} rencontre(s) à compléter · ${c.name}`,tag:`pronos-${id}`,url:`/?tournament=${c.tournamentId}&event=${c.id}&new=1&matches=${missing.slice(0,64).map(m=>m.id).join(',')}`};
  }else if(kind==='ROUND'){
   if(Date.now()-delivery.createdAt.getTime()>86400000)return cancel();
   const raw=await db.match.findMany({where:{competitionId:c.id},include:{predictions:{where:{userId:sub.userId}}}}),rounds=await db.matchRound.findMany({where:{competitionId:c.id}});
   const recap=roundSummaries(raw,rounds).find(r=>r.round===round);if(!recap?.completed||!recap.saved)return cancel();
-  ttl=3600;content={title:`${round} terminé : ${recap.points} points`,body:`${recap.exact} score(s) exact(s), ${recap.winners} bon(s) vainqueur(s) · ${c.name}`,tag:`pronos-${id}`,url:`/?tournament=${c.tournamentId}&event=${c.id}&view=mine`};
+  ttl=3600;content={title:`${roundLabel(round)} : tour terminé : ${recap.points} points`,body:`${recap.exact} score(s) exact(s), ${recap.winners} bon(s) vainqueur(s) · ${c.name}`,tag:`pronos-${id}`,url:`/?tournament=${c.tournamentId}&event=${c.id}&view=mine`};
  }else return cancel();
  try{await sender(sub,content,ttl);await db.pushDelivery.updateMany({where:{id,status:'SENDING'},data:{status:'SENT',sentAt:new Date()}});}
  catch(e){if([404,410].includes(e.statusCode))await db.pushSubscription.update({where:{id:sub.id},data:{enabled:false}});const retry=![400,401,403,404,410].includes(e.statusCode)&&delivery.attempts<3;await db.pushDelivery.updateMany({where:{id,status:'SENDING'},data:{status:retry?'PENDING':'FAILED',nextAttemptAt:new Date(Date.now()+60000*2**delivery.attempts)}});}

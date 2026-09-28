@@ -41,7 +41,7 @@ test('reminder includes only unsaved open matches and expires at their actual de
  let sent,status;const db={pushDelivery:{updateMany:async({data})=>{status=data.status;}},prediction:{findMany:async()=>[{matchId:8}]}};
  const start=new Date(Date.now()+300000),matches=[7,8,9].map(id=>({id,round:'T16',startsAt:start,isFinished:id===9}));
  await push.deliverSpecial(db,{id:'d',kind:'REMINDER',round:'T16',createdAt:new Date()},{enabled:true,userId:1,preferences:{reminders:true},tournamentIds:[1],competitionIds:[]},{id:5,tournamentId:1,name:'Épreuve'},matches,async(s,p,ttl)=>{sent=p;assert.ok(ttl<=300&&ttl>0);});
- assert.equal(status,'SENT');assert.match(sent.url,/matches=7$/);assert.match(sent.title,/T16/);
+ assert.equal(status,'SENT');assert.match(sent.url,/matches=7$/);assert.match(sent.title,/Tableau de 16/);
 });
 test('quiet hours suppress sends even when an alert was queued earlier',async()=>{
  let status;const db={pushDelivery:{updateMany:async({data})=>{status=data.status;}}};
