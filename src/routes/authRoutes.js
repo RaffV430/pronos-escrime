@@ -36,12 +36,13 @@ router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, name: true, email: true, isAdmin: true }, // On sélectionne bien 'name' ici
+      select: { id: true, name: true, email: true, isAdmin: true, totpEnabledAt: true },
     });
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
     // On renvoie 'username' pour le frontend qui attend cette variable
-    res.json({ ...user, username: user.name });
+    const { totpEnabledAt, ...rest } = user;
+    res.json({ ...rest, username: user.name, twoFactorEnabled: Boolean(totpEnabledAt) });
   } catch (err) {
     console.error('Erreur /me:', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -120,6 +121,90 @@ router.post('/register', registerPerIp, async (req, res) => {
 });
 
 // ---------------------------------------------------------
+// Double authentification (TOTP) — réservée aux administrateurs
+// ---------------------------------------------------------
+const totp = require('../services/totp');
+async function consumeTotp(user, code) {
+  let secret;
+  try {
+    secret = totp.openSecret(user.totpSecret);
+  } catch {
+    return false;
+  }
+  const step = totp.verifyCode(secret, code, { lastStep: user.totpLastStep ?? null });
+  if (step === null) return false;
+  // Enregistre le pas utilisé : un même code ne peut pas servir deux fois.
+  const saved = await prisma.user.updateMany({
+    where: { id: user.id, OR: [{ totpLastStep: null }, { totpLastStep: { lt: step } }] },
+    data: { totpLastStep: step },
+  });
+  return saved.count === 1;
+}
+const twoFactorLimiter = limiter({ windowMs: 15 * 60 * 1000, limit: 20 });
+
+router.post('/2fa/setup', authMiddleware, twoFactorLimiter, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user?.isAdmin) return res.status(403).json({ error: 'Réservé aux administrateurs.' });
+    if (user.totpEnabledAt) return res.status(409).json({ error: 'La double authentification est déjà active.' });
+    const secret = totp.generateSecret();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { totpSecret: totp.sealSecret(secret), totpEnabledAt: null, totpLastStep: null },
+    });
+    res.json({ secret, otpauthUrl: totp.otpauthUrl(secret, user.email) });
+  } catch (err) {
+    console.error('Erreur 2FA setup:', err);
+    res.status(500).json({ error: 'Préparation impossible. Réessayez.' });
+  }
+});
+
+router.post('/2fa/enable', authMiddleware, twoFactorLimiter, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user?.isAdmin) return res.status(403).json({ error: 'Réservé aux administrateurs.' });
+    if (!user.totpSecret || user.totpEnabledAt)
+      return res.status(409).json({ error: 'Recommencez la configuration de la double authentification.' });
+    if (!(await consumeTotp(user, req.body.code)))
+      return res.status(400).json({ error: 'Code incorrect. Vérifiez l’heure de votre téléphone et réessayez.' });
+    await prisma.user.update({ where: { id: user.id }, data: { totpEnabledAt: new Date() } });
+    await prisma.auditLog.create({
+      data: { actorId: user.id, action: 'Activation double authentification', targetType: 'User', targetId: user.id },
+    });
+    res.json({ enabled: true });
+  } catch (err) {
+    console.error('Erreur 2FA enable:', err);
+    res.status(500).json({ error: 'Activation impossible. Réessayez.' });
+  }
+});
+
+router.post('/2fa/disable', authMiddleware, twoFactorLimiter, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user?.totpEnabledAt) return res.status(409).json({ error: 'La double authentification n’est pas active.' });
+    if (!(await bcrypt.compare(String(req.body.password || ''), user.password)))
+      return res.status(400).json({ error: 'Mot de passe incorrect.' });
+    if (!(await consumeTotp(user, req.body.code))) return res.status(400).json({ error: 'Code incorrect.' });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { totpSecret: null, totpEnabledAt: null, totpLastStep: null },
+    });
+    await prisma.auditLog.create({
+      data: {
+        actorId: user.id,
+        action: 'Désactivation double authentification',
+        targetType: 'User',
+        targetId: user.id,
+      },
+    });
+    res.json({ enabled: false });
+  } catch (err) {
+    console.error('Erreur 2FA disable:', err);
+    res.status(500).json({ error: 'Désactivation impossible. Réessayez.' });
+  }
+});
+
+// ---------------------------------------------------------
 // 4. Route POST /api/auth/login (Connexion)
 // ---------------------------------------------------------
 router.post('/login', loginPerIp, loginPerIdentifier, async (req, res) => {
@@ -145,6 +230,18 @@ router.post('/login', loginPerIp, loginPerIdentifier, async (req, res) => {
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
       return res.status(400).json({ error: 'Identifiant ou mot de passe incorrect.' });
+    }
+
+    // Double authentification : un code à 6 chiffres est exigé après le mot de passe.
+    if (user.totpEnabledAt) {
+      if (!req.body.code)
+        return res
+          .status(401)
+          .json({ twoFactorRequired: true, error: 'Saisissez le code de votre application d’authentification.' });
+      if (!(await consumeTotp(user, req.body.code)))
+        return res
+          .status(400)
+          .json({ twoFactorRequired: true, error: 'Code de vérification incorrect ou déjà utilisé.' });
     }
 
     const token = jwt.sign({ userId: user.id, isAdmin: user.isAdmin }, getJwtSecret(), { expiresIn: '24h' });
