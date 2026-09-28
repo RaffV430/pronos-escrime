@@ -577,7 +577,9 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
         if (!poolSummary.checked) throw e;
         summary.warnings.push(e.status ? e.message : 'Tableau non vérifiable pour le moment.');
       }
-    } else summary.warnings.push('Tableau pas encore publié. Il sera recherché au prochain contrôle.');
+    }
+    // Simple information, pas une anomalie : le suivi reste « à jour » et garde son rythme normal.
+    else summary.notes = ['Tableau pas encore publié. Il sera recherché au prochain contrôle.'];
     summary.automatic = automatic;
     summary.eventDate = config.date;
     summary.pools = poolSummary;
