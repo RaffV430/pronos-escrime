@@ -1,3 +1,4 @@
+const {withCountries}=require('../services/matchCountries');
 const express = require('express');
 const authMiddleware = require('../middleware/auth');
 const adminMiddleware = require('../middleware/admin');
@@ -32,10 +33,10 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const matches = await prisma.match.findMany({
       where: filter,
-      include: { competition: { select: { name: true, podiumFormat: true } }, predictions: { where: { userId: req.user.userId } } },
+      include: { competition: { select: { name: true, podiumFormat: true, podiumRoster: true } }, predictions: { where: { userId: req.user.userId } } },
       orderBy: { id: 'asc' },
     });
-    res.json((await timedMatches(prisma,matches)).map(match => ({ ...match, maxScore: match.competition?.podiumFormat === 'TEAM' ? 45 : 15, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
+    res.json((await timedMatches(prisma,matches)).map(match => ({ ...withCountries(match), maxScore: match.competition?.podiumFormat === 'TEAM' ? 45 : 15, isClosed: matchClosed(match), closesAt: closesAt(match), winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null })));
   } catch (error) {
     console.error('Erreur matches:', error);
     res.status(500).json({ error: 'Erreur lors de la récupération des matchs.' });
