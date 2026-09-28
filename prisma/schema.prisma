@@ -146,6 +146,7 @@ model Pool {
   sourceUrl     String?
   sourcePoolNumber Int?
   sourceCheckedAt DateTime?
+  recomposedAt  DateTime?
   rankingSystem String?
   rankingSourceUrl String?
   rankingAsOf DateTime?
