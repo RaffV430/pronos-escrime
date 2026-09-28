@@ -78,8 +78,14 @@ app.use((error, req, res, next) => {
   res.status(error.message?.includes('CORS') ? 403 : 500).json({ error: 'Erreur serveur.' });
 });
 
-function start() {
+async function start() {
   validateRuntimeConfig();
+  // Refuse de démarrer si la base ne contient pas toutes les colonnes du schéma
+  // (SKIP_SCHEMA_CHECK=true pour désactiver en cas d'urgence).
+  if (process.env.SKIP_SCHEMA_CHECK !== 'true') {
+    const { tables } = await require('./services/schemaCheck').checkSchema(prisma);
+    console.log(`Schéma de la base vérifié (${tables} tables).`);
+  }
   const port = Number(process.env.PORT) || 5000;
   const server = app.listen(port, () => console.log(`Serveur démarré sur le port ${port}`));
 
@@ -98,6 +104,11 @@ function start() {
   return server;
 }
 
-if (require.main === module) start();
+if (require.main === module)
+  start().catch(async (error) => {
+    console.error('Démarrage annulé :', error.message);
+    await prisma.$disconnect().catch(() => {});
+    process.exit(1);
+  });
 
 module.exports = { app, start };
