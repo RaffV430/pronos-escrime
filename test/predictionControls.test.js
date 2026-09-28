@@ -70,6 +70,13 @@ const db = {
         picks.find((p) => p.id === where.id),
         data,
       ),
+    groupBy: async () =>
+      picks.map((p) => ({
+        matchId: p.matchId,
+        predictedScore1: p.predictedScore1,
+        predictedScore2: p.predictedScore2,
+        _count: { _all: 1 },
+      })),
     updateMany: async ({ where, data }) => {
       const rows = picks.filter((p) => Object.entries(where).every(([k, v]) => p[k] === v));
       rows.forEach((p) => Object.assign(p, data));
@@ -140,7 +147,14 @@ test('HTTP admin reopen, podium persistence, medical closure, registration confl
   config.manualUnlockUntil = new Date(Date.now() - 1);
   assert.equal((await request('/matches/1/predict', 'POST', { predictedScore1: 15, predictedScore2: 8 })).status, 409);
   assert.equal((await request('/matches/1/predict', 'DELETE')).status, 409);
-  assert.equal((await (await request('/matches?competitionId=1')).json())[0].isClosed, true);
+  const closedList = await (await request('/matches?competitionId=1')).json();
+  assert.equal(closedList[0].isClosed, true);
+  assert.deepEqual(closedList[0].crowd, {
+    total: 2,
+    player1Pct: 50,
+    player2Pct: 50,
+    topScore: { score1: 15, score2: 8, count: 1 },
+  });
   assert.equal((await request('/matches/rounds/1/T128/unlock', 'PUT', {}, true)).status, 200);
 
   assert.equal((await request('/podium/competition/1/toggle-lock', 'PUT', { isLocked: 'false' }, true)).status, 400);
