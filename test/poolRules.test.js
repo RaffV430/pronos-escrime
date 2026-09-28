@@ -94,7 +94,15 @@ test('individual closure ignores timetable, freezes on stale source, and preserv
   assert.equal(fencerClosed({ ...pool, isLocked: true }, {}, now), true);
   assert.equal(fencerClosed({ ...pool, isFinal: true }, {}, now), true);
   assert.equal(sourceUnavailable({ ...pool, sourceCheckedAt: null }, now), true);
-  assert.equal(fencerClosed({ ...pool, sourceCheckedAt: new Date(now - 180001) }, {}, now), true);
+  assert.equal(fencerClosed({ ...pool, sourceCheckedAt: new Date(now - 180001) }, {}, now), false, '5-min tolerance');
+  assert.equal(fencerClosed({ ...pool, sourceCheckedAt: new Date(now - 300001) }, {}, now), true);
+  // Avant le jour de l'épreuve : saisie ouverte même sans contrôle récent, mais un premier résultat ferme toujours.
+  const tomorrow = now.getTime() + 3600000;
+  assert.equal(sourceUnavailable({ ...pool, sourceCheckedAt: null }, now, tomorrow), false);
+  assert.equal(fencerClosed({ ...pool, sourceCheckedAt: new Date(now - 3600000) }, {}, now, tomorrow), false);
+  assert.equal(fencerClosed(pool, { firstResultAt: now }, now, tomorrow), true);
+  assert.equal(fencerClosed({ ...pool, isLocked: true }, {}, now, tomorrow), true);
+  assert.equal(sourceUnavailable({ ...pool, sourceCheckedAt: null }, now, now.getTime() - 1), true);
   assert.equal(fencerClosed(pool, { firstResultAt: new Date(now - 60000) }, new Date(now.getTime() + 10000)), true);
 });
 test('source mapping accepts only official pool pages and an explicit pool number', () => {
