@@ -1,8 +1,8 @@
+require('dotenv').config();
+const { Sentry } = require('./instrument');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const { rateLimit } = require('express-rate-limit');
-require('dotenv').config();
 
 const prisma = require('./lib/prisma');
 const { getAllowedOrigins, validateRuntimeConfig } = require('./config');
@@ -28,15 +28,17 @@ app.use(
 );
 app.use(express.json({ limit: '100kb' }));
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 30,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  message: { error: 'Trop de tentatives. Réessayez dans quelques minutes.' },
+// Toute écriture réussie peut modifier les points : le classement mis en cache est invalidé.
+app.use((req, res, next) => {
+  if (req.method !== 'GET')
+    res.on('finish', () => {
+      if (res.statusCode < 400) require('./services/standings').invalidateStandings();
+    });
+  next();
 });
 
-app.use('/api/auth', authLimiter, authRoutes);
+// Les limites anti-abus de connexion sont dans authRoutes (par identifiant, échecs seulement).
+app.use('/api/auth', authRoutes);
 app.use('/api/matches', matchRoutes);
 app.use('/api/podium', podiumRoutes);
 app.use('/api/pools', require('./routes/poolRoutes'));
@@ -70,6 +72,7 @@ app.get('/health', async (req, res) => {
 });
 
 app.use((req, res) => res.status(404).json({ error: 'Route introuvable.' }));
+if (Sentry) Sentry.setupExpressErrorHandler(app);
 app.use((error, req, res, next) => {
   console.error('Erreur non gérée:', error);
   res.status(error.message?.includes('CORS') ? 403 : 500).json({ error: 'Erreur serveur.' });

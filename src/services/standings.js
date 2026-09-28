@@ -1,6 +1,6 @@
 const { rankRows } = require('./ranking');
 const { challengePoints } = require('./communityRules');
-async function standings(db, { competitionId, tournamentId } = {}) {
+async function computeStandings(db, { competitionId, tournamentId } = {}) {
   const comp = competitionId ? { id: competitionId } : tournamentId ? { tournamentId } : {};
   const comps = await db.competition.findMany({ where: comp, select: { id: true } }),
     ids = comps.map((c) => c.id);
@@ -51,4 +51,25 @@ async function standings(db, { competitionId, tournamentId } = {}) {
     })),
   );
 }
-module.exports = { standings };
+// Cache court : le classement est relu à chaque affichage, mais les points ne
+// changent qu'après un import, une correction ou un ajustement. Toute écriture
+// réussie (voir server.js) et chaque contrôle FencingTimeLive vident le cache.
+const TTL = 30000;
+const caches = new WeakMap();
+let generation = 0;
+function invalidateStandings() {
+  generation++;
+}
+function standings(db, filter = {}) {
+  let cache = caches.get(db);
+  if (!cache) caches.set(db, (cache = new Map()));
+  const key = JSON.stringify([filter.competitionId || null, filter.tournamentId || null]);
+  const hit = cache.get(key);
+  if (hit && hit.generation === generation && Date.now() - hit.at < TTL) return hit.promise;
+  const promise = computeStandings(db, filter);
+  cache.set(key, { at: Date.now(), generation, promise });
+  promise.catch(() => cache.delete(key));
+  return promise;
+}
+
+module.exports = { standings, computeStandings, invalidateStandings };
