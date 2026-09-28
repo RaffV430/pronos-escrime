@@ -15,6 +15,10 @@ module.exports = function (req, res, next) {
 
   try {
     const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
+    // Seuls les jetons de session sont acceptés : un jeton à usage spécial (ex.
+    // réinitialisation du mot de passe) ou sans identifiant valide est refusé.
+    if (!Number.isSafeInteger(decoded.userId) || decoded.userId <= 0 || decoded.purpose)
+      throw new Error('Jeton non valable');
     req.user = decoded;
     next();
   } catch (ex) {
