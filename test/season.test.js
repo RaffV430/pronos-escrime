@@ -187,7 +187,7 @@ test('a season gathers every prediction with its points, outcomes and totals', (
   assert.equal(byKey['pool-2'].outcome, 'pending');
   assert.equal(byKey['podium-1'].points, 20);
   assert.equal(byKey['challenge-1'].points, 3);
-  assert.deepEqual(out.totals, { match: 6, pool: 8, podium: 20, challenge: 3, adjustment: 2, total: 39 });
+  assert.deepEqual(out.totals, { match: 6, outsider: 0, pool: 8, podium: 20, challenge: 3, adjustment: 2, total: 39 });
   assert.equal(out.tournaments[0].points, 37, 'tournament points exclude adjustments listed separately');
   assert.deepEqual(out.stats, { predictions: 9, pending: 2, matchesPlayed: 4, exact: 1, winners: 3, accuracy: 75 });
 });
@@ -199,7 +199,15 @@ test('previous seasons stay available and unknown seasons fall back to the curre
     previous.tournaments.map((t) => [t.name, t.archived]),
     [['Coupe de mai', true]],
   );
-  assert.deepEqual(previous.totals, { match: 4, pool: 0, podium: 0, challenge: 0, adjustment: -1, total: 3 });
+  assert.deepEqual(previous.totals, {
+    match: 4,
+    outsider: 0,
+    pool: 0,
+    podium: 0,
+    challenge: 0,
+    adjustment: -1,
+    total: 3,
+  });
   assert.equal(buildSeason(fixture(), 1999, new Date('2026-12-01T00:00:00Z')).season, 2026);
   const empty = buildSeason(
     { ...fixture(), predictions: [], poolPredictions: [], podiums: [], challengePicks: [], adjustments: [] },

@@ -74,6 +74,7 @@ router.get('/predictions', async (req, res) => {
         const exact =
           m.resultType !== 'MEDICAL_WITHDRAWAL' && p.predictedScore1 === m.score1 && p.predictedScore2 === m.score2;
         details = [`Bon vainqueur : +${total - (exact ? 3 : 0)}`, `Score exact : +${exact ? 3 : 0}`];
+        if (p.bonusPoints) details.push(`Bonus outsider : +${p.bonusPoints}`);
       }
       rows.push({
         key: `match-${m.id}`,
@@ -87,7 +88,7 @@ router.get('/predictions', async (req, res) => {
             ? `Retrait médical · ${m.winner === 1 ? m.player1 : m.player2} qualifié(e)`
             : `${m.score1} – ${m.score2}`
           : null,
-        points: p && finished ? p.pointsEarned : null,
+        points: p && finished ? p.pointsEarned + (p.bonusPoints || 0) : null,
         details,
         startsAt: m.startsAt,
         closesAt: closesAt(m),

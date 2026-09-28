@@ -57,7 +57,7 @@ function roundSummaries(matches, rounds) {
           m.winner,
           m.resultType,
         );
-        points += p.pointsEarned || 0;
+        points += (p.pointsEarned || 0) + (p.bonusPoints || 0);
         winners += score > 0 ? 1 : 0;
         exact += score === 4 ? 1 : 0;
       }

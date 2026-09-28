@@ -8,6 +8,7 @@ const { captureRankings } = require('./rankingHistory');
 const { validateManifest } = require('./roundManifest');
 const { calculateMatchPoints } = require('./matchPoints');
 const { rescore } = require('./rescore');
+const { applyOutsiderBonus } = require('./outsider');
 const podiumRules = require('./podiumRules');
 const START = 'Contrôle FTL démarré',
   DONE = 'Contrôle FTL terminé',
@@ -255,7 +256,7 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
           syncIssue: reason,
         },
       });
-      await tx.prediction.updateMany({ where: { matchId: m.id }, data: { pointsEarned: 0 } });
+      await tx.prediction.updateMany({ where: { matchId: m.id }, data: { pointsEarned: 0, bonusPoints: 0 } });
       await tx.auditLog.create({
         data: {
           actorId,
@@ -355,6 +356,8 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
         ['predictedScore1', 'predictedScore2'],
         (p) => calculateMatchPoints(p.predictedScore1, p.predictedScore2, o.score1, o.score2, o.winner, o.resultType),
       );
+      // Bonus outsider, calculé à la publication du résultat.
+      summary.pointsUpdated += await applyOutsiderBonus(tx.prediction, saved.id, predictions, o.winner, o.resultType);
     }
   }
   if (observation.officialPodium) {

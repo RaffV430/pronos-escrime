@@ -9,6 +9,7 @@ const prisma = require('../lib/prisma');
 const { matchClosed, closesAt } = require('../lib/matchLock');
 const { timedMatches, timedMatch, reopenRound } = require('../services/roundTiming');
 const { rescore } = require('../services/rescore');
+const { applyOutsiderBonus, crowdIsOutsider } = require('../services/outsider');
 
 router.get('/freshness/:competitionId', authMiddleware, async (req, res) => {
   const competitionId = Number(req.params.competitionId);
@@ -76,7 +77,13 @@ router.get('/', authMiddleware, async (req, res) => {
         isClosed,
         closesAt: closesAt(match),
         winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null,
-        crowd: isClosed ? crowd[match.id] || null : null,
+        crowd:
+          isClosed && crowd[match.id]
+            ? {
+                ...crowd[match.id],
+                outsider: Boolean(match.isFinished) && crowdIsOutsider(crowd[match.id], match.winner, match.resultType),
+              }
+            : null,
       })),
     );
   } catch (error) {
@@ -131,7 +138,7 @@ router.post('/:id/predict', authMiddleware, async (req, res) => {
         return { status: 400, body: { error: `Scores distincts entre 0 et ${maxScore} requis.` } };
       const prediction = await tx.prediction.upsert({
         where: { userId_matchId: { userId: userId, matchId: matchId } },
-        update: { predictedScore1, predictedScore2, pointsEarned: 0 },
+        update: { predictedScore1, predictedScore2, pointsEarned: 0, bonusPoints: 0 },
         create: { userId: userId, matchId: matchId, predictedScore1, predictedScore2 },
       });
       return { status: 200, body: prediction };
@@ -291,6 +298,8 @@ router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (re
         await rescore(tx.prediction, { matchId: id }, predictions, ['predictedScore1', 'predictedScore2'], (p) =>
           calculateMatchPoints(p.predictedScore1, p.predictedScore2, null, null, winner, 'MEDICAL_WITHDRAWAL'),
         );
+        // Pas de bonus outsider en cas de retrait médical.
+        await applyOutsiderBonus(tx.prediction, id, predictions, winner, 'MEDICAL_WITHDRAWAL');
         await tx.auditLog.create({
           data: {
             actorId: req.user.userId,
@@ -347,6 +356,7 @@ router.put('/:id/result', authMiddleware, adminMiddleware, async (req, res) => {
         await rescore(tx.prediction, { matchId: id }, predictions, ['predictedScore1', 'predictedScore2'], (p) =>
           require('../services/matchPoints').calculateMatchPoints(p.predictedScore1, p.predictedScore2, score1, score2),
         );
+        await applyOutsiderBonus(tx.prediction, id, predictions, winner, 'NORMAL');
         await tx.auditLog.create({
           data: {
             actorId: req.user.userId,

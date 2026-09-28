@@ -9,21 +9,22 @@
 // predictions: pronostics déjà lus dans ce périmètre
 // keys       : champs qui déterminent les points (ex. ['predictedScore1','predictedScore2'])
 // compute    : prediction => points
+// field      : colonne à écrire (pointsEarned par défaut, bonusPoints pour le bonus outsider)
 // Retourne le nombre de pronostics dont les points ont changé.
-async function rescore(model, scope, predictions, keys, compute) {
+async function rescore(model, scope, predictions, keys, compute, field = 'pointsEarned') {
   const groups = new Map();
   for (const prediction of predictions) {
     const key = JSON.stringify(keys.map((k) => prediction[k]));
     if (!groups.has(key)) groups.set(key, { values: prediction, points: compute(prediction), changed: 0 });
     const group = groups.get(key);
-    if (prediction.pointsEarned !== group.points) group.changed++;
+    if ((prediction[field] ?? 0) !== group.points) group.changed++;
   }
   let changed = 0;
   for (const group of groups.values()) {
     if (!group.changed) continue;
     const where = { ...scope };
     for (const k of keys) where[k] = group.values[k];
-    await model.updateMany({ where, data: { pointsEarned: group.points } });
+    await model.updateMany({ where, data: { [field]: group.points } });
     changed += group.changed;
   }
   return changed;

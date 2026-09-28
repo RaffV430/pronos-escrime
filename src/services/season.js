@@ -45,7 +45,8 @@ function matchRow(p) {
     m.resultType,
   );
   const exact = !medical && p.predictedScore1 === m.score1 && p.predictedScore2 === m.score2;
-  const points = p.pointsEarned ?? expected;
+  const bonus = p.bonusPoints || 0;
+  const points = (p.pointsEarned ?? expected) + bonus;
   return {
     ...base,
     outcome: exact ? 'exact' : points > 0 ? 'points' : 'miss',
@@ -53,7 +54,15 @@ function matchRow(p) {
       ? `Retrait médical · ${m.winner === 1 ? m.player1 : m.player2} qualifié(e)`
       : `${m.score1} – ${m.score2}`,
     points,
-    details: points > 0 ? [`Bon vainqueur : +${points - (exact ? 3 : 0)}`, ...(exact ? ['Score exact : +3'] : [])] : [],
+    bonus,
+    details:
+      points > 0
+        ? [
+            `Bon vainqueur : +${points - bonus - (exact ? 3 : 0)}`,
+            ...(exact ? ['Score exact : +3'] : []),
+            ...(bonus ? [`Bonus outsider : +${bonus}`] : []),
+          ]
+        : [],
   };
 }
 
@@ -181,8 +190,10 @@ function buildSeason(data, requested, now = new Date()) {
   const sum = (type) => rows.filter((r) => r.type === type).reduce((s, r) => s + (r.points || 0), 0);
   const matches = rows.filter((r) => r.type === 'Match' && ['exact', 'points', 'miss'].includes(r.outcome));
   const winners = matches.filter((r) => r.points > 0).length;
+  const outsider = rows.reduce((t, r) => t + (r.bonus || 0), 0);
   const totals = {
-    match: sum('Match'),
+    match: sum('Match') - outsider,
+    outsider,
     pool: sum('Poule'),
     podium: sum('Podium'),
     challenge: sum('Défi'),

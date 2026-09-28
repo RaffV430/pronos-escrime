@@ -154,6 +154,7 @@ test('HTTP admin reopen, podium persistence, medical closure, registration confl
     player1Pct: 50,
     player2Pct: 50,
     topScore: { score1: 15, score2: 8, count: 1 },
+    outsider: false,
   });
   assert.equal((await request('/matches/rounds/1/T128/unlock', 'PUT', {}, true)).status, 200);
 
