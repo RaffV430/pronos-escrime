@@ -5,7 +5,7 @@ process.env.JWT_SECRET = 'local-test-secret-not-for-production';
 let locked = false;
 const match = { id: 1, competitionId: 1, round: 'T128', startsAt: new Date(Date.now()-3600000), player1: 'Alice', player2: 'Bob', isFinished: false, isLocked: false };
 const competition = { id: 1, isPodiumLocked: true, podiumFormat:'INDIVIDUAL', podiumRoster:['A','B','C','D'].map(id=>({id,name:id,country:'FRA'})) };
-const picks = [{id:1, predictedScore1:15, predictedScore2:8, pointsEarned:4},{id:2,predictedScore1:8,predictedScore2:15,pointsEarned:0}];
+const picks = [{id:1, matchId:1, predictedScore1:15, predictedScore2:8, pointsEarned:4},{id:2,matchId:1,predictedScore1:8,predictedScore2:15,pointsEarned:0}];
 const config={competitionId:1,round:'T128',previousRound:null,expectedMatchCount:1,manualUnlockUntil:null};
 const db = {
  matchRound:{findMany:async()=>[config],findUnique:async()=>config,update:async({data})=>Object.assign(config,data)},
@@ -13,7 +13,7 @@ const db = {
   match: { count:async()=>match.isFinished?0:1, findUnique:async()=>match, findMany:async()=>[match], update:async({data})=>{assert.ok(locked); return Object.assign(match,data);} },
   competition: { findUnique:async()=>competition, update:async({data})=>{assert.ok(locked); return Object.assign(competition,data);} },
   podiumPrediction: { upsert:async({create})=>{assert.ok(locked);return create;} },
-  prediction: { upsert:async({create})=>{assert.ok(locked);return create;}, deleteMany:async()=>{assert.ok(locked);}, findMany:async()=>picks, update:async({where,data})=>Object.assign(picks.find(p=>p.id===where.id),data) },
+  prediction: { upsert:async({create})=>{assert.ok(locked);return create;}, deleteMany:async()=>{assert.ok(locked);}, findMany:async()=>picks, update:async({where,data})=>Object.assign(picks.find(p=>p.id===where.id),data), updateMany:async({where,data})=>{const rows=picks.filter(p=>Object.entries(where).every(([k,v])=>p[k]===v));rows.forEach(p=>Object.assign(p,data));return {count:rows.length};} },
   user:{findUnique:async({where})=>({isAdmin:where.id===2}),findFirst:async({where})=>{assert.equal(where.OR[0].email.mode,'insensitive');assert.equal(where.OR[1].name.mode,'insensitive');return {id:1};},findMany:async({where})=>where.name?.equals==='Alice'?[{id:7,name:'Alice'}]:[],create:async()=>{throw {code:'P2002'};}},
   auditLog:{create:async({data})=>data},
   pointAdjustment: {findUnique:async()=>null,create:async({data})=>data},

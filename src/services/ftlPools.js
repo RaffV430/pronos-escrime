@@ -2,6 +2,7 @@ const {load}=require('cheerio');
 const {clean,norm}=require('./ftlParser');
 const {failure}=require('./ftlClient');
 const {poolPoints,validateResults}=require('./poolRules');
+const {rescore}=require('./rescore');
 const pattern=/^https:\/\/www\.fencingtimelive\.com\/pools\/scores\/([a-f0-9]{32})\/[a-f0-9]{32}$/i;
 function parsePools(html){
  const $=load(html),tables=$('table.poolTable').toArray();
@@ -60,7 +61,7 @@ async function applyPool(tx,snapshot,observed,checkedAt){
   if(r.firstResult&&!f.firstResultAt&&current.lockMode==='FIRST_RESULT'){data.firstResultAt=checkedAt;locks++;}
   if(r.hasResult){for(const k of ['wins','losses','indicator'])if(f[k]!==r[k])data[k]=r[k];if(['wins','losses','indicator'].some(k=>k in data))changed++;}
   if(Object.keys(data).length){const saved=await tx.poolFencer.updateMany({where:{id:f.id,poolId:current.id,position:f.position,name:f.name},data});if(saved.count!==1)throw failure('Tireur modifié pendant l’import.',409);}
-  if(observed.complete&&!r.absent)for(const p of predictions.filter(p=>p.fencerId===f.id)){const pointsEarned=poolPoints(p,r).total;if(p.pointsEarned!==pointsEarned){await tx.poolPrediction.update({where:{id:p.id},data:{pointsEarned}});pointsUpdated++;}}
+  if(observed.complete&&!r.absent)pointsUpdated+=await rescore(tx.poolPrediction,{fencerId:f.id},predictions.filter(p=>p.fencerId===f.id),['wins','indicator'],p=>poolPoints(p,r).total);
  }
  // A missing reciprocal score does not refresh source freshness, but certain first-result locks persist.
  await tx.pool.update({where:{id:current.id},data:{...(!observed.ambiguous?{sourceCheckedAt:checkedAt}:{}),...(observed.complete?{isFinal:true,isLocked:true}:{})}});

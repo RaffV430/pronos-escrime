@@ -7,6 +7,7 @@ const {parsePools,applyPool,pattern:poolPattern}=require('./ftlPools');
 const {captureRankings}=require('./rankingHistory');
 const {validateManifest}=require('./roundManifest');
 const {calculateMatchPoints}=require('./matchPoints');
+const {rescore}=require('./rescore');
 const podiumRules=require('./podiumRules');
 const START='Contrôle FTL démarré',DONE='Contrôle FTL terminé',FAILED='Contrôle FTL échoué';
 const COOLDOWN=120000;
@@ -144,10 +145,8 @@ async function applyObservation(tx,c,observation,actorId,leaseToken=null){
   if(o.isFinished){
    if(!wasFinished)summary.results++;
    else if(corrected)summary.corrections++;
-   for(const p of await tx.prediction.findMany({where:{matchId:saved.id}})){
-    const pointsEarned=calculateMatchPoints(p.predictedScore1,p.predictedScore2,o.score1,o.score2,o.winner,o.resultType);
-    if(p.pointsEarned!==pointsEarned){await tx.prediction.update({where:{id:p.id},data:{pointsEarned}});summary.pointsUpdated++;}
-   }
+   const predictions=await tx.prediction.findMany({where:{matchId:saved.id}});
+   summary.pointsUpdated+=await rescore(tx.prediction,{matchId:saved.id},predictions,['predictedScore1','predictedScore2'],p=>calculateMatchPoints(p.predictedScore1,p.predictedScore2,o.score1,o.score2,o.winner,o.resultType));
   }
  }
  if(observation.officialPodium){

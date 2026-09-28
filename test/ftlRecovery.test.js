@@ -23,7 +23,7 @@ test('confirmed cancellation keeps old IDs, pairs and prediction scores; rerun i
  const predictions=[{id:4,matchId:7,predictedScore1:45,predictedScore2:30,pointsEarned:1}];
  const tx={$queryRaw:async()=>[],competition:{findUnique:async()=>c},matchRound:{findMany:async()=>[],upsert:async()=>{}},
  match:{findMany:async()=>matches,update:async({where,data})=>Object.assign(matches.find(m=>m.id===where.id),data),create:async({data})=>{const m={id:8,...data};matches.push(m);return m;}},
- prediction:{updateMany:async({where,data})=>predictions.filter(p=>p.matchId===where.matchId).forEach(p=>Object.assign(p,data)),findMany:async({where})=>predictions.filter(p=>p.matchId===where.matchId)},
+ prediction:{updateMany:async({where,data})=>{const rows=predictions.filter(p=>Object.entries(where).every(([k,v])=>p[k]===v));rows.forEach(p=>Object.assign(p,data));return {count:rows.length};},findMany:async({where})=>predictions.filter(p=>p.matchId===where.matchId)},
  auditLog:{create:async()=>{}},pushEvent:{create:async()=>{}}};
  const o={sourceUrl:'source',drawConfirmed:true,rounds:[],warnings:[],checkedAt:new Date(),matches:[{sourceKey:'Finals:1',round:'T2',player1:'C',player2:'B',isFinished:true,winner:2,score1:20,score2:45,resultType:'NORMAL'}]};
  const result=await applyObservation(tx,c,o,1);
