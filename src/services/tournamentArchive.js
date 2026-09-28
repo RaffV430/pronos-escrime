@@ -173,3 +173,83 @@ async function archiveCompleted(db, { clientFactory = createClient, now = new Da
   return archived;
 }
 module.exports = { eventComplete, scheduleFinished, checkTournament, archiveCompleted };
+
+// Archivage manuel depuis l'administration : même effet que l'archivage
+// automatique (tournoi masqué de « Pronostiquer », suivi FencingTimeLive arrêté,
+// résultats et pronostics conservés), sans attendre la vérification officielle.
+async function archiveStatus(db, tournamentId) {
+  const t = await db.tournament.findUnique({ where: { id: tournamentId }, include });
+  if (!t) return null;
+  const ids = t.competitions.map((c) => c.id);
+  const states = ids.length ? await db.ftlSyncState.findMany({ where: { competitionId: { in: ids } } }) : [];
+  const openMatches = t.competitions
+    .flatMap((c) => c.matches)
+    .filter((m) => !m.isFinished && m.resultType !== 'CANCELLED').length;
+  return {
+    id: t.id,
+    name: t.name,
+    archivedAt: t.archivedAt,
+    competitions: t.competitions.map((c) => ({ id: c.id, name: c.name, complete: eventComplete(c) })),
+    openMatches,
+    running: states.some((s) => s.status === 'RUNNING'),
+  };
+}
+
+async function archiveManually(db, tournamentId, actorId, now = new Date()) {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Tournament" WHERE id=${tournamentId} FOR UPDATE`;
+    const status = await archiveStatus(tx, tournamentId);
+    if (!status) throw Object.assign(new Error('Tournoi introuvable.'), { status: 404 });
+    if (status.archivedAt) throw Object.assign(new Error('Ce tournoi est déjà archivé.'), { status: 409 });
+    if (status.running)
+      throw Object.assign(new Error('Un contrôle FencingTimeLive est en cours. Réessayez dans quelques minutes.'), {
+        status: 409,
+      });
+    const ids = status.competitions.map((c) => c.id);
+    await tx.tournament.update({ where: { id: tournamentId }, data: { archivedAt: now, completionNextCheckAt: null } });
+    if (ids.length)
+      await tx.ftlSyncState.updateMany({ where: { competitionId: { in: ids } }, data: { nextAutomaticAt: null } });
+    await tx.auditLog.create({
+      data: {
+        actorId,
+        action: 'Tournoi archivé manuellement',
+        targetType: 'Tournament',
+        targetId: tournamentId,
+        after: {
+          archivedAt: now.toISOString(),
+          incomplete: status.competitions.filter((c) => !c.complete).map((c) => c.name),
+          openMatches: status.openMatches,
+        },
+      },
+    });
+    return { ...status, archivedAt: now };
+  });
+}
+
+async function unarchive(db, tournamentId, actorId, now = new Date()) {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Tournament" WHERE id=${tournamentId} FOR UPDATE`;
+    const t = await tx.tournament.findUnique({ where: { id: tournamentId }, include: { competitions: true } });
+    if (!t) throw Object.assign(new Error('Tournoi introuvable.'), { status: 404 });
+    if (!t.archivedAt) throw Object.assign(new Error('Ce tournoi n’est pas archivé.'), { status: 409 });
+    const ids = t.competitions.map((c) => c.id);
+    await tx.tournament.update({
+      where: { id: tournamentId },
+      data: { archivedAt: null, completionNextCheckAt: null },
+    });
+    // Reprend le suivi automatique des épreuves qui n'étaient pas terminées.
+    if (ids.length)
+      await tx.ftlSyncState.updateMany({
+        where: { competitionId: { in: ids }, NOT: { status: 'COMPLETE' } },
+        data: { nextAutomaticAt: now },
+      });
+    await tx.auditLog.create({
+      data: { actorId, action: 'Tournoi désarchivé', targetType: 'Tournament', targetId: tournamentId },
+    });
+    return { id: tournamentId, archivedAt: null };
+  });
+}
+
+module.exports.archiveStatus = archiveStatus;
+module.exports.archiveManually = archiveManually;
+module.exports.unarchive = unarchive;
