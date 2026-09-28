@@ -57,3 +57,13 @@ test('podium needs final/bronze proof and exact entry ID plus full name',()=>{
  assert.equal(podiumFromResults(rows,c,matches).bronze1,'C');assert.equal(podiumFromResults(rows,c,matches.slice(0,1)),null);
  assert.throws(()=>podiumFromResults([{...rows[0],name:'A homonym'},...rows.slice(1)],c,matches),/Identité/);
 });
+
+test('tied official score retains explicit advancing winner, never fabricates a touch',()=>{
+ const html=fixture('ftl-individual-partial.html').replace('15 - 10','2 - 2');
+ const r=parseTable(html,{...options(html),maxScore:15,requireComplete:false});
+ assert.equal(r.matches[0].score1,2);assert.equal(r.matches[0].score2,2);assert.equal(r.matches[0].winner,1);assert.equal(r.matches[0].isFinished,true);
+ const {calculateMatchPoints}=require('../src/services/matchPoints');
+ assert.equal(calculateMatchPoints(15,10,2,2,1,'NORMAL'),1);
+ assert.equal(calculateMatchPoints(10,15,2,2,1,'NORMAL'),0);
+ assert.equal(calculateMatchPoints(15,10,2,2,null,'NORMAL'),0);
+});

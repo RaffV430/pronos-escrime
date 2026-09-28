@@ -41,7 +41,7 @@ function parseTable(html,{roster,date,offset='+03:00',timezone,maxScore=45,bronz
     if(score==='Opponent withdrew (medical)'){resultType='MEDICAL_WITHDRAWAL';isFinished=true;}
     else if(/^\d+\s*-\s*\d+$/.test(score)){
      const [w,l]=score.split('-').map(Number);
-     if(w<=l||w>maxScore||l<0)throw failure('Score final incohérent.');
+     if(w<l||w>maxScore||l<0)throw failure('Score final incohérent.');
      [score1,score2]=winner===1?[w,l]:[l,w];resultType='NORMAL';isFinished=true;
     }else throw failure('Avancement sans résultat final exploitable : vérification nécessaire.');
    }else if(score)throw failure('Score publié sans vainqueur confirmé.');
