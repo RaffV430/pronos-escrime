@@ -99,8 +99,9 @@ function withCountries(match) {
   return {
     ...match,
     competition,
-    player1Country: countryFor(podiumRoster, match.player1),
-    player2Country: countryFor(podiumRoster, match.player2),
+    // Code olympique, comme dans les poules (GER, SUI…), plus parlant pour les escrimeurs.
+    player1Country: olympicCodeFor(podiumRoster, match.player1),
+    player2Country: olympicCodeFor(podiumRoster, match.player2),
   };
 }
 // Code olympique (CIO) tel que publié dans la liste des engagés : FRA, GER, SUI…
