@@ -18,14 +18,20 @@ function parsePools(html){
    const name=clean($(tr).find('.poolCompName').text()),position=Number(clean($(tr).find('.poolPos').text()));
    const cells=$(tr).children('td').slice(2,2+n).map((j,el)=>clean($(el).text())).get();
    const stats=$(tr).find('.poolResult').map((j,el)=>clean($(el).text())).get();
-   if(!name||position!==i+1||cells.length!==n||cells[i]||stats.length!==5)throw failure(`Structure de la poule ${number} non reconnue.`);
-   return {name,position,cells,stats};
+   const absent=clean($(tr).find('.poolResultWDX').text())==='Failed to Appear';
+   if(absent&&(cells.some(Boolean)||$(tr).find('td.poolScoreWDX').length!==n-1||stats.length))throw failure(`Absence incohérente dans la poule ${number}.`);
+   if(!name||position!==i+1||cells.length!==n||cells[i]||(!absent&&stats.length!==5))throw failure(`Structure de la poule ${number} non reconnue.`);
+   return {name,position,cells,stats,absent};
   });
   if(new Set(rows.map(r=>norm(r.name))).size!==n)throw failure('Noms ambigus dans la poule.');
+  const activeCount=rows.filter(r=>!r.absent).length;
+  if(activeCount<2)throw failure('Pas assez de participants effectifs.');
   const evidence=new Set();let complete=true,ambiguous=false;
   const values=rows.map(()=>({wins:0,losses:0,indicator:0,touches:0,received:0,hasResult:false}));
   for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
-   const a=rows[i].cells[j],b=rows[j].cells[i],parse=s=>/^([VD])([0-5])$/.exec(s);
+   const a=rows[i].cells[j],b=rows[j].cells[i];
+   if(rows[i].absent||rows[j].absent){if(a||b)throw failure('Score attribué à un tireur absent.');continue;}
+   const parse=s=>/^([VD])([0-5])$/.exec(s);
    if((a&&!parse(a))||(b&&!parse(b)))throw failure(`Abandon, exclusion ou score inhabituel dans la poule ${number}.`);
    if(a||b){evidence.add(i+1);evidence.add(j+1);values[i].hasResult=values[j].hasResult=true;}
    if(!a||!b){complete=false;if(a||b){ambiguous=true;values[i].wins=values[i].losses=values[i].indicator=null;values[j].wins=values[j].losses=values[j].indicator=null;}continue;}
@@ -34,10 +40,10 @@ function parsePools(html){
    for(const [k,v,given,received] of [[i,va,+sa,+sb],[j,vb,+sb,+sa]]){const r=values[k];if(r.wins!==null)r.wins+=v==='V'?1:0;if(r.losses!==null)r.losses+=v==='D'?1:0;if(r.indicator!==null)r.indicator+=given-received;r.touches+=given;r.received+=received;}
   }
   if(complete){
-   validateResults(values.map((v,i)=>({fencerId:i+1,...v})),rows.map((r,i)=>({id:i+1})));
-   rows.forEach((r,i)=>{const v=values[i],s=r.stats;if(s.some(x=>!x||!Number.isFinite(Number(x))))throw failure(`Statistiques absentes dans la poule ${number}.`);if(Number(s[0])!==v.wins||Number(s[2])!==v.touches||Number(s[3])!==v.received||Number(s[4])!==v.indicator||Math.abs(Number(s[1])-v.wins/(n-1))>0.011)throw failure(`Statistiques incohérentes dans la poule ${number}.`);});
+   validateResults(values.flatMap((v,i)=>rows[i].absent?[]:[{fencerId:i+1,...v}]),rows.flatMap((r,i)=>r.absent?[]:[{id:i+1}]));
+   rows.forEach((r,i)=>{if(r.absent)return;const v=values[i],s=r.stats;if(s.some(x=>!x||!Number.isFinite(Number(x))))throw failure(`Statistiques absentes dans la poule ${number}.`);if(Number(s[0])!==v.wins||Number(s[2])!==v.touches||Number(s[3])!==v.received||Number(s[4])!==v.indicator||Math.abs(Number(s[1])-v.wins/(activeCount-1))>0.011)throw failure(`Statistiques incohérentes dans la poule ${number}.`);});
   }
-  return {number,complete,ambiguous,rows:rows.map((r,i)=>({name:r.name,position:r.position,firstResult:evidence.has(r.position),...values[i]}))};
+  return {number,complete,ambiguous,rows:rows.map((r,i)=>({name:r.name,position:r.position,firstResult:evidence.has(r.position),...values[i],...(r.absent?{absent:true,wins:null,losses:null,indicator:null}:{} )}))};
  });
 }
 async function applyPool(tx,snapshot,observed,checkedAt){
@@ -54,7 +60,7 @@ async function applyPool(tx,snapshot,observed,checkedAt){
   if(r.firstResult&&!f.firstResultAt&&current.lockMode==='FIRST_RESULT'){data.firstResultAt=checkedAt;locks++;}
   if(r.hasResult){for(const k of ['wins','losses','indicator'])if(f[k]!==r[k])data[k]=r[k];if(['wins','losses','indicator'].some(k=>k in data))changed++;}
   if(Object.keys(data).length){const saved=await tx.poolFencer.updateMany({where:{id:f.id,poolId:current.id,position:f.position,name:f.name},data});if(saved.count!==1)throw failure('Tireur modifié pendant l’import.',409);}
-  if(observed.complete)for(const p of predictions.filter(p=>p.fencerId===f.id)){const pointsEarned=poolPoints(p,r).total;if(p.pointsEarned!==pointsEarned){await tx.poolPrediction.update({where:{id:p.id},data:{pointsEarned}});pointsUpdated++;}}
+  if(observed.complete&&!r.absent)for(const p of predictions.filter(p=>p.fencerId===f.id)){const pointsEarned=poolPoints(p,r).total;if(p.pointsEarned!==pointsEarned){await tx.poolPrediction.update({where:{id:p.id},data:{pointsEarned}});pointsUpdated++;}}
  }
  // A missing reciprocal score does not refresh source freshness, but certain first-result locks persist.
  await tx.pool.update({where:{id:current.id},data:{...(!observed.ambiguous?{sourceCheckedAt:checkedAt}:{}),...(observed.complete?{isFinal:true,isLocked:true}:{})}});
