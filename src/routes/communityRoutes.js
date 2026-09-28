@@ -5,6 +5,7 @@ const { fail, id } = require('../services/poolRules');
 const { title, challengePoints, clubScore } = require('../services/communityRules');
 const { standings } = require('../services/standings');
 const { rankRows } = require('../services/ranking');
+const { buildDuel } = require('../services/duel');
 router.use(require('../middleware/auth'));
 router.use(
   require('express-rate-limit').rateLimit({
@@ -123,6 +124,34 @@ router.post(
       await tx.leagueMember.deleteMany({ where: { leagueId: league.id, userId: req.user.userId } });
     });
     res.json({ success: true });
+  }),
+);
+router.get(
+  '/leagues/:id/duel/:opponentId',
+  wrap(async (req, res) => {
+    const league = await db.league.findUnique({ where: { id: id(req.params.id) }, include: { members: true } });
+    const opponentId = id(req.params.opponentId);
+    const userId = req.user.userId;
+    if (!league || !league.members.some((m) => m.userId === userId)) fail('Cette ligue est privée.', 403);
+    if (opponentId === userId || !league.members.some((m) => m.userId === opponentId))
+      fail('Choisissez un autre membre de la ligue.', 404);
+    // Uniquement les matchs terminés : aucun pronostic n'est dévoilé avant la fin d'un match.
+    const matches = await db.match.findMany({
+      where: {
+        isFinished: true,
+        OR: [{ resultType: null }, { resultType: { not: 'CANCELLED' } }],
+        competition: { tournamentId: league.tournamentId },
+      },
+      include: { competition: { select: { name: true } } },
+      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+    });
+    const ids = matches.map((m) => m.id);
+    const [mine, theirs, opponent] = await Promise.all([
+      db.prediction.findMany({ where: { userId, matchId: { in: ids } } }),
+      db.prediction.findMany({ where: { userId: opponentId, matchId: { in: ids } } }),
+      db.user.findUnique({ where: { id: opponentId }, select: { id: true, name: true } }),
+    ]);
+    res.json({ league: { id: league.id, name: league.name }, opponent, ...buildDuel(matches, mine, theirs) });
   }),
 );
 router.get(
