@@ -26,7 +26,7 @@ function fixture() {
       return [{ id: 1 }];
     },
     user: { findUnique: async ({ where }) => ({ isAdmin: where.id === 3 }) },
-    // Liste des engagés de l'épreuve : nation (code CIO → ISO) et rang d'entrée.
+    // Liste des engagés de l'épreuve : nation (code olympique) et rang d'entrée.
     competition: {
       findUnique: async () => ({
         id: 1,
@@ -129,10 +129,10 @@ test('HTTP authentication, ownership, closure and corrected results', async (t) 
   assert.deepEqual(
     own[0].fencers.map((f) => [f.name, f.countryCode, f.entryRanking]),
     [
-      ['Alice', 'DEU', 12],
+      ['Alice', 'GER', 12],
       ['Bob', 'FRA', null],
     ],
-    'nationality (ISO) and entry ranking from the event entry list',
+    'olympic nationality code and entry ranking from the event entry list',
   );
   const results = [
     { fencerId: 10, wins: 1, losses: 0, indicator: 3 },
