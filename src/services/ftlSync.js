@@ -582,6 +582,16 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     else summary.notes = ['Tableau pas encore publié. Il sera recherché au prochain contrôle.'];
     summary.automatic = automatic;
     summary.eventDate = config.date;
+    const start = require('./eventStart').eventStart(config);
+    if (start !== null) summary.eventStart = new Date(start).toISOString();
+    // Poules encore ouvertes au « premier résultat » : le suivi doit rester frais (2 min) pendant l'épreuve.
+    try {
+      summary.openFirstResultPools = await db.pool.count({
+        where: { competitionId: c.id, lockMode: 'FIRST_RESULT', isLocked: false, isFinal: false },
+      });
+    } catch {
+      summary.openFirstResultPools = 0;
+    }
     summary.pools = poolSummary;
     summary.pointsUpdated += poolSummary.pointsUpdated;
     summary.warnings.push(...poolSummary.warnings);

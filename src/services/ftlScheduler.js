@@ -39,12 +39,16 @@ async function finish(db, competitionId, token, summary, error = null, now = new
   const issues = summary?.warnings?.length || summary?.conflicts?.length;
   const complete = Boolean(summary?.podium && !issues);
   const failures = error ? state.failures + 1 : 0;
-  const beforeEvent = Date.parse(`${summary?.eventDate}T00:00:00Z`) > now.getTime();
+  // Rythme lent seulement jusqu'à 30 min avant le début de la journée d'épreuve (heure locale),
+  // pour que les poules ouvertes aient déjà un contrôle récent quand la fraîcheur devient exigée.
+  const start = summary?.eventStart ? Date.parse(summary.eventStart) : Date.parse(`${summary?.eventDate}T00:00:00Z`);
+  const beforeEvent = start - 30 * 60000 > now.getTime();
+  const openPools = summary?.openFirstResultPools > 0;
   const delay = error
     ? Math.min(30 * 60000, INTERVAL * 2 ** Math.min(failures - 1, 4))
     : beforeEvent
       ? 15 * 60000
-      : issues
+      : issues && !openPools
         ? 5 * 60000
         : INTERVAL;
   await db.ftlSyncState.updateMany({

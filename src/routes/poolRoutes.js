@@ -16,6 +16,7 @@ const {
 } = require('../services/poolRules');
 const { rescore } = require('../services/rescore');
 const { olympicCodeFor, entryRankFor } = require('../services/matchCountries');
+const { eventStartFor } = require('../services/eventStart');
 
 function createPoolRouter(db = prisma) {
   const admin = createAdminMiddleware(db);
@@ -42,6 +43,15 @@ function createPoolRouter(db = prisma) {
       return fn(tx, pool);
     }, options);
 
+  const startForPool = async (poolId) => {
+    try {
+      const pool = await db.pool.findUnique({ where: { id: poolId }, select: { competitionId: true } });
+      return pool ? eventStartFor(db, pool.competitionId) : null;
+    } catch {
+      return null;
+    }
+  };
+
   router.get(
     '/',
     handle(async (req, res) => {
@@ -53,6 +63,8 @@ function createPoolRouter(db = prisma) {
         select: { podiumRoster: true },
       });
       const roster = competition?.podiumRoster;
+      const start = await eventStartFor(db, competitionId);
+      const now = new Date();
       const pools = await db.pool.findMany({
         where: { competitionId },
         orderBy: { id: 'asc' },
@@ -64,12 +76,12 @@ function createPoolRouter(db = prisma) {
         pools.map((pool) => ({
           ...pool,
           isClosed: closed(pool),
-          sourceUnavailable: sourceUnavailable(pool),
+          sourceUnavailable: sourceUnavailable(pool, now, start),
           fencers: pool.fencers.map(({ predictions, ...fencer }) => ({
             ...fencer,
             countryCode: fencer.countryCode || olympicCodeFor(roster, fencer.name),
             entryRanking: entryRankFor(roster, fencer.name),
-            isClosed: fencerClosed(pool, fencer),
+            isClosed: fencerClosed(pool, fencer, now, start),
             prediction: predictions[0] || null,
             comparison: comparison(predictions[0], fencer, pool.isFinal),
           })),
@@ -131,12 +143,14 @@ function createPoolRouter(db = prisma) {
     handle(async (req, res) => {
       const poolId = id(req.params.poolId);
       const fencerId = id(req.params.fencerId);
+      const start = await startForPool(poolId);
       const prediction = await withPool(poolId, async (tx, pool) => {
         const fencer = pool.fencers.find((f) => f.id === fencerId);
         if (!fencer) fail('Tireur introuvable dans cette poule.', 404);
-        if (fencerClosed(pool, fencer))
+        const now = new Date();
+        if (fencerClosed(pool, fencer, now, start))
           fail(
-            sourceUnavailable(pool) && !fencer.firstResultAt && !closed(pool)
+            sourceUnavailable(pool, now, start) && !fencer.firstResultAt && !closed(pool)
               ? 'Vérification FencingTimeLive en attente. Réessayez après le prochain contrôle.'
               : 'Les pronostics de ce tireur sont clos.',
             409,
@@ -157,12 +171,14 @@ function createPoolRouter(db = prisma) {
     handle(async (req, res) => {
       const poolId = id(req.params.poolId);
       const fencerId = id(req.params.fencerId);
+      const start = await startForPool(poolId);
       await withPool(poolId, async (tx, pool) => {
         const fencer = pool.fencers.find((f) => f.id === fencerId);
         if (!fencer) fail('Tireur introuvable dans cette poule.', 404);
-        if (fencerClosed(pool, fencer))
+        const now = new Date();
+        if (fencerClosed(pool, fencer, now, start))
           fail(
-            sourceUnavailable(pool) && !fencer.firstResultAt && !closed(pool)
+            sourceUnavailable(pool, now, start) && !fencer.firstResultAt && !closed(pool)
               ? 'Vérification FencingTimeLive en attente. Réessayez après le prochain contrôle.'
               : 'Les pronostics de ce tireur sont clos.',
             409,

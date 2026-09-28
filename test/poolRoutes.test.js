@@ -199,7 +199,7 @@ test('HTTP individual locks reject creation, edits and deletion while another fe
   assert.equal(rows[0].isClosed, false);
   assert.equal(rows[0].fencers[0].isClosed, true);
   assert.equal(rows[0].fencers[1].isClosed, false);
-  pool.sourceCheckedAt = new Date(Date.now() - 180001);
+  pool.sourceCheckedAt = new Date(Date.now() - 300001);
   assert.equal((await request('/1/fencers/20/prediction', 'PUT', pick)).status, 409);
   pool.sourceCheckedAt = new Date();
   assert.equal((await request('/1/fencers/20/prediction', 'DELETE')).status, 204);

@@ -27,11 +27,17 @@ function validatePrediction(value, size) {
 function closed(pool, now = new Date()) {
   return Boolean(pool.isLocked || pool.isFinal || (pool.lockMode !== 'FIRST_RESULT' && new Date(pool.closesAt) <= now));
 }
-function sourceUnavailable(pool, now = new Date()) {
-  return pool.lockMode === 'FIRST_RESULT' && (!pool.sourceCheckedAt || now - new Date(pool.sourceCheckedAt) > 180000);
+// Tolérance entre deux lectures FencingTimeLive : le suivi repasse toutes les 2 minutes
+// pendant l'épreuve (plus la durée du contrôle), 5 minutes laissent une marge sans bloquer.
+const SOURCE_WINDOW = 300000;
+function sourceUnavailable(pool, now = new Date(), start = null) {
+  if (pool.lockMode !== 'FIRST_RESULT') return false;
+  // Avant le jour de l'épreuve, aucun résultat ne peut exister : la saisie reste ouverte.
+  if (start && now.getTime() < start) return false;
+  return !pool.sourceCheckedAt || now - new Date(pool.sourceCheckedAt) > SOURCE_WINDOW;
 }
-function fencerClosed(pool, fencer, now = new Date()) {
-  return closed(pool, now) || Boolean(fencer.firstResultAt) || sourceUnavailable(pool, now);
+function fencerClosed(pool, fencer, now = new Date(), start = null) {
+  return closed(pool, now) || Boolean(fencer.firstResultAt) || sourceUnavailable(pool, now, start);
 }
 function validateSource(sourceUrl, sourcePoolNumber) {
   if (typeof sourceUrl !== 'string') fail('Lien FencingTimeLive requis.');
