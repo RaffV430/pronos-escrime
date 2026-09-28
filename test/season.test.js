@@ -272,3 +272,27 @@ test('an event lists pools first, then bouts by time, and the podium last', () =
   assert.deepEqual(types.slice(0, 2), ['Poule', 'Poule']);
   assert.equal(types.at(-1), 'Podium');
 });
+
+test('podium row: perfect only when every medal is exact (60 individual, 45 team)', () => {
+  const f = fixture();
+  const out = (points, format) =>
+    buildSeason(
+      {
+        ...f,
+        podiums: [
+          {
+            ...f.podiums[0],
+            pointsEarned: points,
+            competition: { podiumFormat: format, podiumResolvedAt: '2026-11-15T00:00:00Z' },
+          },
+        ],
+      },
+      2026,
+      new Date('2026-12-01T00:00:00Z'),
+    ).tournaments[0].competitions[0].rows.find((r) => r.type === 'Podium');
+  assert.equal(out(60, 'INDIVIDUAL').perfect, true);
+  assert.equal(out(60, 'INDIVIDUAL').outcome, 'exact');
+  assert.equal(out(50, 'INDIVIDUAL').perfect, false);
+  assert.equal(out(45, 'TEAM').perfect, true);
+  assert.equal(out(40, 'TEAM').perfect, false);
+});

@@ -104,7 +104,16 @@ function podiumRow(p) {
   };
   if (!c.podiumResolvedAt) return { ...base, outcome: 'pending', result: null, points: null, details: [] };
   const points = p.pointsEarned || 0;
-  return { ...base, outcome: points > 0 ? 'points' : 'miss', result: 'Podium officiel validé', points, details: [] };
+  // Podium parfait : chaque médaille exacte (15 points chacune), seul moyen d'atteindre le maximum.
+  const perfect = points === 15 * (c.podiumFormat === 'TEAM' ? 3 : 4);
+  return {
+    ...base,
+    outcome: perfect ? 'exact' : points > 0 ? 'points' : 'miss',
+    result: 'Podium officiel validé',
+    points,
+    perfect,
+    details: perfect ? ['Podium parfait'] : [],
+  };
 }
 
 function challengeRow(pick, match) {
