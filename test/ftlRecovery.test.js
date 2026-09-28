@@ -108,7 +108,7 @@ test('confirmed cancellation keeps old IDs, pairs and prediction scores; rerun i
   assert.equal(result.created, 1);
   assert.equal(matches[0].player1, 'A');
   assert.equal(matches[0].resultType, 'CANCELLED');
-  assert.deepEqual(predictions, [{ id: 4, matchId: 7, predictedScore1: 45, predictedScore2: 30, pointsEarned: 0 }]);
+  assert.deepEqual(predictions, [{ id: 4, matchId: 7, predictedScore1: 45, predictedScore2: 30, pointsEarned: 0, bonusPoints: 0 }]);
   const again = await applyObservation(tx, c, o, 1);
   assert.equal(again.cancelled, 0);
   assert.equal(again.created, 0);

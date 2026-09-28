@@ -24,7 +24,15 @@ async function computeStandings(db, { competitionId, tournamentId } = {}) {
   const rows = new Map(
     users.map((u) => [
       u.id,
-      { ...u, podiumPoints: 0, matchPoints: 0, poolPoints: 0, adjustmentPoints: 0, challengePoints: 0 },
+      {
+        ...u,
+        podiumPoints: 0,
+        matchPoints: 0,
+        outsiderPoints: 0,
+        poolPoints: 0,
+        adjustmentPoints: 0,
+        challengePoints: 0,
+      },
     ]),
   );
   for (const [data, key] of [
@@ -37,6 +45,10 @@ async function computeStandings(db, { competitionId, tournamentId } = {}) {
       const row = rows.get(p.userId);
       if (row) row[key] += p.pointsEarned ?? p.points ?? 0;
     }
+  for (const p of matches) {
+    const row = rows.get(p.userId);
+    if (row) row.outsiderPoints += p.bonusPoints || 0;
+  }
   for (const c of challenges) {
     const m = challengeMatches.find((m) => m.id === c.matchId);
     for (const p of c.picks) {
@@ -47,7 +59,8 @@ async function computeStandings(db, { competitionId, tournamentId } = {}) {
   return rankRows(
     [...rows.values()].map((r) => ({
       ...r,
-      totalPoints: r.podiumPoints + r.matchPoints + r.poolPoints + r.adjustmentPoints + r.challengePoints,
+      totalPoints:
+        r.podiumPoints + r.matchPoints + r.outsiderPoints + r.poolPoints + r.adjustmentPoints + r.challengePoints,
     })),
   );
 }
