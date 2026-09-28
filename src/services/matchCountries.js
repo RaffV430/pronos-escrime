@@ -103,4 +103,10 @@ function withCountries(match) {
     player2Country: countryFor(podiumRoster, match.player2),
   };
 }
-module.exports = { countryFor, withCountries };
+// Rang d'entrée dans l'épreuve (liste des engagés FencingTimeLive), si le nom est unique.
+function entryRankFor(roster, name) {
+  const found = (Array.isArray(roster) ? roster : []).filter((r) => normalize(r.name) === normalize(name));
+  const rank = found.length === 1 ? found[0].entryRanking : null;
+  return Number.isSafeInteger(rank) && rank > 0 ? rank : null;
+}
+module.exports = { countryFor, withCountries, entryRankFor };
