@@ -20,5 +20,6 @@ test('nationality requires unique full-name match, preserves identities and conv
   assert.equal(m.player1, 'SPICA MANUELA');
   assert.equal(m.player1Country, 'ITA');
   assert.equal(m.player2Country, null);
+  assert.equal(withCountries({ player1: 'DOE Jane', competition: { podiumRoster: r } }).player1Country, 'GER');
   assert.equal(m.competition.podiumRoster, undefined);
 });
