@@ -134,14 +134,17 @@ function payload(c, matches, id) {
       .join(',')}`,
   };
 }
-async function send(subscription, content, ttl) {
+// Priorité « high » pour ce qui est urgent (clôture proche, réouverture, alerte administrateur) :
+// en « normal », iOS peut retarder la livraison jusqu'au réveil de l'appareil.
+const URGENT = new Set(['AVAILABLE', 'REMINDER', 'REOPENED', 'POOLS', 'MATCHES']);
+async function send(subscription, content, ttl, urgency = 'normal') {
   return webpush.sendNotification(
     { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
     JSON.stringify(content),
     {
       TTL: ttl,
       timeout: 7000,
-      urgency: 'normal',
+      urgency: urgency === 'high' ? 'high' : 'normal',
       vapidDetails: {
         subject: process.env.VAPID_SUBJECT,
         publicKey: process.env.VAPID_PUBLIC_KEY,
@@ -185,7 +188,7 @@ async function deliver(db, id, sender = send) {
   const deadlines = open.map(closesAt).filter(Boolean).map(Date.parse);
   const ttl = Math.max(1, Math.min(900, ...deadlines.map((d) => Math.floor((d - Date.now()) / 1000))));
   try {
-    await sender(sub, payload(c, open, id), ttl);
+    await sender(sub, payload(c, open, id), ttl, 'high');
     await db.pushDelivery.updateMany({
       where: { id, status: 'SENDING' },
       data: { status: 'SENT', sentAt: new Date() },
@@ -612,7 +615,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     content = { ...require('./poolRecompose').poolsNotification(c, pools), tag: `pronos-${id}` };
   } else return cancel();
   try {
-    await sender(sub, content, ttl);
+    await sender(sub, content, ttl, URGENT.has(kind) ? 'high' : 'normal');
     await db.pushDelivery.updateMany({
       where: { id, status: 'SENDING' },
       data: { status: 'SENT', sentAt: new Date() },

@@ -48,6 +48,9 @@ async function syncHealth(db, now = Date.now()) {
   );
   return {
     workerEnabled: process.env.FTL_AUTO_SYNC === 'true',
+    // Canaux d'alerte des administrateurs : sans e-mail, seules les notifications arrivent.
+    mailConfigured: require('./mailer').mailConfigured(),
+    pushConfigured: require('./pushNotifications').configured(),
     checkedAt: new Date(now).toISOString(),
     summary: {
       error: rows.filter((r) => r.level === 'error').length,
@@ -61,32 +64,46 @@ async function syncHealth(db, now = Date.now()) {
 // E-mail (si configuré) et notification à chaque administrateur ; un échec d'envoi n'interrompt rien.
 async function notifyAdmins(db, { title, body, tag, url }, deps = {}) {
   const admins = await db.user.findMany({ where: { isAdmin: true }, select: { id: true, email: true, name: true } });
-  const sent = { mail: 0, push: 0 };
+  const sent = { mail: 0, push: 0, mailFailed: 0, pushFailed: 0, mailConfigured: false, pushConfigured: false };
   const mailer = deps.mailer || require('./mailer');
-  if (mailer.mailConfigured())
+  sent.mailConfigured = mailer.mailConfigured();
+  if (sent.mailConfigured)
     for (const admin of admins) {
       try {
         await mailer.sendMail({ to: admin.email, subject: title, text: body, html: `<p>${body}</p>` });
         sent.mail++;
       } catch (e) {
+        sent.mailFailed++;
         reportError(e, 'alerte administrateur (e-mail)');
       }
     }
   const push = deps.push || require('./pushNotifications');
-  if (push.configured()) {
+  sent.pushConfigured = push.configured();
+  if (sent.pushConfigured) {
     const subs = await db.pushSubscription.findMany({
       where: { enabled: true, userId: { in: admins.map((a) => a.id) } },
     });
     for (const sub of subs) {
       try {
-        await push.send(sub, { title, body, tag, url }, 3600);
+        await push.send(sub, { title, body, tag, url }, 3600, 'high');
         sent.push++;
       } catch (e) {
+        sent.pushFailed++;
         reportError(e, 'alerte administrateur (notification)');
       }
     }
   }
   return sent;
+}
+
+// Résultat d'une alerte dans le journal d'administration (envois réussis ou échoués, canaux actifs).
+async function logResult(db, entry, result) {
+  try {
+    if (entry?.id) await db.auditLog.update({ where: { id: entry.id }, data: { after: result } });
+  } catch {
+    /* journal facultatif */
+  }
+  return result;
 }
 
 // Demi-finale, petite finale ou finale close par la règle par défaut (10 min après le tour précédent)
@@ -122,7 +139,7 @@ async function alertClosedWithoutTime(db, competition, deps = {}) {
     const alerted = [];
     for (const m of found.filter((x) => !done.some((d) => d.targetId === x.id))) {
       // Journal d'abord : jamais deux alertes pour le même match, même si l'envoi échoue.
-      await db.auditLog.create({
+      const entry = await db.auditLog.create({
         data: { actorId: 0, action: NO_TIME_ACTION, targetType: 'Match', targetId: m.id },
       });
       const label = NO_TIME_ROUNDS[m.round];
@@ -141,7 +158,7 @@ async function alertClosedWithoutTime(db, competition, deps = {}) {
           url: `/?tournament=${competition.tournamentId}&event=${competition.id}&matches=${m.id}`,
         },
         deps,
-      );
+      ).then((result) => logResult(db, entry, result));
       alerted.push(m.id);
     }
     return alerted;
@@ -164,6 +181,17 @@ async function alertAdmins(db, { competitionId, failures, previousFailures, erro
       ? `${ALERT_AFTER} contrôles d'affilée ont échoué (${error || 'erreur inconnue'}). Les pronostics de poules se bloquent tant que la lecture échoue. Voir Administration → Suivi.`
       : 'Les contrôles automatiques fonctionnent de nouveau.';
     const sent = await notifyAdmins(db, { title, body, tag: `ftl-${competitionId}`, url: '/?admin=sync' }, deps);
+    await db.auditLog
+      ?.create({
+        data: {
+          actorId: 0,
+          action: crossed ? 'Alerte suivi FTL en panne' : 'Alerte suivi FTL rétabli',
+          targetType: 'Competition',
+          targetId: competitionId,
+          after: sent,
+        },
+      })
+      ?.catch(() => {});
     if (crossed)
       reportError(new Error(`${title} : ${error || 'erreur inconnue'}`), 'suivi FencingTimeLive', { competitionId });
     return { kind: crossed ? 'down' : 'recovered', ...sent };
