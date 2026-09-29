@@ -36,7 +36,9 @@ function statements(sql) {
 
 // Refuse une migration qui supprimerait ce que le code actuel utilise encore.
 function checkSafety(file, stmts, expected) {
-  const destructive = stmts.filter((s) => DESTRUCTIVE.test(s));
+  // « ON DELETE CASCADE » / « ON UPDATE … » d'une clé étrangère ne suppriment rien : ignorés.
+  const referential = /\bON\s+(DELETE|UPDATE)\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)\b/gi;
+  const destructive = stmts.filter((s) => DESTRUCTIVE.test(s.replace(referential, '')));
   if (destructive.length && !file.includes('__destructif'))
     throw fail(`${file} : instruction destructive sans « __destructif » dans le nom du fichier.`);
   for (const s of destructive) {
