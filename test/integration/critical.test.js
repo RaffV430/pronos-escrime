@@ -322,3 +322,24 @@ test('f) tableau d’animation : participation et joueurs sans pronostic sur une
   assert.ok(out.inactive.some((u) => u.id === idle.id));
   assert.ok(!out.inactive.some((u) => u.id === active.id));
 });
+
+test('g) réactions et commentaires sur une vraie base (tables, contraintes, compteurs)', opts, async () => {
+  const [alice, bob] = [await createUser(), await createUser()];
+  const match = await createOpenMatch((await createCompetition()).id);
+  assert.equal((await call('PUT', `/api/matches/${match.id}/reaction`, alice.token, { emoji: '👏' })).status, 200);
+  assert.equal((await call('PUT', `/api/matches/${match.id}/reaction`, alice.token, { emoji: '🔥' })).status, 200);
+  assert.equal((await call('PUT', `/api/matches/${match.id}/reaction`, bob.token, { emoji: '🔥' })).status, 200);
+  const posted = await call('POST', `/api/matches/${match.id}/comments`, bob.token, { text: 'Allez !' });
+  assert.equal(posted.status, 201);
+  const view = await call('GET', `/api/matches/${match.id}/social`, alice.token);
+  assert.deepEqual(view.body.reactions, { '🔥': 2 });
+  assert.equal(view.body.mine, '🔥');
+  assert.deepEqual(
+    view.body.comments.map((c) => [c.text, c.mine]),
+    [['Allez !', false]],
+  );
+  assert.equal((await call('DELETE', `/api/matches/${match.id}/comments/${posted.body.id}`, alice.token)).status, 403);
+  assert.equal((await call('DELETE', `/api/matches/${match.id}/comments/${posted.body.id}`, bob.token)).status, 204);
+  const counts = await require('../../src/services/matchSocial').counts(prisma, [match.id]);
+  assert.deepEqual(counts.get(match.id), { reactions: 2, comments: 0 });
+});

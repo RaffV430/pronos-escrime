@@ -276,28 +276,34 @@ router.get('/summary/:tournamentId', async (req, res) => {
 router.get('/export', async (req, res) => {
   try {
     const userId = req.user.userId;
-    const [user, predictions, poolPredictions, podiums, picks, adjustments, memberships, devices] = await Promise.all([
-      db.user.findUnique({
-        where: { id: userId },
-        select: { id: true, name: true, email: true, isAdmin: true, createdAt: true, totpEnabledAt: true },
-      }),
-      db.prediction.findMany({
-        where: { userId },
-        include: { match: { select: { player1: true, player2: true, round: true, competitionId: true } } },
-      }),
-      db.poolPrediction.findMany({
-        where: { userId },
-        include: { fencer: { select: { name: true, pool: { select: { name: true, competitionId: true } } } } },
-      }),
-      db.podiumPrediction.findMany({ where: { userId } }),
-      db.challengePick.findMany({ where: { userId }, include: { challenge: { select: { name: true } } } }),
-      db.pointAdjustment.findMany({ where: { userId } }),
-      db.leagueMember.findMany({ where: { userId }, include: { league: { select: { name: true, kind: true } } } }),
-      db.pushSubscription.findMany({
-        where: { userId },
-        select: { createdAt: true, enabled: true, tournamentIds: true, competitionIds: true, preferences: true },
-      }),
-    ]);
+    const [user, predictions, poolPredictions, podiums, picks, adjustments, memberships, devices, reactions, comments] =
+      await Promise.all([
+        db.user.findUnique({
+          where: { id: userId },
+          select: { id: true, name: true, email: true, isAdmin: true, createdAt: true, totpEnabledAt: true },
+        }),
+        db.prediction.findMany({
+          where: { userId },
+          include: { match: { select: { player1: true, player2: true, round: true, competitionId: true } } },
+        }),
+        db.poolPrediction.findMany({
+          where: { userId },
+          include: { fencer: { select: { name: true, pool: { select: { name: true, competitionId: true } } } } },
+        }),
+        db.podiumPrediction.findMany({ where: { userId } }),
+        db.challengePick.findMany({ where: { userId }, include: { challenge: { select: { name: true } } } }),
+        db.pointAdjustment.findMany({ where: { userId } }),
+        db.leagueMember.findMany({ where: { userId }, include: { league: { select: { name: true, kind: true } } } }),
+        db.pushSubscription.findMany({
+          where: { userId },
+          select: { createdAt: true, enabled: true, tournamentIds: true, competitionIds: true, preferences: true },
+        }),
+        db.matchReaction.findMany({ where: { userId }, select: { matchId: true, emoji: true, createdAt: true } }),
+        db.matchComment.findMany({
+          where: { userId },
+          select: { matchId: true, text: true, createdAt: true, hiddenAt: true },
+        }),
+      ]);
     if (!user) return res.status(404).json({ error: 'Compte introuvable.' });
     res.setHeader('Content-Disposition', 'attachment; filename="pronos-escrime-mes-donnees.json"');
     res.json({
@@ -310,6 +316,8 @@ router.get('/export', async (req, res) => {
       pointAdjustments: adjustments,
       leagues: memberships,
       notificationDevices: devices,
+      matchReactions: reactions,
+      matchComments: comments,
     });
   } catch (error) {
     reportError(error, 'export');
