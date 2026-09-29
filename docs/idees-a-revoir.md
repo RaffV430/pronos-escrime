@@ -11,3 +11,11 @@ Propositions du 29/09/2026 non validées pour l'instant. Rien n'est développé 
 | N8 | Mode grand écran pour la TV du club | Affichage plein écran en rotation : matchs en cours, classement, derniers résultats. |
 | N11 | Multiplicateur de série | Bonus croissant pour plusieurs bons pronostics d'affilée. |
 | — | Bonus ×2 (joker) | Déjà écarté « pour le moment ». |
+
+## Écartées le 29/09/2026 (deuxième série)
+
+| Réf. | Idée | Raison |
+| --- | --- | --- |
+| I1 | Classement provisoire en direct pendant les poules | La majorité des poules ne sont pas suivies en direct sur FTL : classement peu fiable. |
+| I2 | Classement de sortie de poules projeté | Même raison que I1. |
+| I5 | Pré-remplissage des pronostics selon le classement | Trop irrégulier ; risque d'influencer les joueurs. Les cases restent vides. |
