@@ -55,6 +55,46 @@ async function enroll(tx, league, userId) {
     create: { leagueId: league.id, userId },
   });
 }
+// Club de l'application : tireurs mis en avant et ligue du club de chaque tournoi (créée automatiquement).
+let clubCheckedAt = 0;
+router.get(
+  '/club',
+  wrap(async (req, res) => {
+    const club = require('../services/club');
+    if (Date.now() - clubCheckedAt > 5 * 60000) {
+      clubCheckedAt = Date.now();
+      await club.ensureClubLeagues(db).catch((e) => reportError(e, 'ligue du club'));
+    }
+    const { name, fencers } = await club.getClub(db);
+    const leagues = name
+      ? await db.league.findMany({
+          where: { kind: 'CLUB', name, tournament: { archivedAt: null } },
+          select: { id: true, tournamentId: true, startsAt: true, members: { where: { userId: req.user.userId } } },
+        })
+      : [];
+    res.json({
+      name,
+      fencers,
+      leagues: leagues.map((l) => ({
+        leagueId: l.id,
+        tournamentId: l.tournamentId,
+        member: l.members.length > 0,
+        open: new Date(l.startsAt) > new Date(),
+      })),
+    });
+  }),
+);
+router.post(
+  '/club/:tournamentId/join',
+  wrap(async (req, res) => {
+    const tournamentId = id(req.params.tournamentId);
+    const { name } = await require('../services/club').getClub(db);
+    const league = name ? await db.league.findFirst({ where: { kind: 'CLUB', name, tournamentId } }) : null;
+    if (!league) fail('Pas de ligue du club pour ce tournoi.', 404);
+    await db.$transaction((tx) => enroll(tx, league, req.user.userId));
+    res.json({ leagueId: league.id, message: `Bienvenue dans la ligue « ${league.name} ».` });
+  }),
+);
 router.get(
   '/leagues',
   wrap(async (req, res) =>
