@@ -59,7 +59,12 @@ test('admins alerted once per match, by mail and push, with a link to the match'
     auditLog: {
       findMany: async ({ where }) =>
         audit.filter((a) => a.action === where.action && where.targetId.in.includes(a.targetId)),
-      create: async ({ data }) => (audit.push(data), data),
+      create: async ({ data }) => (audit.push({ id: audit.length + 1, ...data }), { id: audit.length, ...data }),
+      update: async ({ where, data }) =>
+        Object.assign(
+          audit.find((a) => a.id === where.id),
+          data,
+        ),
     },
     user: { findMany: async () => [{ id: 1, email: 'admin@example.test', name: 'Admin' }] },
     pushSubscription: { findMany: async () => [{ id: 's1' }] },
@@ -67,7 +72,10 @@ test('admins alerted once per match, by mail and push, with a link to the match'
   const deps = {
     now,
     mailer: { mailConfigured: () => true, sendMail: async (m) => mails.push(m) },
-    push: { configured: () => true, send: async (sub, content) => pushes.push(content) },
+    push: {
+      configured: () => true,
+      send: async (sub, content, ttl, urgency) => (assert.equal(urgency, 'high'), pushes.push(content)),
+    },
   };
   const competition = { id: 9, name: "Senior Men's Foil", tournamentId: 2 };
   assert.deepEqual(await alertClosedWithoutTime(db, competition, deps), [262]);
@@ -76,6 +84,11 @@ test('admins alerted once per match, by mail and push, with a link to the match'
   assert.equal(pushes[0].url, '/?tournament=2&event=9&matches=262');
   assert.equal(mails.length, 1);
   assert.equal(audit[0].action, NO_TIME_ACTION);
+  assert.deepEqual(
+    [audit[0].after.push, audit[0].after.mail, audit[0].after.pushFailed, audit[0].after.mailConfigured],
+    [1, 1, 0, true],
+    'result of the alert kept in the admin log',
+  );
   assert.deepEqual(await alertClosedWithoutTime(db, competition, deps), [], 'only once');
   assert.equal(pushes.length, 1);
 });

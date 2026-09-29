@@ -137,7 +137,10 @@ test('F4: admins are alerted once at the 3rd failure in a row, then when it reco
   try {
     assert.equal(await alertAdmins(db, { competitionId: 5, failures: 2, previousFailures: 1, error: 'x' }, deps), null);
     const down = await alertAdmins(db, { competitionId: 5, failures: 3, previousFailures: 2, error: 'FTL 503' }, deps);
-    assert.deepEqual(down, { kind: 'down', mail: 1, push: 1 });
+    assert.deepEqual(
+      [down.kind, down.mail, down.push, down.mailFailed, down.pushFailed, down.mailConfigured],
+      ['down', 1, 1, 0, 0, true],
+    );
     assert.match(mails[0].subject, /en panne · Fleuret hommes/);
     assert.match(mails[0].text, /FTL 503/);
     assert.equal(await alertAdmins(db, { competitionId: 5, failures: 4, previousFailures: 3 }, deps), null, 'no spam');

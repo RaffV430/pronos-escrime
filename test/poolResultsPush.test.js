@@ -97,7 +97,14 @@ test('delivery: points of the published pools, link to Mes pronostics; cancelled
   };
   const c = { id: 9, tournamentId: 1, name: 'Fleuret hommes' };
   const delivery = { id: 'd1', kind: 'POOLRESULTS', round: 'pools', createdAt: new Date(), attempts: 0 };
-  await push.deliverSpecial(db, delivery, sub, c, [], async (s, content) => sent.push(content));
+  await push.deliverSpecial(
+    db,
+    delivery,
+    sub,
+    c,
+    [],
+    async (s, content, ttl, urgency) => (assert.equal(urgency, 'normal'), sent.push(content)),
+  );
   assert.equal(sent[0].body, 'Poules terminées · 11 points (3 tireurs pronostiqués)');
   assert.equal(sent[0].url, '/?tournament=1&event=9&view=mine');
   assert.deepEqual(updates, ['SENT']);

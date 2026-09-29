@@ -140,7 +140,7 @@ router.post(
       url: '/',
     };
     try {
-      await push.send(row, content, 60);
+      await push.send(row, content, 60, 'high');
     } catch (e) {
       if ([404, 410].includes(e.statusCode))
         await db.pushSubscription.update({ where: { id: row.id }, data: { enabled: false } });

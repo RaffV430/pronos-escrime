@@ -100,7 +100,16 @@ test('delivery: sent while the reopened match is still open and not yet predicte
     attempts: 0,
   };
   const sent = [];
-  await push.deliverSpecial(db, delivery, sub, c, [], async (s, content) => sent.push(content));
+  const urgencies = [];
+  await push.deliverSpecial(
+    db,
+    delivery,
+    sub,
+    c,
+    [],
+    async (s, content, ttl, urgency) => (urgencies.push(urgency), sent.push(content)),
+  );
+  assert.deepEqual(urgencies, ['high'], 'reopening is urgent');
   assert.match(sent[0].body, /^Finale · horaire publié : pronostics rouverts jusqu’à \d\d:\d\d$/);
   assert.equal(sent[0].url, '/?tournament=1&event=9&matches=262');
   own = 1;
