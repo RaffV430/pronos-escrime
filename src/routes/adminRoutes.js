@@ -41,6 +41,19 @@ router.get(
     ),
   ),
 );
+// Animation : participation au tournoi, joueurs sans pronostic, relance en un clic.
+router.get(
+  '/engagement/:tournamentId',
+  wrap(async (req, res) =>
+    res.json(await require('../services/engagement').engagement(prisma, id(req.params.tournamentId))),
+  ),
+);
+router.post(
+  '/engagement/:competitionId/remind',
+  wrap(async (req, res) =>
+    res.json(await require('../services/engagement').remind(prisma, id(req.params.competitionId), req.user.userId)),
+  ),
+);
 // Club : nom et liste des tireurs mis en avant ; enregistrer crée aussi les ligues du club manquantes.
 router.get(
   '/club',
