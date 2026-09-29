@@ -1,0 +1,77 @@
+# Sauvegarde nocturne de la base de production (Neon), chiffrée, conservée 30 jours
+# comme artefact GitHub. Mode d'emploi et restauration : docs/sauvegardes.md.
+name: Sauvegarde de la base
+
+on:
+  schedule:
+    - cron: '17 2 * * *' # chaque nuit à 02:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sauvegarde
+  cancel-in-progress: false
+
+jobs:
+  sauvegarde:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Client PostgreSQL 17 : il sait sauvegarder un serveur 16 ou 17 (Neon).
+      PG_IMAGE: postgres:17
+    steps:
+      - name: Vérifier la configuration
+        id: config
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          if [ -z "$BACKUP_DATABASE_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::notice title=Sauvegarde non configurée::Sauvegarde non configurée : ajoutez les secrets BACKUP_DATABASE_URL et BACKUP_PASSPHRASE (voir docs/sauvegardes.md)."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Exporter la base (pg_dump, format personnalisé)
+        if: steps.config.outputs.configured == 'true'
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          umask 077
+          # L'adresse de connexion passe par une variable d'environnement (jamais dans la commande ni le journal).
+          docker run --rm -e BACKUP_DATABASE_URL "$PG_IMAGE" \
+            sh -c 'exec pg_dump --dbname="$BACKUP_DATABASE_URL" --format=custom --no-owner --no-privileges' \
+            > base.dump
+          # Contrôle : l'archive doit être lisible par pg_restore et non vide.
+          docker run --rm -i "$PG_IMAGE" pg_restore --list < base.dump > sommaire.txt
+          echo "Objets sauvegardés : $(grep -cv '^;' sommaire.txt) — taille : $(du -h base.dump | cut -f1)"
+          rm -f sommaire.txt
+
+      - name: Chiffrer (AES-256)
+        if: steps.config.outputs.configured == 'true'
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          FICHIER: sauvegarde-${{ steps.config.outputs.date }}.dump.gpg
+        run: |
+          set -euo pipefail
+          umask 077
+          # Phrase secrète transmise par l'entrée standard, jamais en argument.
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --symmetric --cipher-algo AES256 --passphrase-fd 0 --output "$FICHIER" base.dump
+          rm -f base.dump
+          ls -lh "$FICHIER"
+
+      - name: Conserver la sauvegarde (30 jours)
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sauvegarde-${{ steps.config.outputs.date }}
+          path: sauvegarde-${{ steps.config.outputs.date }}.dump.gpg
+          retention-days: 30
+          if-no-files-found: error
+          compression-level: 0 # déjà compressé et chiffré

@@ -4,56 +4,17 @@
 // automatiques de prisma/auto/ sont appliquées et le schéma vérifié.
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+const { url, quiet, connect, replayLegacyHistory, tmpDir } = require('./helpers');
 
-const url = process.env.TEST_DATABASE_URL;
-const root = path.join(__dirname, '../..');
 const opts = { skip: url ? false : 'TEST_DATABASE_URL non défini' };
 
-let pg, admin;
-async function connect() {
-  const client = new pg.Client({ connectionString: url });
-  await client.connect();
-  const sql = (strings, values) => strings.reduce((s, p, i) => s + p + (i < values.length ? `$${i + 1}` : ''), '');
-  const db = {
-    $queryRaw: async (s, ...v) => (await client.query(sql(s, v), v)).rows,
-    $executeRaw: async (s, ...v) => (await client.query(sql(s, v), v)).rowCount,
-    $executeRawUnsafe: async (s) => (await client.query(s)).rowCount,
-    $transaction: async (fn) => {
-      await client.query('BEGIN');
-      try {
-        const result = await fn(db);
-        await client.query('COMMIT');
-        return result;
-      } catch (e) {
-        await client.query('ROLLBACK');
-        throw e;
-      }
-    },
-    close: () => client.end(),
-  };
-  return db;
-}
-const tmpDir = (files) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-'));
-  for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), content);
-  return dir;
-};
-const quiet = () => {};
-
+let admin;
 before(async () => {
   if (!url) return;
-  pg = require('pg');
-  admin = new pg.Client({ connectionString: url });
+  admin = new (require('pg').Client)({ connectionString: url });
   await admin.connect();
   await admin.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-  const files = fs
-    .readFileSync(path.join(root, 'prisma/legacy-order.txt'), 'utf8')
-    .split('\n')
-    .filter((l) => l.trim() && !l.startsWith('#'));
-  for (const f of files) await admin.query(fs.readFileSync(path.join(root, f), 'utf8'));
+  await replayLegacyHistory(admin);
 });
 after(async () => admin?.end());
 
