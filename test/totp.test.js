@@ -77,7 +77,7 @@ test('admin login requires the 6-digit code once 2FA is enabled; setup and disab
     server.closeAllConnections();
     server.close();
   });
-  const token = jwt.sign({ userId: 1 }, process.env.JWT_SECRET);
+  const token = jwt.sign({ userId: 1, sv: 0 }, process.env.JWT_SECRET);
   const call = (path, body, auth = true) =>
     fetch(`http://127.0.0.1:${server.address().port}/auth${path}`, {
       method: 'POST',

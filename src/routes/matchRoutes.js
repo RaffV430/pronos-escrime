@@ -10,6 +10,7 @@ const { matchClosed, closesAt } = require('../lib/matchLock');
 const { timedMatches, timedMatch, reopenRound } = require('../services/roundTiming');
 const { rescore } = require('../services/rescore');
 const { applyOutsiderBonus, crowdIsOutsider } = require('../services/outsider');
+const { reportError } = require('../lib/report');
 
 router.get('/freshness/:competitionId', authMiddleware, async (req, res) => {
   const competitionId = Number(req.params.competitionId);
@@ -30,7 +31,8 @@ router.get('/sync-ftl/:competitionId', authMiddleware, adminMiddleware, async (r
   if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Épreuve invalide.' });
   try {
     res.json(await require('../services/ftlSync').syncStatus(prisma, id));
-  } catch {
+  } catch (error) {
+    reportError(error, 'match');
     res.status(500).json({ error: 'État du contrôle indisponible.' });
   }
 });
@@ -40,6 +42,7 @@ router.post('/sync-ftl', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     res.json(await require('../services/ftlSync').syncCompetition(prisma, id, req.user.userId));
   } catch (e) {
+    reportError(e, 'match');
     if (e.retryAfter) res.set('Retry-After', String(e.retryAfter));
     res
       .status(e.status || 500)
@@ -88,7 +91,7 @@ router.get('/', authMiddleware, async (req, res) => {
     );
   } catch (error) {
     if (error.status) return res.status(error.status).json({ error: error.message });
-    console.error('Erreur matches:', error);
+    reportError(error, 'matches');
     res.status(500).json({ error: 'Erreur lors de la récupération des matchs.' });
   }
 });
@@ -101,6 +104,7 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
     for (const k of ['competitionId', 'tournamentId']) if (req.query[k]) filter[k] = id(req.query[k]);
     res.json(await require('../services/standings').standings(prisma, filter));
   } catch (e) {
+    reportError(e, 'match');
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Classement indisponible.' });
   }
 });
@@ -145,6 +149,7 @@ router.post('/:id/predict', authMiddleware, async (req, res) => {
     });
     res.status(result.status).json(result.body);
   } catch (error) {
+    reportError(error, 'match');
     res.status(500).json({ error: 'Erreur lors de la sauvegarde du pronostic' });
   }
 });
@@ -169,6 +174,7 @@ router.delete('/:id/predict', authMiddleware, async (req, res) => {
     });
     res.status(result.status).json(result.body);
   } catch (error) {
+    reportError(error, 'match');
     res.status(500).json({ error: 'Erreur lors de la suppression du pronostic' });
   }
 });
@@ -197,7 +203,8 @@ router.put('/:id/lock', authMiddleware, adminMiddleware, async (req, res) => {
       return { match: updated };
     });
     res.status(result.status || 200).json(result);
-  } catch {
+  } catch (error) {
+    reportError(error, 'match');
     res.status(500).json({ error: 'Verrouillage impossible.' });
   }
 });
@@ -252,7 +259,8 @@ router.put('/rounds/:competitionId/manifest', authMiddleware, adminMiddleware, a
       return { rounds };
     });
     res.status(result.status || 200).json(result);
-  } catch {
+  } catch (error) {
+    reportError(error, 'match');
     res.status(500).json({ error: 'Configuration du tableau impossible.' });
   }
 });
@@ -264,7 +272,8 @@ router.put('/rounds/:competitionId/:round/unlock', authMiddleware, adminMiddlewa
   try {
     const result = await prisma.$transaction((tx) => reopenRound(tx, competitionId, round, req.user.userId));
     res.status(result.status || 200).json(result);
-  } catch {
+  } catch (error) {
+    reportError(error, 'match');
     res.status(500).json({ error: 'Réouverture du tour impossible.' });
   }
 });
@@ -314,7 +323,8 @@ router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (re
       { timeout: 30000 },
     );
     res.status(result.status || 200).json(result);
-  } catch {
+  } catch (error) {
+    reportError(error, 'match');
     res.status(500).json({ error: 'Impossible de valider le retrait médical.' });
   }
 });
@@ -377,7 +387,8 @@ router.put('/:id/result', authMiddleware, adminMiddleware, async (req, res) => {
       { timeout: 30000 },
     );
     res.status(outcome.status || 200).json(outcome);
-  } catch {
+  } catch (error) {
+    reportError(error, 'match');
     res.status(500).json({ error: 'Correction impossible.' });
   }
 });

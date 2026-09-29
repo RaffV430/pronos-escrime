@@ -9,6 +9,7 @@ const { standings } = require('../services/standings');
 const { buildSeason } = require('../services/season');
 const { computeBadges } = require('../services/badges');
 router.use(require('../middleware/auth'));
+const { reportError } = require('../lib/report');
 router.get('/predictions', async (req, res) => {
   try {
     const competitionId = id(req.query.competitionId),
@@ -170,6 +171,7 @@ router.get('/predictions', async (req, res) => {
       rounds: require('../services/playerExperience').roundSummaries(matches, rounds),
     });
   } catch (e) {
+    reportError(e, 'personal');
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Pronostics indisponibles.' });
   }
 });
@@ -265,6 +267,7 @@ router.get('/summary/:tournamentId', async (req, res) => {
       accuracy: predictions.length ? Math.round((winners * 100) / predictions.length) : null,
     });
   } catch (e) {
+    reportError(e, 'personal');
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Bilan indisponible.' });
   }
 });
@@ -309,7 +312,7 @@ router.get('/export', async (req, res) => {
       notificationDevices: devices,
     });
   } catch (error) {
-    console.error('Erreur export des données :', error);
+    reportError(error, 'export');
     res.status(500).json({ error: 'Export impossible. Réessayez.' });
   }
 });
@@ -396,7 +399,7 @@ router.get('/season', async (req, res) => {
     season.badges = computeBadges(season, { userId, matches: seasonMatches, predictions: everyone });
     res.json(season);
   } catch (e) {
-    console.error('Erreur saison:', e.code || e.message);
+    reportError(e, 'saison');
     res.status(500).json({ error: 'Historique de saison indisponible.' });
   }
 });

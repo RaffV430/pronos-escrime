@@ -62,7 +62,7 @@ test('GET duel: members only, another member only, finished non-cancelled matche
   });
   const get = (path, userId) =>
     fetch(`http://127.0.0.1:${server.address().port}/community${path}`, {
-      headers: { Authorization: `Bearer ${jwt.sign({ userId }, process.env.JWT_SECRET)}` },
+      headers: { Authorization: `Bearer ${jwt.sign({ userId, sv: 0 }, process.env.JWT_SECRET)}` },
     });
   assert.equal((await get('/leagues/3/duel/2', 5)).status, 403, 'not a member');
   assert.equal((await get('/leagues/3/duel/7', 1)).status, 404, 'opponent outside the league');

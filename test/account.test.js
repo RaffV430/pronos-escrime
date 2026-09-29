@@ -128,7 +128,7 @@ test('password reset: generic answer, e-mailed single-use link, new password wor
     (await call('/auth/reset-password', 'POST', { token: expired, password: 'another-pass-123' })).status,
     400,
   );
-  const session = jwt.sign({ userId: 2 }, process.env.JWT_SECRET);
+  const session = jwt.sign({ userId: 2, sv: 0 }, process.env.JWT_SECRET);
   assert.equal(
     (await call('/auth/reset-password', 'POST', { token: session, password: 'another-pass-123' })).status,
     400,
@@ -155,7 +155,7 @@ test('account deletion requires the password and cleans leagues and challenge pi
     },
   );
   const call = await server(t, f.db, []);
-  const token = jwt.sign({ userId: 2 }, process.env.JWT_SECRET);
+  const token = jwt.sign({ userId: 2, sv: 0 }, process.env.JWT_SECRET);
   assert.equal(
     (await call('/auth/account', 'DELETE', { password: 'alice-password' }, token)).status,
     400,
@@ -168,7 +168,7 @@ test('account deletion requires the password and cleans leagues and challenge pi
         '/auth/account',
         'DELETE',
         { password: 'admin-password', confirm: 'SUPPRIMER' },
-        jwt.sign({ userId: 9 }, process.env.JWT_SECRET),
+        jwt.sign({ userId: 9, sv: 0 }, process.env.JWT_SECRET),
       )
     ).status,
     409,

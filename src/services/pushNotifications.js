@@ -1,3 +1,4 @@
+const { reportError } = require('../lib/report');
 const { roundLabel, matchNotificationText } = require('./notificationText');
 const webpush = require('web-push');
 const { preferences, isQuiet, roundSummaries } = require('./playerExperience');
@@ -474,8 +475,9 @@ async function dispatch(db, sender = send) {
           const item = pending[index++];
           try {
             await deliver(db, item.id, sender);
-          } catch {
+          } catch (error) {
             console.warn('Envoi de notification à réessayer.');
+            reportError(error, 'envoi de notification');
           }
         }
       }),
@@ -485,8 +487,16 @@ async function dispatch(db, sender = send) {
   }
 }
 function startWorker(db) {
-  if (!configured()) return () => {};
-  const tick = () => dispatch(db).catch(() => console.warn('Notifications temporairement indisponibles.'));
+  if (!configured()) {
+    console.warn('Notifications désactivées : clés VAPID absentes.');
+    return () => {};
+  }
+  console.log('Notifications actives (envoi toutes les 30 s).');
+  const tick = () =>
+    dispatch(db).catch((error) => {
+      console.warn('Notifications temporairement indisponibles.');
+      reportError(error, 'tâche des notifications');
+    });
   const timer = setInterval(tick, 30000);
   timer.unref();
   tick();
