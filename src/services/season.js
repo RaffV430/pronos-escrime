@@ -49,6 +49,10 @@ function matchRow(p) {
     m.resultType,
   );
   const exact = !medical && p.predictedScore1 === m.score1 && p.predictedScore2 === m.score2;
+  const scoreGap =
+    !medical && Number.isInteger(m.score1) && Number.isInteger(m.score2)
+      ? Math.abs(p.predictedScore1 - m.score1) + Math.abs(p.predictedScore2 - m.score2)
+      : null;
   const bonus = p.bonusPoints || 0;
   const points = (p.pointsEarned ?? expected) + bonus;
   return {
@@ -59,6 +63,7 @@ function matchRow(p) {
       : `${m.score1} – ${m.score2}`,
     points,
     bonus,
+    scoreGap,
     details:
       points > 0
         ? [
@@ -87,11 +92,14 @@ function poolRow(p) {
   if (f.wins === null || f.wins === undefined)
     return { ...base, outcome: 'cancelled', result: 'Absent ou retrait : matchs annulés', points: 0, details: [] };
   const adjusted = adjustForAnnulled(p, f, pool._count?.fencers ?? null);
+  const compared = adjusted || p;
   return {
     ...base,
     outcome: points === 8 ? 'exact' : points > 0 ? 'points' : 'miss',
     result: `${f.wins} V · indice ${f.indicator}`,
     points,
+    winsExact: compared.wins === f.wins,
+    indicatorGap: Math.abs(compared.indicator - f.indicator),
     details: adjusted
       ? [
           `Ajusté : ${adjusted.annulled} match${adjusted.annulled > 1 ? 's' : ''} annulé${adjusted.annulled > 1 ? 's' : ''} · comparé à ${adjusted.wins} V · indice ${adjusted.indicator > 0 ? '+' : ''}${adjusted.indicator}`,
@@ -223,7 +231,9 @@ function buildSeason(data, requested, now = new Date()) {
   totals.total = Object.values(totals).reduce((s, v) => s + v, 0);
 
   const order = (a, b) => new Date(b.date || 0) - new Date(a.date || 0);
+  const analysis = analyse(rows, [...tournaments.values()]);
   return {
+    analysis,
     season,
     label: seasonLabel(season),
     seasons: seasons.map((s) => ({ season: s, label: seasonLabel(s) })),
@@ -247,4 +257,46 @@ function buildSeason(data, requested, now = new Date()) {
   };
 }
 
-module.exports = { seasonOf, seasonLabel, buildSeason, matchRow };
+// Tours du plus grand au plus petit tableau ; « T2 » = finale.
+const ROUND_ORDER = (r) => (r === 'Bronze' ? 1.5 : Number(String(r).replace(/\D/g, '')) || 0);
+const percent = (n, d) => (d ? Math.round((n * 100) / d) : null);
+const average = (values) =>
+  values.length ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10 : null;
+
+// Statistiques personnelles de la saison (matchs terminés et poules publiées uniquement).
+function analyse(rows, tournaments) {
+  const played = rows.filter((r) => r.type === 'Match' && ['exact', 'points', 'miss'].includes(r.outcome));
+  const rounds = new Map();
+  for (const r of played) {
+    const key = r.round || '?';
+    if (!rounds.has(key)) rounds.set(key, { round: key, played: 0, winners: 0, exact: 0, points: 0 });
+    const x = rounds.get(key);
+    x.played++;
+    x.winners += r.points > 0 ? 1 : 0;
+    x.exact += r.outcome === 'exact' ? 1 : 0;
+    x.points += r.points || 0;
+  }
+  const byRound = [...rounds.values()]
+    .sort((a, b) => ROUND_ORDER(b.round) - ROUND_ORDER(a.round))
+    .map((x) => ({ ...x, accuracy: percent(x.winners, x.played) }));
+  const pools = rows.filter((r) => r.type === 'Poule' && ['exact', 'points', 'miss'].includes(r.outcome));
+  const competitions = tournaments.flatMap((t) =>
+    [...t.competitions.values()].map((c) => ({ name: c.name, tournament: t.name, points: c.points })),
+  );
+  const best = competitions.sort((a, b) => b.points - a.points)[0];
+  return {
+    byRound,
+    bestRound: byRound.filter((r) => r.played >= 3).sort((a, b) => b.accuracy - a.accuracy)[0]?.round || null,
+    averageScoreGap: average(played.map((r) => r.scoreGap).filter((g) => g !== null && g !== undefined)),
+    outsiderHits: played.filter((r) => r.bonus > 0).length,
+    pools: {
+      predicted: pools.length,
+      winsExact: pools.filter((r) => r.winsExact).length,
+      winsAccuracy: percent(pools.filter((r) => r.winsExact).length, pools.length),
+      averageIndicatorGap: average(pools.map((r) => r.indicatorGap).filter((g) => Number.isFinite(g))),
+    },
+    bestCompetition: best && best.points > 0 ? best : null,
+  };
+}
+
+module.exports = { seasonOf, seasonLabel, buildSeason, matchRow, analyse };
