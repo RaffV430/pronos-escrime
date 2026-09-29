@@ -38,5 +38,5 @@ jobs:
       - name: Résumé des tests sur base réelle
         if: always()
         run: |
-          node --test test/integration > integration.log 2>&1 || true
+          node --test test/integration/*.test.js > integration.log 2>&1 || true
           echo "::notice title=Tests base réelle::$(grep -E '^# (tests|pass|fail|skipped)' integration.log | tr '\n' ' ')"
