@@ -556,6 +556,12 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
       throw failure('Configurez la source et l’identité de cette épreuve dans Administration.', 409);
     await client.login();
     ({ c, config } = await require('./ftlTournament').refreshPending(db, c, config, actorId, client));
+    let discoveryWarning = null;
+    try {
+      config = await require('./ftlTournament').discoverTableau(db, c, config, actorId, client);
+    } catch (e) {
+      discoveryWarning = e.status ? e.message : 'Recherche du tableau officiel impossible pour le moment.';
+    }
     const poolSummary = await syncPools(db, c, config, actorId, client, claim.token);
     let summary = {
       createdIds: [],
@@ -608,6 +614,7 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     }
     // Simple information, pas une anomalie : le suivi reste « à jour » et garde son rythme normal.
     else summary.notes = ['Tableau pas encore publié. Il sera recherché au prochain contrôle.'];
+    if (discoveryWarning) summary.warnings.push(discoveryWarning);
     summary.automatic = automatic;
     summary.eventDate = config.date;
     const start = require('./eventStart').eventStart(config);
