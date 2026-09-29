@@ -73,9 +73,20 @@ router.get('/', authMiddleware, async (req, res) => {
       prisma,
       timed.filter((t) => t.isClosed).map((t) => t.match.id),
     );
+    // Compteurs réactions/commentaires (facultatifs : une erreur ne bloque jamais la liste des matchs).
+    let social = new Map();
+    try {
+      social = await require('../services/matchSocial').counts(
+        prisma,
+        timed.map((t) => t.match.id),
+      );
+    } catch (error) {
+      reportError(error, 'compteurs sociaux');
+    }
     res.json(
       timed.map(({ match, isClosed }) => ({
         ...withCountries(match),
+        social: social.get(match.id) || { reactions: 0, comments: 0 },
         maxScore: match.competition?.podiumFormat === 'TEAM' ? 45 : 15,
         isClosed,
         closesAt: closesAt(match),
@@ -110,6 +121,46 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
 });
 
 // 4. POST : Ajouter ou modifier un pronostic
+// Réactions et commentaires d'un match.
+const socialRoute = (fn) => async (req, res) => {
+  try {
+    await fn(req, res, require('../services/matchSocial'), Number(req.params.id));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    reportError(error, 'réactions et commentaires');
+    res.status(500).json({ error: 'Réactions et commentaires indisponibles.' });
+  }
+};
+router.get(
+  '/:id/social',
+  authMiddleware,
+  socialRoute(async (req, res, s, matchId) => res.json(await s.social(prisma, matchId, req.user.userId))),
+);
+router.put(
+  '/:id/reaction',
+  authMiddleware,
+  socialRoute(async (req, res, s, matchId) =>
+    res.json({ mine: await s.react(prisma, matchId, req.user.userId, req.body?.emoji ?? null) }),
+  ),
+);
+router.post(
+  '/:id/comments',
+  authMiddleware,
+  socialRoute(async (req, res, s, matchId) =>
+    res.status(201).json(await s.comment(prisma, matchId, req.user.userId, req.body?.text)),
+  ),
+);
+router.delete(
+  '/:id/comments/:commentId',
+  authMiddleware,
+  socialRoute(async (req, res, s, matchId) => {
+    const commentId = Number(req.params.commentId);
+    if (!Number.isSafeInteger(commentId) || commentId <= 0)
+      return res.status(400).json({ error: 'Commentaire invalide.' });
+    await s.hide(prisma, matchId, commentId, req.user);
+    res.status(204).end();
+  }),
+);
 // Face-à-face des deux tireurs et forme récente (épreuves déjà suivies par l'application).
 router.get('/:id/h2h', authMiddleware, async (req, res) => {
   try {

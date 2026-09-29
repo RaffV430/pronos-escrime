@@ -29,3 +29,15 @@ test('destructive statements need the marker and cannot remove what the code sti
   assert.throws(() => checkSafety('202609290000_x.sql', ['DELETE FROM "User"'], expected), /__destructif/);
   assert.doesNotThrow(() => checkSafety('202609290000_add.sql', ['ALTER TABLE "User" ADD COLUMN "sv" INT'], expected));
 });
+
+test('a foreign key with ON DELETE CASCADE is an addition, not a destructive statement', () => {
+  const { checkSafety, statements } = require('../src/services/migrations');
+  const fs = require('node:fs');
+  const sql = fs.readFileSync(`${__dirname}/../prisma/auto/202609290600_match_social.sql`, 'utf8');
+  assert.doesNotThrow(() => checkSafety('202609290600_match_social.sql', statements(sql), new Map()));
+  assert.throws(() => checkSafety('x.sql', ['DELETE FROM "Match";'], new Map()), /destructive/);
+  assert.throws(
+    () => checkSafety('x.sql', ['ALTER TABLE "A" DROP COLUMN "b" ON DELETE CASCADE;'], new Map()),
+    /destructive/,
+  );
+});

@@ -22,6 +22,8 @@ model User {
   poolPredictions   PoolPrediction[]
   podiumPredictions PodiumPrediction[] 
   pointAdjustments  PointAdjustment[]
+  matchReactions    MatchReaction[]
+  matchComments     MatchComment[]
   createdAt         DateTime           @default(now())
 }
 
@@ -46,6 +48,8 @@ model Match {
   resultType    String?
   resultRegisteredAt DateTime?
   syncIssue String?
+  reactions     MatchReaction[]
+  comments      MatchComment[]
 
   @@unique([competitionId, sourceKey])
 }
@@ -320,4 +324,30 @@ model AppSetting {
   key       String   @id
   value     Json
   updatedAt DateTime @default(now()) @updatedAt
+}
+
+// Réactions (un emoji par joueur et par match) et commentaires courts sur un match.
+model MatchReaction {
+  id        Int      @id @default(autoincrement())
+  matchId   Int
+  match     Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([matchId, userId])
+}
+model MatchComment {
+  id        Int       @id @default(autoincrement())
+  matchId   Int
+  match     Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text      String
+  createdAt DateTime  @default(now())
+  hiddenAt  DateTime?
+  hiddenBy  Int?
+
+  @@index([matchId, createdAt])
 }
