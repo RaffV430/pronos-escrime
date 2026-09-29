@@ -50,6 +50,7 @@ async function syncHealth(db, now = Date.now()) {
     workerEnabled: process.env.FTL_AUTO_SYNC === 'true',
     // Canaux d'alerte des administrateurs : sans e-mail, seules les notifications arrivent.
     mailConfigured: require('./mailer').mailConfigured(),
+    mailSandbox: require('./mailer').sandboxSender(),
     pushConfigured: require('./pushNotifications').configured(),
     checkedAt: new Date(now).toISOString(),
     summary: {

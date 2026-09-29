@@ -276,14 +276,14 @@ router.post('/login', loginPerIp, loginPerIdentifier, async (req, res) => {
 // ---------------------------------------------------------
 // Mot de passe oublié / réinitialisation / suppression de compte
 // ---------------------------------------------------------
-const { mailConfigured, sendMail } = require('../services/mailer');
+const { sendMail } = require('../services/mailer');
 const account = require('../services/account');
 const forgotPerIp = limiter({ windowMs: 15 * 60 * 1000, limit: 10 });
 const forgotPerEmail = limiter({ windowMs: 60 * 60 * 1000, limit: 3, keyGenerator: identifierKey });
 const resetPerIp = limiter({ windowMs: 15 * 60 * 1000, limit: 20 });
 const validPassword = (password) => typeof password === 'string' && password.length >= 10 && password.length <= 128;
 
-router.get('/config', (req, res) => res.json({ passwordReset: mailConfigured() }));
+router.get('/config', (req, res) => res.json({ passwordReset: require('../services/mailer').playerMailAvailable() }));
 
 router.post('/forgot-password', forgotPerIp, forgotPerEmail, async (req, res) => {
   // Réponse identique que le compte existe ou non : on ne révèle pas les adresses inscrites.
@@ -291,7 +291,7 @@ router.post('/forgot-password', forgotPerIp, forgotPerEmail, async (req, res) =>
     res.json({
       message: 'Si un compte correspond à cette adresse, un e-mail de réinitialisation vient d’être envoyé.',
     });
-  if (!mailConfigured())
+  if (!require('../services/mailer').playerMailAvailable())
     return res.status(503).json({ error: 'La réinitialisation par e-mail n’est pas encore disponible.' });
   const email = String(req.body.email || '')
     .trim()
