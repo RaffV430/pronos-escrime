@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { getJwtSecret } = require('../config');
+const LEGACY_TOKENS_EXPIRED = Date.parse('2026-09-30T00:00:00Z');
 
 module.exports = async function (req, res, next) {
   const authHeader = req.header('Authorization');
@@ -21,10 +22,16 @@ module.exports = async function (req, res, next) {
       throw new Error('Jeton non valable');
     // Jetons récents : la version de session doit correspondre à celle du compte
     // (sinon le mot de passe a changé, les sessions ont été coupées, ou le compte supprimé).
-    if (decoded.sv !== undefined) {
-      const version = await require('../services/session').currentVersion(require('../lib/prisma'), decoded.userId);
+    // Les anciens jetons sans version (24 h, émis avant le 28/09/2026 22h) ont tous expiré
+    // depuis : après cette date, un jeton sans version est refusé.
+    const session = require('../services/session');
+    if (decoded.sv === undefined) {
+      if (Date.now() > LEGACY_TOKENS_EXPIRED) throw new Error('Jeton sans version');
+    } else {
+      const version = await session.currentVersion(require('../lib/prisma'), decoded.userId);
       if (version === null || version !== decoded.sv) throw new Error('Session révoquée');
     }
+    if (session.sessionTooOld(decoded)) throw new Error('Session trop ancienne');
     req.user = decoded;
   } catch (ex) {
     return res.status(401).json({ error: 'Token invalide ou expiré.' });

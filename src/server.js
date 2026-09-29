@@ -28,6 +28,26 @@ app.use(
 );
 app.use(express.json({ limit: '100kb' }));
 
+// Limite générale : 300 requêtes/min par session (ou par adresse IP sans session). Protège la base
+// contre un compte ou un script qui boucle, sans gêner un club entier derrière le même wifi.
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+app.use(
+  '/api',
+  rateLimit({
+    windowMs: 60 * 1000,
+    limit: 300,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    message: { error: 'Trop de requêtes. Patientez une minute.' },
+    keyGenerator: (req) => {
+      const auth = req.headers.authorization;
+      return auth
+        ? `s:${require('node:crypto').createHash('sha256').update(auth).digest('base64url').slice(0, 22)}`
+        : `ip:${ipKeyGenerator(req.ip || '')}`;
+    },
+  }),
+);
+
 // Toute écriture réussie peut modifier les points : le classement mis en cache est invalidé.
 app.use((req, res, next) => {
   if (req.method !== 'GET')
