@@ -12,6 +12,7 @@ const { calculateMatchPoints } = require('./matchPoints');
 const { rescore } = require('./rescore');
 const { applyOutsiderBonus } = require('./outsider');
 const podiumRules = require('./podiumRules');
+const REOPEN_ACTION = 'Horaire publié après clôture';
 const START = 'Contrôle FTL démarré',
   DONE = 'Contrôle FTL terminé',
   FAILED = 'Contrôle FTL échoué';
@@ -227,6 +228,20 @@ function cancellable(m, observation) {
 function drawSignature(observation) {
   return JSON.stringify(observation.matches.map((m) => [m.sourceKey, m.round, m.player1, m.player2]));
 }
+// Match clos faute d'horaire (10 min après le tour précédent) dont FTL publie maintenant une heure
+// encore à venir (plus de 5 min) : la saisie se rouvre d'elle-même jusqu'à cette heure.
+function reopenedByPublishedTime(late, timed, now = Date.now()) {
+  const { matchClosed } = require('../lib/matchLock');
+  const out = [];
+  for (const { current: m, observed: o } of late) {
+    if (m.startsAt || !o.startsAt || m.isFinished || o.isFinished) continue;
+    if (new Date(o.startsAt).getTime() - now <= 5 * 60000) continue;
+    const t = timed.find((x) => x.id === m.id);
+    if (t && !t.isLocked && !t.syncIssue && !t.manualUnlockUntil && t.previousRoundCompletedAt && matchClosed(t, now))
+      out.push({ m, o });
+  }
+  return out;
+}
 async function applyObservation(tx, c, observation, actorId, leaseToken = null) {
   await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
   if (leaseToken) await require('./ftlScheduler').assertClaim(tx, c.id, leaseToken);
@@ -304,6 +319,13 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       create: { competitionId: c.id, ...r, sourceUrl: observation.sourceUrl, verifiedAt: observation.checkedAt },
       update: { ...r, sourceUrl: observation.sourceUrl, verifiedAt: observation.checkedAt },
     });
+  // Match clos faute d'horaire (10 min après le tour précédent) dont FTL publie maintenant une heure
+  // encore à venir : la saisie se rouvre d'elle-même jusqu'à cette heure ; on le note pour prévenir
+  // les joueurs (une fois par match, seulement s'il reste plus de 5 minutes).
+  const late = plan.filter(({ current: m, observed: o }) => m && !m.startsAt && o.startsAt);
+  const reopened = late.length
+    ? reopenedByPublishedTime(late, await require('./roundTiming').timedMatches(tx, existing))
+    : [];
   for (const { current: m, observed: o } of plan) {
     const wasFinished = m?.isFinished;
     // Legacy scored finals may lack an explicit winner/type; filling those is not a score correction.
@@ -363,6 +385,17 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       summary.pointsUpdated += await applyOutsiderBonus(tx.prediction, saved.id, predictions, o.winner, o.resultType);
     }
   }
+  for (const { m, o } of reopened)
+    await tx.auditLog.create({
+      data: {
+        actorId,
+        action: REOPEN_ACTION,
+        targetType: 'Match',
+        targetId: m.id,
+        after: { competitionId: c.id, round: o.round, startsAt: o.startsAt.toISOString() },
+      },
+    });
+  summary.reopened = reopened.map(({ m }) => m.id);
   if (observation.officialPodium) {
     // Validate every legacy selection before writing anything to the podium.
     const predictions = await tx.podiumPrediction.findMany({ where: { competitionId: c.id } });
@@ -711,6 +744,8 @@ async function syncAndRefresh(...args) {
   }
 }
 module.exports = {
+  REOPEN_ACTION,
+  reopenedByPublishedTime,
   syncCompetition: syncAndRefresh,
   syncStatus,
   observe,
