@@ -13,7 +13,8 @@ function scheduleUrl(value) {
     throw failure('Lien du calendrier FencingTimeLive requis.', 400);
   }
   u.hash = '';
-  if (!SCHEDULE.test(u.href)) throw failure('Utilisez le lien SCHEDULE du tournoi FencingTimeLive.', 400);
+  if (!SCHEDULE.test(u.href))
+    throw failure('Utilisez le lien SCHEDULE du tournoi FencingTimeLive, ou le lien du tournoi engarde-service.', 400);
   u.pathname = u.pathname.replace(/[a-f0-9]{32}$/i, (id) => id.toUpperCase());
   return u.href;
 }
@@ -154,6 +155,9 @@ function matching(existing, eventId) {
   return found[0];
 }
 async function preview(db, input, actorId, client = createClient()) {
+  // Lien engarde-service : même écran d'aperçu, lu par son propre module.
+  if (require('./engardeParser').parseLink(input.sourceUrl))
+    return require('./engardeTournament').preview(db, input, actorId);
   const sourceUrl = scheduleUrl(input.sourceUrl);
   await client.login();
   const parsed = parseSchedule(
@@ -188,6 +192,11 @@ async function preview(db, input, actorId, client = createClient()) {
   };
 }
 async function save(db, input, actorId, client = createClient()) {
+  // Aperçu engarde-service : enregistrement par son module.
+  const preview = Number.isSafeInteger(Number(input.previewId))
+    ? await db.auditLog.findUnique({ where: { id: Number(input.previewId) } })
+    : null;
+  if (preview?.targetType === 'EngardePreview') return require('./engardeTournament').save(db, input, actorId);
   const previewId = Number(input.previewId),
     ids = input.eventIds;
   if (

@@ -64,6 +64,18 @@ const signature = (t) =>
 async function checkTournament(db, t, client = createClient(), now = new Date()) {
   if (t.archivedAt || !t.competitions.length || !t.competitions.every(eventComplete)) return false;
   const configs = await Promise.all(t.competitions.map((c) => configuration(db, c.id)));
+  // engarde-service : épreuves terminées et podiums vérifiés (ci-dessus) suffisent, pas de calendrier FTL à relire.
+  const engarde = configs.length && configs.every((cfg) => cfg?.provider === 'engarde');
+  const official = engarde
+    ? {
+        source: t.ftlSourceUrl,
+        events: configs.map((cfg) => ({ eventId: cfg.eventId, event: cfg.event, date: cfg.date })),
+      }
+    : await ftlTournamentFinished(t, configs, client);
+  if (!official) return false;
+  return archiveNow(db, t, now, official);
+}
+async function ftlTournamentFinished(t, configs, client) {
   let source = t.ftlSourceUrl;
   await client.login();
   if (!source) {
@@ -112,6 +124,9 @@ async function checkTournament(db, t, client = createClient(), now = new Date())
     )
       return false;
   }
+  return { source, events: observed.events };
+}
+async function archiveNow(db, t, now, { source, events }) {
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Tournament" WHERE id=${t.id} FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM "Competition" WHERE "tournamentId"=${t.id} ORDER BY id FOR UPDATE`;
@@ -139,7 +154,7 @@ async function checkTournament(db, t, client = createClient(), now = new Date())
         after: {
           sourceUrl: source,
           checkedAt: now.toISOString(),
-          events: observed.events.map((e) => ({ eventId: e.eventId, name: e.event, date: e.date })),
+          events: events.map((e) => ({ eventId: e.eventId, name: e.event, date: e.date })),
         },
       },
     });

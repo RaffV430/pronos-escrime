@@ -52,10 +52,18 @@ function verifiedPodium(competition) {
   const result = /^https:\/\/www\.fencingtimelive\.com\/events\/results\/([A-F0-9]{32})$/i.exec(
     competition.resultsSourceUrl || '',
   )?.[1];
+  // engarde-service : liste des engagés et classement général sur la même épreuve.
+  const engarde = (suffix, url) =>
+    new RegExp(`^https://engarde-service\\.com/competition/([a-z0-9_-]+/[a-z0-9_-]+/[a-z0-9_-]+)/${suffix}$`, 'i').exec(
+      url || '',
+    )?.[1];
+  const engardeEvent = engarde('tireurs\\.htm', competition.rosterSourceUrl);
+  const sameEvent = engardeEvent
+    ? engardeEvent.toLowerCase() === engarde('clasfinal\\.htm', competition.resultsSourceUrl)?.toLowerCase()
+    : Boolean(event) && event.toUpperCase() === result?.toUpperCase();
   const official = competition.officialPodium;
   if (
-    !event ||
-    event.toUpperCase() !== result?.toUpperCase() ||
+    !sameEvent ||
     !competition.resultsVerifiedAt ||
     !official?.finalConfirmed ||
     (competition.podiumFormat === 'TEAM' && !official?.bronzeMatchConfirmed)

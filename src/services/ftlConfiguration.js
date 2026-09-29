@@ -34,9 +34,18 @@ function parseRoster(rows) {
   return entries.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 }
 async function preview(db, input, actorId, client = createClient()) {
+  if (require('./engardeParser').parseLink(input.sourceUrl))
+    throw failure(
+      'Pour engarde-service, utilisez « Préparer un tournoi » avec le lien du tournoi ou d’une épreuve.',
+      400,
+    );
   const sourceUrl = String(input.sourceUrl || '').trim(),
     match = SOURCE.exec(sourceUrl);
-  if (!match) throw failure('Indiquez un lien officiel de poules ou de tableau FencingTimeLive.', 400);
+  if (!match)
+    throw failure(
+      'Indiquez un lien officiel de poules ou de tableau FencingTimeLive, ou une page d’épreuve engarde-service.',
+      400,
+    );
   const timezone = String(input.timezone || '');
   try {
     new Intl.DateTimeFormat('en', { timeZone: timezone }).format();
