@@ -217,6 +217,69 @@ router.get('/predictions/all', async (req, res) => {
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Pronostics indisponibles.' });
   }
 });
+// Récap de fin d'épreuve : classement dans l'épreuve, points par phase, meilleur pronostic.
+const PHASES = ['T512', 'T256', 'T128', 'T64', 'T32', 'T16', 'T8', 'T4', 'Bronze', 'T2'];
+async function competitionRecap(competition, userId) {
+  const { rows } = await competitionPredictions(competition, userId);
+  const final = await db.match.findFirst({
+    where: { competitionId: competition.id, round: 'T2', isFinished: true },
+    select: { id: true },
+  });
+  const scored = rows.filter((r) => r.prediction && r.status !== 'Annulé' && r.points !== null);
+  const sum = (list) => list.reduce((n, r) => n + (r.points || 0), 0);
+  const phases = [];
+  const pools = scored.filter((r) => r.type === 'Poule');
+  if (pools.length) phases.push({ phase: 'Poules', points: sum(pools), count: pools.length });
+  for (const round of PHASES) {
+    const list = scored.filter((r) => r.type === 'Match' && r.round === round);
+    if (list.length) phases.push({ phase: round, points: sum(list), count: list.length });
+  }
+  const podium = scored.filter((r) => r.type === 'Podium');
+  if (podium.length) phases.push({ phase: 'Podium', points: sum(podium), count: 1 });
+  const matches = scored.filter((r) => r.type === 'Match' && r.status === 'Terminé');
+  const exact = matches.filter((r) => r.details.some((d) => d === 'Score exact : +3')).length;
+  const winners = matches.filter((r) => r.points > 0).length;
+  const best = [...scored].sort((a, b) => b.points - a.points)[0] || null;
+  const table = await standings(db, { competitionId: competition.id });
+  const me = table.find((r) => r.id === userId);
+  return {
+    competition: { id: competition.id, name: competition.name, tournamentId: competition.tournamentId },
+    tournamentName: competition.tournament?.name || '',
+    finished: Boolean(competition.podiumResolvedAt || final),
+    points: sum(scored),
+    predictions: scored.length,
+    rank: me?.rank ?? null,
+    players: table.length,
+    phases,
+    exact,
+    winners,
+    played: matches.length,
+    best:
+      best && best.points > 0
+        ? {
+            type: best.type,
+            name: best.name,
+            round: best.round || null,
+            prediction: best.prediction,
+            result: best.result,
+            points: best.points,
+          }
+        : null,
+  };
+}
+router.get('/recap/:competitionId', async (req, res) => {
+  try {
+    const competition = await db.competition.findUnique({
+      where: { id: id(req.params.competitionId) },
+      include: { tournament: { select: { name: true } } },
+    });
+    if (!competition) return res.status(404).json({ error: 'Épreuve introuvable.' });
+    res.json(await competitionRecap(competition, req.user.userId));
+  } catch (e) {
+    reportError(e, 'personal');
+    res.status(e.status || 500).json({ error: e.status ? e.message : 'Récap indisponible.' });
+  }
+});
 router.get('/predictions', async (req, res) => {
   try {
     const competitionId = id(req.query.competitionId);
@@ -465,3 +528,4 @@ router.get('/season', async (req, res) => {
   }
 });
 module.exports = router;
+module.exports.competitionRecap = competitionRecap;
