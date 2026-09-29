@@ -17,6 +17,15 @@ function safeMailError(error) {
   });
 }
 
+// Adresse de test de Resend (sans domaine vérifié) : Resend n'envoie alors qu'au titulaire du compte.
+// Les alertes administrateur fonctionnent, pas les e-mails aux joueurs (mot de passe oublié).
+function sandboxSender() {
+  return /@resend\.dev>?\s*$/i.test(process.env.MAIL_FROM?.trim() || '');
+}
+function playerMailAvailable() {
+  return mailConfigured() && !sandboxSender();
+}
+
 async function sendMail({ to, subject, html, text }, http = axios) {
   if (!mailConfigured()) throw Object.assign(new Error('Envoi d’e-mails non configuré.'), { status: 503 });
   try {
@@ -30,4 +39,4 @@ async function sendMail({ to, subject, html, text }, http = axios) {
   }
 }
 
-module.exports = { mailConfigured, sendMail, safeMailError };
+module.exports = { mailConfigured, playerMailAvailable, sandboxSender, sendMail, safeMailError };

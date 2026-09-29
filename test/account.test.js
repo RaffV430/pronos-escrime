@@ -189,3 +189,22 @@ test('account deletion requires the password and cleans leagues and challenge pi
     'shared league goes to the oldest member, empty league removed',
   );
 });
+
+test('password reset hidden while Resend only has its test sender (no verified domain)', () => {
+  const mailer = require('../src/services/mailer');
+  const saved = { key: process.env.RESEND_API_KEY, from: process.env.MAIL_FROM };
+  try {
+    process.env.RESEND_API_KEY = 're_test';
+    process.env.MAIL_FROM = 'Pronos Escrime <onboarding@resend.dev>';
+    assert.equal(mailer.mailConfigured(), true, 'admin alerts still sent');
+    assert.equal(mailer.sandboxSender(), true);
+    assert.equal(mailer.playerMailAvailable(), false);
+    process.env.MAIL_FROM = 'Pronos Escrime <alertes@pronos-escrime.fr>';
+    assert.equal(mailer.playerMailAvailable(), true);
+  } finally {
+    if (saved.key === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = saved.key;
+    if (saved.from === undefined) delete process.env.MAIL_FROM;
+    else process.env.MAIL_FROM = saved.from;
+  }
+});
