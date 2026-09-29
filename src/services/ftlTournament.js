@@ -2,6 +2,7 @@ const { load } = require('cheerio');
 const { createClient, failure, ORIGIN } = require('./ftlClient');
 const { clean, norm } = require('./ftlParser');
 const { parseRoster, SOURCE, configuration } = require('./ftlConfiguration');
+const { cleanCity, utcOffset, offsetLabel } = require('./venue');
 const SCHEDULE = /^https:\/\/www\.fencingtimelive\.com\/tournaments\/eventSchedule\/([a-f0-9]{32})$/i;
 const CONFIG = 'Configuration FTL validée';
 function scheduleUrl(value) {
@@ -16,7 +17,7 @@ function scheduleUrl(value) {
   u.pathname = u.pathname.replace(/[a-f0-9]{32}$/i, (id) => id.toUpperCase());
   return u.href;
 }
-function parseSchedule(html, sourceUrl, timezone) {
+function parseSchedule(html, sourceUrl, timezone, city = null) {
   try {
     if (!timezone) throw Error();
     new Intl.DateTimeFormat('en', { timeZone: timezone });
@@ -55,6 +56,7 @@ function parseSchedule(html, sourceUrl, timezone) {
           time,
           format: /\bteam\b/i.test(event) ? 'TEAM' : 'INDIVIDUAL',
           timezone,
+          ...(city ? { city } : {}),
           tournament,
           scheduleUrl: sourceUrl,
         });
@@ -62,7 +64,7 @@ function parseSchedule(html, sourceUrl, timezone) {
   });
   if (!events.length || events.length > 128 || new Set(events.map((e) => e.eventId)).size !== events.length)
     throw failure('Liste des épreuves absente ou incohérente.');
-  return { sourceUrl, tournament, timezone, events };
+  return { sourceUrl, tournament, timezone, ...(city ? { city } : {}), events };
 }
 function linksOf($) {
   return $('a[href]')
@@ -154,9 +156,21 @@ function matching(existing, eventId) {
 async function preview(db, input, actorId, client = createClient()) {
   const sourceUrl = scheduleUrl(input.sourceUrl);
   await client.login();
-  const parsed = parseSchedule(await client.get(sourceUrl), sourceUrl, String(input.timezone || ''));
+  const parsed = parseSchedule(
+    await client.get(sourceUrl),
+    sourceUrl,
+    String(input.timezone || ''),
+    cleanCity(input.city),
+  );
   const existing = await db.competition.findMany({ select: linkedSelection });
   const events = parsed.events.map((e) => ({ ...e, existingCompetitionId: matching(existing, e.eventId)?.id || null }));
+  // Heure de début convertie en UTC : l'interface l'affiche aussi à l'heure de Paris pour vérification.
+  const { eventStart } = require('./eventStart');
+  const first = eventStart(parsed.events[0]);
+  const shown = events.map((e) => {
+    const start = eventStart(e);
+    return { ...e, startsAt: start ? new Date(start).toISOString() : null };
+  });
   const saved = await db.auditLog.create({
     data: {
       actorId,
@@ -166,7 +180,12 @@ async function preview(db, input, actorId, client = createClient()) {
       after: { ...parsed, events },
     },
   });
-  return { ...parsed, events, previewId: saved.id };
+  return {
+    ...parsed,
+    events: shown,
+    offset: offsetLabel(utcOffset(parsed.timezone, first || Date.now())),
+    previewId: saved.id,
+  };
 }
 async function save(db, input, actorId, client = createClient()) {
   const previewId = Number(input.previewId),
@@ -191,7 +210,12 @@ async function save(db, input, actorId, client = createClient()) {
   const selected = entry.after.events.filter((e) => ids.includes(e.eventId));
   if (selected.length !== ids.length) throw failure('Sélection extérieure à cet aperçu.', 400);
   await client.login();
-  const fresh = parseSchedule(await client.get(entry.after.sourceUrl), entry.after.sourceUrl, entry.after.timezone);
+  const fresh = parseSchedule(
+    await client.get(entry.after.sourceUrl),
+    entry.after.sourceUrl,
+    entry.after.timezone,
+    entry.after.city || null,
+  );
   const observations = [];
   for (const e of selected) {
     const latest = fresh.events.find((x) => x.eventId === e.eventId);
