@@ -231,13 +231,24 @@ function roundAlertPlan(matches, round, now = Date.now()) {
 async function notificationContext(db) {
   const competitions = await db.competition.findMany({ where: { tournament: { archivedAt: null } } });
   const ids = competitions.map((c) => c.id);
-  const [matches, rounds, pools] = await Promise.all([
+  const [matches, rounds, pools, reopenings] = await Promise.all([
     ids.length ? db.match.findMany({ where: { competitionId: { in: ids } } }) : [],
     ids.length ? db.matchRound.findMany({ where: { competitionId: { in: ids } } }) : [],
     ids.length && db.pool
       ? db.pool.findMany({
           where: { competitionId: { in: ids } },
           select: { id: true, competitionId: true, isFinal: true, fencers: { select: { firstResultAt: true } } },
+        })
+      : [],
+    // Horaires publiés après une clôture par défaut (2 dernières heures).
+    ids.length && db.auditLog
+      ? db.auditLog.findMany({
+          where: {
+            action: require('./ftlSync').REOPEN_ACTION,
+            targetType: 'Match',
+            createdAt: { gte: new Date(Date.now() - 2 * 3600e3) },
+          },
+          select: { targetId: true, after: true },
         })
       : [],
   ]);
@@ -247,6 +258,7 @@ async function notificationContext(db) {
     matches: timed.filter((m) => m.competitionId === c.id),
     rounds: rounds.filter((r) => r.competitionId === c.id),
     pools: (pools || []).filter((p) => p.competitionId === c.id),
+    reopened: (reopenings || []).filter((r) => r.after?.competitionId === c.id).map((r) => r.targetId),
   }));
 }
 // Toutes les poules de l'épreuve sont publiées : date du dernier blocage connu (approximation de la fin).
@@ -257,6 +269,13 @@ function poolsFinishedAt(pools = []) {
 }
 const poolResultsText = (points, fencers) =>
   `Poules terminées · ${points} point${points > 1 ? 's' : ''} (${fencers} tireur${fencers > 1 ? 's' : ''} pronostiqué${fencers > 1 ? 's' : ''})`;
+const reopenedText = (round, start, timezone = 'Europe/Paris') =>
+  `${roundLabel(round)} · horaire publié : pronostics rouverts jusqu’à ${new Intl.DateTimeFormat('fr-FR', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(start))}`;
 const recapText = (r) =>
   `Épreuve terminée · ${r.points} point${r.points > 1 ? 's' : ''}` +
   (r.rank ? ` · ${r.rank === 1 ? '1er' : `${r.rank}e`} sur ${r.players}` : '') +
@@ -339,6 +358,30 @@ async function queueSpecial(db, id, context = null) {
           });
         }
       }
+      // Horaire publié après la clôture par défaut : pronostics rouverts, une alerte par match.
+      if (p.newMatches)
+        for (const x of shared.filter((y) => follows(sub, y.competition)))
+          for (const matchId of x.reopened || [])
+            await tx.pushDelivery.upsert({
+              where: {
+                subscriptionId_competitionId_throughEventId_kind_round: {
+                  subscriptionId: id,
+                  competitionId: x.competition.id,
+                  throughEventId: 0,
+                  kind: 'REOPENED',
+                  round: `match-${matchId}`,
+                },
+              },
+              create: {
+                subscriptionId: id,
+                competitionId: x.competition.id,
+                throughEventId: 0,
+                kind: 'REOPENED',
+                round: `match-${matchId}`,
+                matchIds: [matchId],
+              },
+              update: {},
+            });
       if (!p.newMatches && !p.reminders && !p.roundResults) return;
       const followed = shared.filter((x) => follows(sub, x.competition) && x.matches.length);
       if (!followed.length) return;
@@ -448,7 +491,8 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     (kind === 'REMINDER' && !prefs.reminders) ||
     (kind === 'ROUND' && !prefs.roundResults) ||
     (kind === 'POOLRESULTS' && !prefs.poolResults) ||
-    (kind === 'RECAP' && !prefs.roundResults && !prefs.poolResults)
+    (kind === 'RECAP' && !prefs.roundResults && !prefs.poolResults) ||
+    (kind === 'REOPENED' && !prefs.newMatches)
   )
     return cancel();
   let content, ttl;
@@ -510,6 +554,21 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
       body: `${roundLabel(round)} · tour terminé · ${recap.total} match${recap.total > 1 ? 's' : ''} · ${recap.points} point${recap.points > 1 ? 's' : ''}`,
       tag: `pronos-${id}`,
       url: `/?tournament=${c.tournamentId}&event=${c.id}&view=mine`,
+    };
+  } else if (kind === 'REOPENED') {
+    const matchId = delivery.matchIds[0];
+    const raw = await db.match.findMany({ where: { competitionId: c.id } });
+    const m = (await timedMatches(db, raw)).find((x) => x.id === matchId);
+    const start = m?.startsAt ? new Date(m.startsAt).getTime() : NaN;
+    if (!m || matchClosed(m) || !(start - Date.now() > 5 * 60000)) return cancel();
+    const own = await db.prediction.count({ where: { userId: sub.userId, matchId } });
+    if (own) return cancel();
+    ttl = Math.max(60, Math.min(3600, Math.floor((start - Date.now()) / 1000)));
+    content = {
+      title: c.name,
+      body: reopenedText(m.round, start, prefs.timezone),
+      tag: `pronos-${id}`,
+      url: `/?tournament=${c.tournamentId}&event=${c.id}&matches=${matchId}`,
     };
   } else if (kind === 'RECAP') {
     if (Date.now() - delivery.createdAt.getTime() > 86400000) return cancel();
@@ -657,6 +716,7 @@ module.exports = {
   poolsFinishedAt,
   poolResultsText,
   recapText,
+  reopenedText,
   retireLegacy,
   roundAlertPlan,
   queueSpecial,
