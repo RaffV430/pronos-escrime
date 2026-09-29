@@ -107,12 +107,27 @@ function parseTable(
           ? localTime(date, h, +m, timezone)
           : new Date(`${date}T${String(h).padStart(2, '0')}:${m}:00${offset}`);
       }
+      // Piste annoncée par FencingTimeLive (« 1:00 PM Strip 11 », « Strip Blue ») : information
+      // d'affichage seulement, ignorée si elle est absente ou ambiguë.
+      const strips = [
+        ...new Set(
+          [
+            ...cell(mid, c + 1)
+              .find('.ttistr')
+              .toArray(),
+            ...scoreCell.find('.tref').toArray(),
+          ]
+            .map((e) => /\bStrip\s+([A-Za-z0-9][A-Za-z0-9 -]{0,19})$/i.exec(clean($(e).text()))?.[1]?.trim())
+            .filter(Boolean),
+        ),
+      ];
       out.push({
         sourceKey: `${label}:${i / 2 + 1}`,
         round,
         player1,
         player2,
         startsAt,
+        strip: strips.length === 1 ? strips[0] : null,
         winner,
         score1,
         score2,

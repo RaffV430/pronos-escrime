@@ -5,6 +5,19 @@ const { poolPoints, validateResults } = require('./poolRules');
 const { rescore } = require('./rescore');
 const WITHDRAWALS = new Set(['Failed to Appear', 'Medical Withdrawal']);
 const pattern = /^https:\/\/www\.fencingtimelive\.com\/pools\/scores\/([a-f0-9]{32})\/[a-f0-9]{32}$/i;
+// « On strip 10 at 9:00 AM » / « On strip 4 » : piste et heure locale du lieu (affichage seulement,
+// jamais bloquant). L'heure est convertie avec le fuseau de l'épreuve lors de l'import.
+function stripTime(text) {
+  const m = /^On strip\s+([A-Za-z0-9][A-Za-z0-9 -]{0,19}?)(?:\s+at\s+(\d{1,2}):(\d{2})\s*(AM|PM))?$/i.exec(clean(text));
+  if (!m) return { strip: null, time: null };
+  const h = Number(m[2]),
+    min = Number(m[3]);
+  const time =
+    m[2] && h >= 1 && h <= 12 && min <= 59
+      ? { hour: (h % 12) + (m[4].toUpperCase() === 'PM' ? 12 : 0), minute: min }
+      : null;
+  return { strip: m[1].trim(), time };
+}
 function parsePools(html) {
   const $ = load(html),
     tables = $('table.poolTable').toArray();
@@ -121,6 +134,7 @@ function parsePools(html) {
       number,
       complete,
       ambiguous,
+      ...stripTime(container.find('.poolStripTime').text()),
       rows: rows.map((r, i) => ({
         name: r.name,
         position: r.position,
@@ -197,8 +211,12 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
     data: {
       ...(!observed.ambiguous ? { sourceCheckedAt: checkedAt } : {}),
       ...(observed.complete ? { isFinal: true, isLocked: true } : {}),
+      ...(observed.strip && observed.strip !== current.strip ? { strip: observed.strip } : {}),
+      ...(observed.startsAt && observed.startsAt.getTime() !== current.startsAt?.getTime()
+        ? { startsAt: observed.startsAt }
+        : {}),
     },
   });
   return { locks, pointsUpdated, changed, finalized: observed.complete && !current.isFinal ? 1 : 0 };
 }
-module.exports = { parsePools, applyPool, pattern };
+module.exports = { parsePools, applyPool, pattern, stripTime };
