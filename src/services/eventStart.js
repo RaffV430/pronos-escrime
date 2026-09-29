@@ -3,7 +3,11 @@
 const MAX_OFFSET = 14 * 3600000; // fuseau le plus en avance (UTC+14), si le fuseau est inconnu.
 // « 9:00 AM » (calendrier) ou « Saturday, September 26, 2026 9:00 AM » (page de l'épreuve).
 function localMinutes(config) {
-  const m = /(\d{1,2}):(\d{2})\s*(AM|PM)\s*$/i.exec(String(config?.time || config?.eventTime || '').trim());
+  const text = String(config?.time || config?.eventTime || '').trim();
+  // engarde-service : « 08:00 » (24 h).
+  const h24 = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(text);
+  if (h24) return Number(h24[1]) * 60 + Number(h24[2]);
+  const m = /(\d{1,2}):(\d{2})\s*(AM|PM)\s*$/i.exec(text);
   if (!m) return 0;
   const h = (Number(m[1]) % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0);
   return h * 60 + Number(m[2]);

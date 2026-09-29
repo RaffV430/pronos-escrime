@@ -597,66 +597,80 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     let config = configured || events[eventId];
     if (!config || c.name !== config.name || c.podiumFormat !== config.format)
       throw failure('Configurez la source et l’identité de cette épreuve dans Administration.', 409);
-    await client.login();
-    ({ c, config } = await require('./ftlTournament').refreshPending(db, c, config, actorId, client));
-    let discoveryWarning = null;
-    try {
-      config = await require('./ftlTournament').discoverTableau(db, c, config, actorId, client);
-    } catch (e) {
-      discoveryWarning = e.status ? e.message : 'Recherche du tableau officiel impossible pour le moment.';
-    }
-    const poolSummary = await syncPools(db, c, config, actorId, client, claim.token);
-    let summary = {
-      createdIds: [],
-      created: 0,
-      results: 0,
-      corrections: 0,
-      pointsUpdated: 0,
-      podium: false,
-      checked: 0,
-      checkedAt: new Date().toISOString(),
-      warnings: [],
-    };
-    if (existing.some((m) => m.sourceUrl) || config.sourceUrl) {
+    let poolSummary,
+      summary,
+      discoveryWarning = null;
+    if (config.provider === 'engarde') {
+      // engarde-service : engagés, poules et tableau lus par son module, importés par ce même moteur.
+      ({ c, poolSummary, summary } = await require('./engardeSync').control(
+        db,
+        c,
+        config,
+        actorId,
+        claim,
+        client?.engarde,
+      ));
+    } else {
+      await client.login();
+      ({ c, config } = await require('./ftlTournament').refreshPending(db, c, config, actorId, client));
       try {
-        let observation = await observe(
-          c,
-          existing.filter((m) => m.resultType !== 'CANCELLED'),
-          client,
-          config,
-          true,
-        );
-        const conflicts = planMatches(existing, observation, { allowPartial: true }).conflicts;
-        if (
-          conflicts.some((i) =>
-            cancellable(
-              existing.find((m) => m.id === i.id),
-              observation,
-            ),
-          )
-        ) {
-          const confirmation = await observe(
+        config = await require('./ftlTournament').discoverTableau(db, c, config, actorId, client);
+      } catch (e) {
+        discoveryWarning = e.status ? e.message : 'Recherche du tableau officiel impossible pour le moment.';
+      }
+      poolSummary = await syncPools(db, c, config, actorId, client, claim.token);
+      summary = {
+        createdIds: [],
+        created: 0,
+        results: 0,
+        corrections: 0,
+        pointsUpdated: 0,
+        podium: false,
+        checked: 0,
+        checkedAt: new Date().toISOString(),
+        warnings: [],
+      };
+      if (existing.some((m) => m.sourceUrl) || config.sourceUrl) {
+        try {
+          let observation = await observe(
             c,
             existing.filter((m) => m.resultType !== 'CANCELLED'),
             client,
             config,
             true,
           );
-          if (drawSignature(observation) !== drawSignature(confirmation))
-            throw failure('Le tableau officiel change pendant le contrôle. Nouvelle vérification nécessaire.');
-          observation = { ...confirmation, drawConfirmed: true };
+          const conflicts = planMatches(existing, observation, { allowPartial: true }).conflicts;
+          if (
+            conflicts.some((i) =>
+              cancellable(
+                existing.find((m) => m.id === i.id),
+                observation,
+              ),
+            )
+          ) {
+            const confirmation = await observe(
+              c,
+              existing.filter((m) => m.resultType !== 'CANCELLED'),
+              client,
+              config,
+              true,
+            );
+            if (drawSignature(observation) !== drawSignature(confirmation))
+              throw failure('Le tableau officiel change pendant le contrôle. Nouvelle vérification nécessaire.');
+            observation = { ...confirmation, drawConfirmed: true };
+          }
+          summary = await db.$transaction((tx) => applyObservation(tx, c, observation, actorId, claim.token), {
+            timeout: 30000,
+            maxWait: 5000,
+          });
+        } catch (e) {
+          if (!poolSummary.checked) throw e;
+          summary.warnings.push(e.status ? e.message : 'Tableau non vérifiable pour le moment.');
         }
-        summary = await db.$transaction((tx) => applyObservation(tx, c, observation, actorId, claim.token), {
-          timeout: 30000,
-          maxWait: 5000,
-        });
-      } catch (e) {
-        if (!poolSummary.checked) throw e;
-        summary.warnings.push(e.status ? e.message : 'Tableau non vérifiable pour le moment.');
       }
+      // Simple information, pas une anomalie : le suivi reste « à jour » et garde son rythme normal.
+      else summary.notes = ['Tableau pas encore publié. Il sera recherché au prochain contrôle.'];
     }
-    // Simple information, pas une anomalie : le suivi reste « à jour » et garde son rythme normal.
-    else summary.notes = ['Tableau pas encore publié. Il sera recherché au prochain contrôle.'];
     if (discoveryWarning) summary.warnings.push(discoveryWarning);
     summary.automatic = automatic;
     summary.eventDate = config.date;

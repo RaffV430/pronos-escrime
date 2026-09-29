@@ -35,7 +35,10 @@ function parseRoster(rows) {
 }
 async function preview(db, input, actorId, client = createClient()) {
   if (require('./engardeParser').parseLink(input.sourceUrl))
-    return require('./engardeTournament').preview(db, input, actorId);
+    throw failure(
+      'Pour engarde-service, utilisez « Préparer un tournoi » avec le lien du tournoi ou d’une épreuve.',
+      400,
+    );
   const sourceUrl = String(input.sourceUrl || '').trim(),
     match = SOURCE.exec(sourceUrl);
   if (!match)

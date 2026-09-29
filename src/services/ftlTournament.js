@@ -192,6 +192,11 @@ async function preview(db, input, actorId, client = createClient()) {
   };
 }
 async function save(db, input, actorId, client = createClient()) {
+  // Aperçu engarde-service : enregistrement par son module.
+  const preview = Number.isSafeInteger(Number(input.previewId))
+    ? await db.auditLog.findUnique({ where: { id: Number(input.previewId) } })
+    : null;
+  if (preview?.targetType === 'EngardePreview') return require('./engardeTournament').save(db, input, actorId);
   const previewId = Number(input.previewId),
     ids = input.eventIds;
   if (

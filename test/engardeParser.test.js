@@ -64,10 +64,12 @@ test('pools: wins, losses and official indicator, with time and strip from the h
   assert.deepEqual(pools[0].time, { hour: 12, minute: 30 });
   assert.equal(pools[0].strip, '1');
   assert.equal(pools[0].complete, true);
-  const bolore = pools[0].fencers.find((f) => f.name === 'BOLORE Mélisande');
+  const bolore = pools[0].rows.find((f) => f.name === 'BOLORE Mélisande');
   assert.deepEqual([bolore.wins, bolore.losses, bolore.indicator], [6, 0, 21]);
-  const li = pools[1].fencers.find((f) => f.name === 'LI Helene Zhixuan');
-  assert.deepEqual([li.wins, li.losses, li.bouts, li.indicator], [5, 0, 5, 19]);
+  const li = pools[1].rows.find((f) => f.name === 'LI Helene Zhixuan');
+  assert.deepEqual([li.wins, li.losses, li.indicator, li.firstResult], [5, 0, 19, true]);
+  const marcel = pools[0].rows[0];
+  assert.deepEqual([marcel.touches, marcel.received, marcel.position], [25, 17, 1]);
 });
 
 test('tableau: matches by official slot, byes skipped, winner, score, time and strip', () => {
@@ -135,7 +137,10 @@ test('a match without a published winner stays open', () => {
 test('admin preview of an engarde-service tournament lists events, venue time zone and entries', async () => {
   const { preview } = require('../src/services/engardeTournament');
   const logged = [];
-  const db = { auditLog: { create: async ({ data }) => (logged.push(data), { id: 42 }) } };
+  const db = {
+    auditLog: { create: async ({ data }) => (logged.push(data), { id: 42 }) },
+    competition: { findUnique: async () => null },
+  };
   const menu = (compe) =>
     ['tireurs.htm', 'poules1.htm', 'tableau128-32.htm', 'tableau16.htm', 'clasfinal.htm']
       .map((f) => `<a class="link-competition" href="/competition/life/idf1fm20mennecy/${compe}/${f}">x</a>`)
