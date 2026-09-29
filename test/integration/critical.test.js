@@ -271,3 +271,42 @@ test('d) le pronostic de poule d’un tireur est refusé dès son premier résul
   // Verrou par tireur : les autres tireurs de la poule restent ouverts.
   assert.equal((await put(second, { wins: 1, losses: 2, indicator: -3 })).status, 200);
 });
+
+test('e) face-à-face : rencontres passées dans les deux sens, forme récente, match courant exclu', opts, async () => {
+  const user = await createUser();
+  const t = tag();
+  const [a, b, c] = [`ALPHA ${t}`, `BRAVO ${t}`, `CHARLIE ${t}`];
+  const old = await createCompetition();
+  const done = (player1, player2, score1, score2, days) =>
+    prisma.match.create({
+      data: {
+        competitionId: old.id,
+        player1,
+        player2,
+        score1,
+        score2,
+        winner: score1 > score2 ? 1 : 2,
+        isFinished: true,
+        round: 'T16',
+        startsAt: new Date(Date.now() - days * 86400000),
+      },
+    });
+  await done(a, b, 15, 9, 30);
+  await done(b.toLowerCase(), a, 15, 13, 10); // autre casse, ordre inversé
+  await done(a, c, 15, 2, 5);
+  const current = await createOpenMatch((await createCompetition()).id, { player1: a, player2: b });
+  const res = await call('GET', `/api/matches/${current.id}/h2h`, user.token);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.summary, { wins1: 1, wins2: 1 });
+  assert.deepEqual(
+    res.body.meetings.map((m) => m.score),
+    [
+      [13, 15],
+      [15, 9],
+    ],
+    'most recent first, scores from player 1’s side',
+  );
+  assert.equal(res.body.form.player1.length, 3, 'all finished bouts of player 1, the current one excluded');
+  assert.equal(res.body.form.player1[0].opponent, c);
+  assert.equal((await call('GET', '/api/matches/999999999/h2h', user.token)).status, 404);
+});

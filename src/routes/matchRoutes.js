@@ -110,6 +110,16 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
 });
 
 // 4. POST : Ajouter ou modifier un pronostic
+// Face-à-face des deux tireurs et forme récente (épreuves déjà suivies par l'application).
+router.get('/:id/h2h', authMiddleware, async (req, res) => {
+  try {
+    res.json(await require('../services/headToHead').headToHead(prisma, Number(req.params.id)));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    reportError(error, 'face-à-face');
+    res.status(500).json({ error: 'Face-à-face indisponible.' });
+  }
+});
 router.post('/:id/predict', authMiddleware, async (req, res) => {
   const matchId = Number(req.params.id);
   const userId = req.user.userId;
