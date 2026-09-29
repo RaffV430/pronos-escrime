@@ -76,7 +76,7 @@ test('round alerts are idempotent, per-device opt-in, and never backfill old rou
   const db = {
     $queryRaw: async () => [],
     pushSubscription: { findUnique: async () => sub },
-    competition: { findMany: async () => [{ id: 5 }] },
+    competition: { findMany: async () => [{ id: 5, tournamentId: 1 }] },
     match: {
       findMany: async () => [
         {
@@ -97,6 +97,11 @@ test('round alerts are idempotent, per-device opt-in, and never backfill old rou
         if (!del.some((d) => d.kind === create.kind && d.round === create.round)) del.push(create);
       },
     },
+  };
+  // Pronostics du joueur, lus séparément des matchs (une requête par abonné).
+  db.prediction = {
+    findMany: async () =>
+      (await db.match.findMany()).flatMap((m) => (m.predictions || []).map((p) => ({ ...p, matchId: m.id }))),
   };
   db.$transaction = (f) => f(db);
   await push.queueSpecial(db, 's');

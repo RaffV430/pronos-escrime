@@ -226,7 +226,24 @@ function roundAlertPlan(matches, round, now = Date.now()) {
     urgent,
   };
 }
-async function queueSpecial(db, id) {
+// Contexte commun à tous les abonnements pour un passage de la tâche : épreuves des tournois non
+// archivés, leurs matchs (sans pronostics) et leurs tours, lus une seule fois au lieu d'une fois par abonné.
+async function notificationContext(db) {
+  const competitions = await db.competition.findMany({ where: { tournament: { archivedAt: null } } });
+  const ids = competitions.map((c) => c.id);
+  const [matches, rounds] = await Promise.all([
+    ids.length ? db.match.findMany({ where: { competitionId: { in: ids } } }) : [],
+    ids.length ? db.matchRound.findMany({ where: { competitionId: { in: ids } } }) : [],
+  ]);
+  const timed = await timedMatches({ matchRound: { findMany: async () => rounds } }, matches);
+  return competitions.map((c) => ({
+    competition: c,
+    matches: timed.filter((m) => m.competitionId === c.id),
+    rounds: rounds.filter((r) => r.competitionId === c.id),
+  }));
+}
+async function queueSpecial(db, id, context = null) {
+  const shared = context || (await notificationContext(db));
   return db.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT id FROM "PushSubscription" WHERE id=${id} FOR UPDATE`;
@@ -234,16 +251,16 @@ async function queueSpecial(db, id) {
       if (!sub?.enabled) return;
       const p = preferences(sub.preferences || {});
       if ((!p.newMatches && !p.reminders && !p.roundResults) || isQuiet(p)) return;
-      const competitions = await tx.competition.findMany({
-        where: { OR: [{ id: { in: sub.competitionIds } }, { tournamentId: { in: sub.tournamentIds } }] },
+      const followed = shared.filter((x) => follows(sub, x.competition) && x.matches.length);
+      if (!followed.length) return;
+      // Pronostics de ce joueur sur les matchs suivis, en une seule requête.
+      const saved = await tx.prediction.findMany({
+        where: { userId: sub.userId, matchId: { in: followed.flatMap((x) => x.matches.map((m) => m.id)) } },
       });
-      for (const c of competitions) {
-        const raw = await tx.match.findMany({
-            where: { competitionId: c.id },
-            include: { predictions: { where: { userId: sub.userId } } },
-          }),
-          matches = await timedMatches(tx, raw);
-        const rounds = await tx.matchRound.findMany({ where: { competitionId: c.id } });
+      const byMatch = new Map();
+      for (const s of saved) byMatch.set(s.matchId, [...(byMatch.get(s.matchId) || []), s]);
+      for (const { competition: c, matches: timed, rounds } of followed) {
+        const matches = timed.map((m) => ({ ...m, predictions: byMatch.get(m.id) || [] }));
         const recaps = roundSummaries(matches, rounds);
         for (const round of rounds) {
           const plan = roundAlertPlan(matches, round);
@@ -447,20 +464,26 @@ async function retireLegacy(db) {
     data: { status: 'CANCELLED' },
   });
 }
+let legacyRetired = false;
 async function dispatch(db, sender = send) {
   if (running) return;
   running = true;
   try {
-    await retireLegacy(db);
+    // Ancien format d'alertes : conversion une seule fois par démarrage (jointure coûteuse).
+    if (!legacyRetired) {
+      await retireLegacy(db);
+      legacyRetired = true;
+    }
     // Resume interrupted sends with the same notification tag, never a new event.
     await db.pushDelivery.updateMany({
       where: { status: 'SENDING', claimedAt: { lt: new Date(Date.now() - 120000) } },
       data: { status: 'PENDING' },
     });
     const subs = await db.pushSubscription.findMany({ where: { enabled: true }, select: { id: true } });
+    const context = subs.length ? await notificationContext(db) : [];
     for (const sub of subs) {
       await queueForSubscription(db, sub.id);
-      await queueSpecial(db, sub.id);
+      await queueSpecial(db, sub.id, context);
     }
     const pending = await db.pushDelivery.findMany({
       where: { status: 'PENDING', nextAttemptAt: { lte: new Date() } },
@@ -492,17 +515,24 @@ function startWorker(db) {
     return () => {};
   }
   console.log('Notifications actives (envoi toutes les 30 s).');
+  let current = null;
   const tick = () =>
-    dispatch(db).catch((error) => {
-      console.warn('Notifications temporairement indisponibles.');
-      reportError(error, 'tâche des notifications');
-    });
+    (current = dispatch(db)
+      .then(() => require('../lib/heartbeat').beat('push'))
+      .catch((error) => {
+        console.warn('Notifications temporairement indisponibles.');
+        reportError(error, 'tâche des notifications');
+      }));
   const timer = setInterval(tick, 30000);
   timer.unref();
   tick();
-  return () => clearInterval(timer);
+  return () => {
+    clearInterval(timer);
+    return current;
+  };
 }
 module.exports = {
+  notificationContext,
   retireLegacy,
   roundAlertPlan,
   queueSpecial,

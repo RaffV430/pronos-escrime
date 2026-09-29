@@ -4,6 +4,7 @@ const { failure } = require('./ftlClient');
 const events = require('./ftlEvents');
 const { eventComplete, archiveCompleted } = require('./tournamentArchive');
 const { configuration } = require('./ftlConfiguration');
+const CONCURRENCY = 3;
 const INTERVAL = 120000,
   LEASE = 180000,
   LEAD = 60000;
@@ -93,15 +94,22 @@ async function tick(db, { sync, archive = archiveCompleted, now = new Date() } =
   running = true;
   const outcomes = [];
   try {
+    // Seules les épreuves dont le contrôle est dû sont relues (avec leurs matchs) : les autres attendent
+    // leur heure sans coûter une lecture complète toutes les 30 s.
+    const states = await db.ftlSyncState.findMany();
+    const notDue = states
+      .filter((s) => s.nextAutomaticAt === null || s.nextAutomaticAt > now || s.leaseUntil > now)
+      .map((s) => s.competitionId);
     const competitions = await db.competition.findMany({
       where: {
         tournament: { archivedAt: null },
         OR: [{ rosterSourceUrl: { not: null } }, { ftlEventId: { not: null } }],
+        ...(notDue.length ? { id: { notIn: notDue } } : {}),
       },
       include: { matches: true, pools: true, matchRounds: true },
       orderBy: { id: 'asc' },
     });
-    const states = await db.ftlSyncState.findMany();
+    const due = [];
     for (const c of competitions) {
       const state = states.find((s) => s.competitionId === c.id);
       if (
@@ -130,16 +138,31 @@ async function tick(db, { sync, archive = archiveCompleted, now = new Date() } =
         });
         continue;
       }
+      due.push(c);
+    }
+    // Plusieurs épreuves le même jour : contrôles en parallèle (3 à la fois), chacune garde son propre verrou.
+    const runOne = async (c) => {
       try {
         // Actor 0 is the service, never a user's identity. Each event has its own claim/cooldown.
         const result = await (sync || require('./ftlSync').syncCompetition)(db, c.id, 0, undefined, {
           automatic: true,
         });
-        outcomes.push({ competitionId: c.id, ok: true, created: result?.created || 0 });
+        return { competitionId: c.id, ok: true, created: result?.created || 0 };
       } catch (e) {
-        outcomes.push({ competitionId: c.id, ok: false, status: e.status || 500 });
+        return { competitionId: c.id, ok: false, status: e.status || 500 };
       }
-    }
+    };
+    let next = 0;
+    const results = new Array(due.length);
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, due.length) }, async () => {
+        while (next < due.length) {
+          const i = next++;
+          results[i] = await runOne(due[i]);
+        }
+      }),
+    );
+    outcomes.push(...results);
     await archive(db, { now });
     return outcomes;
   } finally {
@@ -152,14 +175,22 @@ function startWorker(db) {
     return () => {};
   }
   console.log('Suivi FencingTimeLive automatique actif (contrôle toutes les 30 s).');
+  let current = null;
   const run = () =>
-    tick(db).catch((error) => {
-      console.warn('Contrôles automatiques temporairement indisponibles.');
-      reportError(error, 'tâche FencingTimeLive');
-    });
+    (current = tick(db)
+      .then(() => require('../lib/heartbeat').beat('ftl'))
+      .catch((error) => {
+        console.warn('Contrôles automatiques temporairement indisponibles.');
+        reportError(error, 'tâche FencingTimeLive');
+      }));
   const timer = setInterval(run, 30000);
   timer.unref();
   run();
-  return () => clearInterval(timer);
+  // Arrêt : plus de nouveau passage ; renvoie le passage en cours pour que l'arrêt l'attende
+  // (le verrou de l'épreuve est ainsi libéré proprement avant un redéploiement).
+  return () => {
+    clearInterval(timer);
+    return current;
+  };
 }
 module.exports = { enabled, claim, finish, assertClaim, configFor, windowDelay, tick, startWorker, INTERVAL };

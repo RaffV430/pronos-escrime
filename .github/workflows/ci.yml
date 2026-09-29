@@ -34,3 +34,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      # Résumé lisible depuis l'API GitHub (annotation) : tests sur la vraie base bien exécutés, pas ignorés.
+      - name: Résumé des tests sur base réelle
+        if: always()
+        run: |
+          node --test test/integration > integration.log 2>&1 || true
+          echo "::notice title=Tests base réelle::$(grep -E '^# (tests|pass|fail|skipped)' integration.log | tr '\n' ' ')"
