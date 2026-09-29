@@ -70,6 +70,17 @@ async function finish(db, competitionId, token, summary, error = null, now = new
   await require('./syncHealth')
     .alertAdmins(db, { competitionId, failures, previousFailures: state.failures || 0, error })
     .catch(() => {});
+  // Phase finale close faute d'horaire : alerte des administrateurs (une fois par match).
+  if (!error)
+    try {
+      const competition = await db.competition.findUnique({
+        where: { id: competitionId },
+        select: { id: true, name: true, tournamentId: true },
+      });
+      if (competition) await require('./syncHealth').alertClosedWithoutTime(db, competition);
+    } catch {
+      /* alerte facultative */
+    }
 }
 async function assertClaim(tx, competitionId, token) {
   const state = await tx.ftlSyncState.findUnique({ where: { competitionId } });

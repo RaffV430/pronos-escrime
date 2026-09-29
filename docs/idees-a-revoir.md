@@ -19,3 +19,9 @@ Propositions du 29/09/2026 non validées pour l'instant. Rien n'est développé 
 | I1 | Classement provisoire en direct pendant les poules | La majorité des poules ne sont pas suivies en direct sur FTL : classement peu fiable. |
 | I2 | Classement de sortie de poules projeté | Même raison que I1. |
 | I5 | Pré-remplissage des pronostics selon le classement | Trop irrégulier ; risque d'influencer les joueurs. Les cases restent vides. |
+
+## Gardée pour plus tard (29/09/2026)
+
+| Réf. | Idée | Notes |
+| --- | --- | --- |
+| — | « Rouvrir jusqu'à… » une heure précise | Si FTL ne publie jamais l'heure d'une phase finale : l'administrateur saisit l'heure du match (programme de l'organisateur), la saisie rouvre jusque-là avec la notification « pronostics rouverts ». Plafond (ex. 12 h) et annulation possibles. Risque : heure trop tardive, le début d'un match n'étant pas détectable sur FTL. En attendant, l'alerte administrateur « close sans horaire » est en place. |
