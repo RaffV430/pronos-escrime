@@ -4,6 +4,7 @@ const defaults = {
   newMatches: true,
   reminders: true,
   roundResults: false,
+  poolResults: false,
   quietEnabled: false,
   quietStart: '22:00',
   quietEnd: '08:00',
@@ -11,7 +12,7 @@ const defaults = {
 };
 function preferences(input = {}) {
   const p = { ...defaults, ...input };
-  for (const k of ['newMatches', 'reminders', 'roundResults', 'quietEnabled'])
+  for (const k of ['newMatches', 'reminders', 'roundResults', 'poolResults', 'quietEnabled'])
     if (typeof p[k] !== 'boolean') throw failure('Préférence de notification invalide.', 400);
   for (const k of ['quietStart', 'quietEnd'])
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(p[k])) throw failure('Horaire silencieux invalide.', 400);
