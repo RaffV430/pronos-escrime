@@ -116,7 +116,7 @@ test('HTTP admin reopen, podium persistence, medical closure, registration confl
       method,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${jwt.sign({ userId: admin ? 2 : 1, isAdmin: false }, process.env.JWT_SECRET)}`,
+        Authorization: `Bearer ${jwt.sign({ userId: admin ? 2 : 1, isAdmin: false, sv: 0 }, process.env.JWT_SECRET)}`,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });

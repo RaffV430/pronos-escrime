@@ -51,6 +51,7 @@ test('S6/S8: tokens without session version are refused after the cutoff; sessio
     }
   };
   const secret = process.env.JWT_SECRET;
+  process.env.LEGACY_TOKENS_EXPIRED_AT = '2026-09-30T00:00:00Z';
   const legacy = jwt.sign({ userId: 5, isAdmin: false }, secret, { expiresIn: '30d' });
   assert.equal(await run(legacy, Date.parse('2026-09-29T12:00:00Z')), 200, 'still accepted before the cutoff');
   assert.equal(await run(legacy, Date.parse('2026-09-30T00:00:01Z')), 401);

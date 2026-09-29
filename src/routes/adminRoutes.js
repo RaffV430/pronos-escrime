@@ -2,10 +2,12 @@ const router = require('express').Router();
 const prisma = require('../lib/prisma');
 const { id, fail } = require('../services/poolRules');
 router.use(require('../middleware/auth'), require('../middleware/admin'));
+const { reportError } = require('../lib/report');
 const wrap = (fn) => async (req, res) => {
   try {
     await fn(req, res);
   } catch (e) {
+    reportError(e, 'admin');
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Opération impossible.' });
   }
 };
@@ -24,9 +26,25 @@ router.get(
     );
   }),
 );
+// Journal d'administration : par défaut sans les contrôles automatiques FencingTimeLive
+// (un toutes les 2 min par épreuve), qui noyaient les actions des administrateurs. ?all=1 pour tout voir.
+const ROUTINE = ['Contrôle FTL démarré', 'Contrôle FTL terminé'];
 router.get(
   '/audit',
-  wrap(async (req, res) => res.json(await prisma.auditLog.findMany({ orderBy: { id: 'desc' }, take: 100 }))),
+  wrap(async (req, res) =>
+    res.json(
+      await prisma.auditLog.findMany({
+        where: req.query.all === '1' ? {} : { action: { notIn: ROUTINE } },
+        orderBy: { id: 'desc' },
+        take: 100,
+      }),
+    ),
+  ),
+);
+// État du suivi automatique de chaque épreuve (erreurs, retards, dernier contrôle).
+router.get(
+  '/sync-health',
+  wrap(async (req, res) => res.json(await require('../services/syncHealth').syncHealth(prisma))),
 );
 router.get(
   '/adjustments',

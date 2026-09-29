@@ -72,7 +72,7 @@ test('admin archives a whole tournament: hidden, FTL follow-up stopped, logged; 
       method,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${jwt.sign({ userId }, process.env.JWT_SECRET)}`,
+        Authorization: `Bearer ${jwt.sign({ userId, sv: 0 }, process.env.JWT_SECRET)}`,
       },
       body: body ? JSON.stringify(body) : undefined,
     });

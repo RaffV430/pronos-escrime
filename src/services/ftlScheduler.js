@@ -1,3 +1,4 @@
+const { reportError } = require('../lib/report');
 const { randomUUID } = require('node:crypto');
 const { failure } = require('./ftlClient');
 const events = require('./ftlEvents');
@@ -64,6 +65,10 @@ async function finish(db, competitionId, token, summary, error = null, now = new
       nextAutomaticAt: complete ? null : new Date(now.getTime() + delay),
     },
   });
+  // Alerte des administrateurs au 3e échec d'affilée, puis au rétablissement (sans bloquer le contrôle).
+  await require('./syncHealth')
+    .alertAdmins(db, { competitionId, failures, previousFailures: state.failures || 0, error })
+    .catch(() => {});
 }
 async function assertClaim(tx, competitionId, token) {
   const state = await tx.ftlSyncState.findUnique({ where: { competitionId } });
@@ -142,8 +147,16 @@ async function tick(db, { sync, archive = archiveCompleted, now = new Date() } =
   }
 }
 function startWorker(db) {
-  if (!enabled()) return () => {};
-  const run = () => tick(db).catch(() => console.warn('Contrôles automatiques temporairement indisponibles.'));
+  if (!enabled()) {
+    console.warn('Suivi FencingTimeLive automatique désactivé (FTL_AUTO_SYNC ≠ true).');
+    return () => {};
+  }
+  console.log('Suivi FencingTimeLive automatique actif (contrôle toutes les 30 s).');
+  const run = () =>
+    tick(db).catch((error) => {
+      console.warn('Contrôles automatiques temporairement indisponibles.');
+      reportError(error, 'tâche FencingTimeLive');
+    });
   const timer = setInterval(run, 30000);
   timer.unref();
   run();

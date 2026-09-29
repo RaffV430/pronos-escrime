@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { getJwtSecret } = require('../config');
-const LEGACY_TOKENS_EXPIRED = Date.parse('2026-09-30T00:00:00Z');
+const legacyTokensExpired = () => Date.parse(process.env.LEGACY_TOKENS_EXPIRED_AT || '2026-09-30T00:00:00Z');
 
 module.exports = async function (req, res, next) {
   const authHeader = req.header('Authorization');
@@ -26,7 +26,7 @@ module.exports = async function (req, res, next) {
     // depuis : après cette date, un jeton sans version est refusé.
     const session = require('../services/session');
     if (decoded.sv === undefined) {
-      if (Date.now() > LEGACY_TOKENS_EXPIRED) throw new Error('Jeton sans version');
+      if (Date.now() > legacyTokensExpired()) throw new Error('Jeton sans version');
     } else {
       const version = await session.currentVersion(require('../lib/prisma'), decoded.userId);
       if (version === null || version !== decoded.sv) throw new Error('Session révoquée');

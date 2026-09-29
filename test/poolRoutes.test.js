@@ -101,6 +101,7 @@ test('HTTP authentication, ownership, closure and corrected results', async (t) 
   const { db, pool, predictions, audits } = fixture();
   const app = express();
   app.use(express.json());
+  require.cache[require.resolve('../src/lib/prisma')] = { exports: db };
   app.use('/pools', createPoolRouter(db));
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
@@ -112,7 +113,7 @@ test('HTTP authentication, ownership, closure and corrected results', async (t) 
   const request = async (path, method = 'GET', body, userId = 1, isAdmin = false) => {
     const headers = { 'Content-Type': 'application/json' };
     if (userId)
-      headers.Authorization = `Bearer ${jwt.sign({ userId: isAdmin ? 3 : userId, isAdmin: false }, process.env.JWT_SECRET)}`;
+      headers.Authorization = `Bearer ${jwt.sign({ userId: isAdmin ? 3 : userId, isAdmin: false, sv: 0 }, process.env.JWT_SECRET)}`;
     return fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   };
   assert.equal((await request('?competitionId=1', 'GET', undefined, null)).status, 401);
@@ -167,6 +168,7 @@ test('HTTP individual locks reject creation, edits and deletion while another fe
   pool.sourceCheckedAt = new Date();
   const app = express();
   app.use(express.json());
+  require.cache[require.resolve('../src/lib/prisma')] = { exports: db };
   app.use('/pools', createPoolRouter(db));
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
@@ -179,7 +181,7 @@ test('HTTP individual locks reject creation, edits and deletion while another fe
       method,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${jwt.sign({ userId: 1 }, process.env.JWT_SECRET)}`,
+        Authorization: `Bearer ${jwt.sign({ userId: 1, sv: 0 }, process.env.JWT_SECRET)}`,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });

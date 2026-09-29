@@ -17,6 +17,7 @@ const {
 const { rescore } = require('../services/rescore');
 const { olympicCodeFor, entryRankFor } = require('../services/matchCountries');
 const { eventStartFor } = require('../services/eventStart');
+const { reportError } = require('../lib/report');
 
 function createPoolRouter(db = prisma) {
   const admin = createAdminMiddleware(db);
@@ -29,7 +30,7 @@ function createPoolRouter(db = prisma) {
       if (error.status) return res.status(error.status).json({ error: error.message });
       if (error.code === 'P2002')
         return res.status(409).json({ error: 'Cette poule existe déjà dans la compétition.' });
-      console.error('Erreur poules:', error.code || error.message);
+      reportError(error, 'poules');
       res.status(500).json({ error: 'Impossible de traiter les poules. Réessayez.' });
     }
   };

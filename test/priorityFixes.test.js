@@ -95,7 +95,12 @@ test('invalid numeric identifiers return 400 instead of a database error', async
   const jwt = require('jsonwebtoken');
   const db = new Proxy(
     {},
-    { get: () => new Proxy({}, { get: () => async () => assert.fail('no database call for an invalid id') }) },
+    {
+      get: (_, model) =>
+        model === 'user'
+          ? { findUnique: async () => ({ sessionVersion: 0 }) } // vérification de la session uniquement
+          : new Proxy({}, { get: () => async () => assert.fail('no database call for an invalid id') }),
+    },
   );
   require.cache[require.resolve('../src/lib/prisma')] = { exports: db };
   delete require.cache[require.resolve('../src/routes/matchRoutes')];
@@ -110,7 +115,7 @@ test('invalid numeric identifiers return 400 instead of a database error', async
     server.closeAllConnections();
     server.close();
   });
-  const auth = { Authorization: `Bearer ${jwt.sign({ userId: 1 }, process.env.JWT_SECRET)}` };
+  const auth = { Authorization: `Bearer ${jwt.sign({ userId: 1, sv: 0 }, process.env.JWT_SECRET)}` };
   const call = (path, method = 'GET') =>
     fetch(`http://127.0.0.1:${server.address().port}${path}`, { method, headers: auth });
   for (const [path, method] of [

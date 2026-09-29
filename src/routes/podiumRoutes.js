@@ -6,6 +6,7 @@ const authMiddleware = require('../middleware/auth');
 const adminMiddleware = require('../middleware/admin');
 const { roster, validateSelection, verifiedPodium, resolvePodium } = require('../services/podiumRules');
 const { podiumClosed } = require('../lib/matchLock');
+const { reportError } = require('../lib/report');
 async function isClosed(tx, competition) {
   return podiumClosed(competition, await tx.match.findMany({ where: { competitionId: competition.id } }));
 }
@@ -23,6 +24,7 @@ router.get('/competitions/:tournamentId', authMiddleware, async (req, res) => {
     });
     res.json(competitions);
   } catch (err) {
+    reportError(err, 'podium');
     res.status(500).json({ error: 'Erreur lors de la récupération des compétitions.' });
   }
 });
@@ -38,6 +40,7 @@ router.get('/competition-status/:competitionId', authMiddleware, async (req, res
     });
     res.json({ isLocked: competition ? await isClosed(prisma, competition) : false });
   } catch (err) {
+    reportError(err, 'podium');
     res.status(500).json({ error: 'Erreur lors de la récupération du statut.' });
   }
 });
@@ -63,6 +66,7 @@ router.get('/all/competition/:competitionId', authMiddleware, async (req, res) =
     });
     res.json(allPredictions);
   } catch (error) {
+    reportError(error, 'podium');
     res.status(500).json({ error: 'Erreur lors de la récupération des pronostics.' });
   }
 });
@@ -97,6 +101,7 @@ router.get('/leaderboard/:tournamentId', authMiddleware, async (req, res) => {
     const leaderboard = Object.values(leaderboardMap).sort((a, b) => b.totalPoints - a.totalPoints);
     res.json(require('../services/ranking').rankRows(leaderboard));
   } catch (error) {
+    reportError(error, 'podium');
     res.status(500).json({ error: 'Erreur lors du calcul du classement général.' });
   }
 });
@@ -248,6 +253,7 @@ router.get('/:competitionId', authMiddleware, async (req, res) => {
     });
     res.json(prediction || {});
   } catch (err) {
+    reportError(err, 'podium');
     res.status(500).json({ error: 'Erreur lors du chargement du podium.' });
   }
 });

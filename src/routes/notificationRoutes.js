@@ -3,6 +3,7 @@ const router = require('express').Router(),
 const push = require('../services/pushNotifications');
 const { rateLimit } = require('express-rate-limit');
 router.use(require('../middleware/auth'));
+const { reportError } = require('../lib/report');
 router.use(
   rateLimit({
     windowMs: 60000,
@@ -16,6 +17,7 @@ const wrap = (fn) => async (req, res) => {
   try {
     await fn(req, res);
   } catch (e) {
+    reportError(e, 'notification');
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Notifications temporairement indisponibles.' });
   }
 };

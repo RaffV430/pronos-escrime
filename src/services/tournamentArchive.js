@@ -1,3 +1,4 @@
+const { reportError } = require('../lib/report');
 const { load } = require('cheerio');
 const { createClient, ORIGIN } = require('./ftlClient');
 const { parseSchedule, scheduleUrl } = require('./ftlTournament');
@@ -166,8 +167,9 @@ async function archiveCompleted(db, { clientFactory = createClient, now = new Da
     if (!claim.count) continue;
     try {
       if (await checkTournament(db, t, clientFactory(), now)) archived.push(t.id);
-    } catch {
+    } catch (error) {
       console.warn(`Vérification de fin du tournoi ${t.id} à réessayer.`);
+      reportError(error, 'archivage automatique', { tournamentId: t.id });
     }
   }
   return archived;

@@ -227,6 +227,7 @@ test('GET /api/me/season only reads the signed-in player and validates the seaso
     async ({ where }) =>
       where.competitionId.in.map((id) => ({ competitionId: id, _min: { [field]: f.firstDates.get(id) } }));
   const db = {
+    user: { findUnique: async () => ({ sessionVersion: 0 }) },
     prediction: {
       findMany: async ({ where, select }) => {
         if (where.userId !== undefined) return (own(where), f.predictions);
@@ -253,7 +254,7 @@ test('GET /api/me/season only reads the signed-in player and validates the seaso
     server.closeAllConnections();
     server.close();
   });
-  const get = (q, token = jwt.sign({ userId: 7 }, process.env.JWT_SECRET)) =>
+  const get = (q, token = jwt.sign({ userId: 7, sv: 0 }, process.env.JWT_SECRET)) =>
     fetch(`http://127.0.0.1:${server.address().port}/me/season${q}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });

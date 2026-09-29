@@ -48,11 +48,12 @@ app.use(
   }),
 );
 
-// Toute écriture réussie peut modifier les points : le classement mis en cache est invalidé.
+// Une écriture réussie qui peut modifier des points vide le cache du classement (voir standings.js).
 app.use((req, res, next) => {
-  if (req.method !== 'GET')
+  const standings = require('./services/standings');
+  if (standings.changesPoints(req.method, req.path))
     res.on('finish', () => {
-      if (res.statusCode < 400) require('./services/standings').invalidateStandings();
+      if (res.statusCode < 400) standings.invalidateStandings();
     });
   next();
 });

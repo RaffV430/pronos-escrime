@@ -1,3 +1,4 @@
+const { reportError } = require('../lib/report');
 const { load } = require('cheerio');
 const { createClient, failure, ORIGIN } = require('./ftlClient');
 const { parseTable, clean, norm } = require('./ftlParser');
@@ -624,23 +625,29 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     summary.warnings.push(...poolSummary.warnings);
     if (poolSummary.notes?.length) summary.notes = [...(summary.notes || []), ...poolSummary.notes];
     // Ranking history must never roll back a certain score or first-result lock.
-    try {
-      await db.$transaction(
-        async (tx) => {
-          await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184723)`;
-          await captureRankings(tx, c, actorId);
-        },
-        { timeout: 30000 },
-      );
-    } catch {
-      summary.warnings.push('Résultats enregistrés, historique du classement à réessayer au prochain contrôle.');
-    }
+    // Rien n'a changé dans les points : inutile de recalculer trois classements.
+    const pointsChanged = summary.pointsUpdated > 0 || summary.results > 0 || summary.corrections > 0;
+    if (pointsChanged) require('./standings').invalidateStandings();
+    if (pointsChanged)
+      try {
+        await db.$transaction(
+          async (tx) => {
+            await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184723)`;
+            await captureRankings(tx, c, actorId);
+          },
+          { timeout: 30000 },
+        );
+      } catch {
+        summary.warnings.push('Résultats enregistrés, historique du classement à réessayer au prochain contrôle.');
+      }
     await db.auditLog.create({
       data: { actorId, action: DONE, targetType: 'Competition', targetId: c.id, after: summary },
     });
     await scheduler.finish(db, competitionId, claim.token, summary);
     return summary;
   } catch (e) {
+    // Erreur imprévue (code, base) : la trace complète part dans Sentry, le joueur voit un message simple.
+    reportError(e, 'contrôle FencingTimeLive', { competitionId, automatic });
     const safe = e.status
       ? e
       : failure('Le contrôle n’a pas pu être terminé. Réessayez pour vérifier les résultats déjà enregistrés.', 500);

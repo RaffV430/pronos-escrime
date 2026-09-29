@@ -15,10 +15,12 @@ router.use(
     legacyHeaders: false,
   }),
 );
+const { reportError } = require('../lib/report');
 const wrap = (fn) => async (req, res) => {
   try {
     await fn(req, res);
   } catch (e) {
+    reportError(e, 'community');
     res.status(e.status || 500).json({ error: e.status ? e.message : 'Service indisponible. Réessayez.' });
   }
 };

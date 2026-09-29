@@ -101,7 +101,7 @@ test('30-day sessions: refresh, password change and "log out other devices" revo
   users.splice(0, 1);
   session.forget(5);
   assert.equal((await call('/me', 'GET', undefined, kept)).status, 401, 'deleted account');
-  const legacy = jwt.sign({ userId: 9, isAdmin: false }, process.env.JWT_SECRET, { expiresIn: '24h' });
+  const legacy = jwt.sign({ userId: 9, isAdmin: false, sv: 0 }, process.env.JWT_SECRET, { expiresIn: '24h' });
   assert.notEqual(
     (await call('/refresh', 'POST', {}, legacy)).status,
     403,
