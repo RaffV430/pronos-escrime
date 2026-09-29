@@ -297,3 +297,17 @@ test('podium row: perfect only when every medal is exact (60 individual, 45 team
   assert.equal(out(45, 'TEAM').perfect, true);
   assert.equal(out(40, 'TEAM').perfect, false);
 });
+
+test('personal analysis: success by round, average score gap, pools, outsider hits and best event', () => {
+  const out = buildSeason(fixture(), 2026, new Date('2026-12-01T00:00:00Z'));
+  const a = out.analysis;
+  // T16 : 3 matchs normaux terminés + 1 retrait médical.
+  assert.deepEqual(a.byRound, [{ round: 'T16', played: 4, winners: 3, exact: 1, points: 6, accuracy: 75 }]);
+  // Écarts : 0 (15-8 exact), 2 (15-10 vs 15-12), 19 (8-15 vs 15-3) → moyenne 7 ; le retrait médical ne compte pas.
+  assert.equal(a.averageScoreGap, 7);
+  assert.equal(a.bestRound, 'T16');
+  assert.equal(a.outsiderHits, 0);
+  assert.deepEqual(a.pools, { predicted: 1, winsExact: 1, winsAccuracy: 100, averageIndicatorGap: 0 });
+  assert.equal(a.bestCompetition.name, 'Fleuret hommes');
+  assert.equal(a.bestCompetition.points, 37);
+});
