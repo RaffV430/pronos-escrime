@@ -191,6 +191,8 @@ model PoolPrediction {
   createdAt     DateTime     @default(now())
   pointsEarned  Int          @default(0)
   updatedAt     DateTime     @updatedAt
+  // Dernier enregistrement par le joueur (le recalcul des points ne le modifie pas).
+  savedAt       DateTime?
 
   @@unique([userId, fencerId])
   @@index([fencerId])

@@ -1,0 +1,1 @@
+ALTER TABLE "PoolPrediction" ADD COLUMN IF NOT EXISTS "savedAt" TIMESTAMP(3);
