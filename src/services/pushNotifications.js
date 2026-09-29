@@ -257,6 +257,10 @@ function poolsFinishedAt(pools = []) {
 }
 const poolResultsText = (points, fencers) =>
   `Poules terminées · ${points} point${points > 1 ? 's' : ''} (${fencers} tireur${fencers > 1 ? 's' : ''} pronostiqué${fencers > 1 ? 's' : ''})`;
+const recapText = (r) =>
+  `Épreuve terminée · ${r.points} point${r.points > 1 ? 's' : ''}` +
+  (r.rank ? ` · ${r.rank === 1 ? '1er' : `${r.rank}e`} sur ${r.players}` : '') +
+  ' · votre récap est prêt';
 async function queueSpecial(db, id, context = null) {
   const shared = context || (await notificationContext(db));
   return db.$transaction(
@@ -293,6 +297,42 @@ async function queueSpecial(db, id, context = null) {
               throughEventId: 0,
               kind: 'POOLRESULTS',
               round: 'pools',
+              matchIds: [],
+            },
+            update: {},
+          });
+        }
+      }
+      // Récap de fin d'épreuve : pour les joueurs qui ont demandé leurs bilans (tours ou poules),
+      // une fois le podium officiel publié, s'ils ont pronostiqué dans l'épreuve.
+      if (p.roundResults || p.poolResults) {
+        const since = Math.max(Date.now() - 86400000, new Date(sub.preferencesSince || sub.createdAt).getTime());
+        for (const x of shared.filter((y) => follows(sub, y.competition))) {
+          const ended = x.competition.podiumResolvedAt && new Date(x.competition.podiumResolvedAt).getTime();
+          if (!ended || ended < since) continue;
+          const cid = x.competition.id;
+          const [a, b, c] = await Promise.all([
+            tx.prediction.count({ where: { userId: sub.userId, match: { competitionId: cid } } }),
+            tx.poolPrediction.count({ where: { userId: sub.userId, fencer: { pool: { competitionId: cid } } } }),
+            tx.podiumPrediction.count({ where: { userId: sub.userId, competitionId: cid } }),
+          ]);
+          if (!a && !b && !c) continue;
+          await tx.pushDelivery.upsert({
+            where: {
+              subscriptionId_competitionId_throughEventId_kind_round: {
+                subscriptionId: id,
+                competitionId: cid,
+                throughEventId: 0,
+                kind: 'RECAP',
+                round: 'recap',
+              },
+            },
+            create: {
+              subscriptionId: id,
+              competitionId: cid,
+              throughEventId: 0,
+              kind: 'RECAP',
+              round: 'recap',
               matchIds: [],
             },
             update: {},
@@ -407,7 +447,8 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     (kind === 'AVAILABLE' && !prefs.newMatches) ||
     (kind === 'REMINDER' && !prefs.reminders) ||
     (kind === 'ROUND' && !prefs.roundResults) ||
-    (kind === 'POOLRESULTS' && !prefs.poolResults)
+    (kind === 'POOLRESULTS' && !prefs.poolResults) ||
+    (kind === 'RECAP' && !prefs.roundResults && !prefs.poolResults)
   )
     return cancel();
   let content, ttl;
@@ -467,6 +508,21 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     content = {
       title: c.name,
       body: `${roundLabel(round)} · tour terminé · ${recap.total} match${recap.total > 1 ? 's' : ''} · ${recap.points} point${recap.points > 1 ? 's' : ''}`,
+      tag: `pronos-${id}`,
+      url: `/?tournament=${c.tournamentId}&event=${c.id}&view=mine`,
+    };
+  } else if (kind === 'RECAP') {
+    if (Date.now() - delivery.createdAt.getTime() > 86400000) return cancel();
+    const competition = await db.competition.findUnique({
+      where: { id: c.id },
+      include: { tournament: { select: { name: true } } },
+    });
+    const recap = await require('../routes/personalRoutes').competitionRecap(competition, sub.userId);
+    if (!recap.predictions) return cancel();
+    ttl = 3600;
+    content = {
+      title: c.name,
+      body: recapText(recap),
       tag: `pronos-${id}`,
       url: `/?tournament=${c.tournamentId}&event=${c.id}&view=mine`,
     };
@@ -600,6 +656,7 @@ module.exports = {
   notificationContext,
   poolsFinishedAt,
   poolResultsText,
+  recapText,
   retireLegacy,
   roundAlertPlan,
   queueSpecial,
