@@ -231,17 +231,32 @@ function roundAlertPlan(matches, round, now = Date.now()) {
 async function notificationContext(db) {
   const competitions = await db.competition.findMany({ where: { tournament: { archivedAt: null } } });
   const ids = competitions.map((c) => c.id);
-  const [matches, rounds] = await Promise.all([
+  const [matches, rounds, pools] = await Promise.all([
     ids.length ? db.match.findMany({ where: { competitionId: { in: ids } } }) : [],
     ids.length ? db.matchRound.findMany({ where: { competitionId: { in: ids } } }) : [],
+    ids.length && db.pool
+      ? db.pool.findMany({
+          where: { competitionId: { in: ids } },
+          select: { id: true, competitionId: true, isFinal: true, fencers: { select: { firstResultAt: true } } },
+        })
+      : [],
   ]);
   const timed = await timedMatches({ matchRound: { findMany: async () => rounds } }, matches);
   return competitions.map((c) => ({
     competition: c,
     matches: timed.filter((m) => m.competitionId === c.id),
     rounds: rounds.filter((r) => r.competitionId === c.id),
+    pools: (pools || []).filter((p) => p.competitionId === c.id),
   }));
 }
+// Toutes les poules de l'épreuve sont publiées : date du dernier blocage connu (approximation de la fin).
+function poolsFinishedAt(pools = []) {
+  if (!pools.length || pools.some((p) => !p.isFinal)) return null;
+  const stamps = pools.flatMap((p) => (p.fencers || []).map((f) => f.firstResultAt)).filter(Boolean);
+  return stamps.length ? Math.max(...stamps.map((d) => new Date(d).getTime())) : null;
+}
+const poolResultsText = (points, fencers) =>
+  `Poules terminées · ${points} point${points > 1 ? 's' : ''} (${fencers} tireur${fencers > 1 ? 's' : ''} pronostiqué${fencers > 1 ? 's' : ''})`;
 async function queueSpecial(db, id, context = null) {
   const shared = context || (await notificationContext(db));
   return db.$transaction(
@@ -250,7 +265,41 @@ async function queueSpecial(db, id, context = null) {
       const sub = await tx.pushSubscription.findUnique({ where: { id } });
       if (!sub?.enabled) return;
       const p = preferences(sub.preferences || {});
-      if ((!p.newMatches && !p.reminders && !p.roundResults) || isQuiet(p)) return;
+      if ((!p.newMatches && !p.reminders && !p.roundResults && !p.poolResults) || isQuiet(p)) return;
+      // Bilan des poules (au choix du joueur) : une notification par épreuve, poules toutes publiées,
+      // seulement s'il y a pronostiqué et si elles ont fini après l'activation de l'option (24 h au plus).
+      if (p.poolResults) {
+        const since = Math.max(Date.now() - 86400000, new Date(sub.preferencesSince || sub.createdAt).getTime());
+        for (const x of shared.filter((y) => follows(sub, y.competition))) {
+          const finished = poolsFinishedAt(x.pools);
+          if (!finished || finished < since) continue;
+          const played = await tx.poolPrediction.count({
+            where: { userId: sub.userId, fencer: { pool: { competitionId: x.competition.id } } },
+          });
+          if (!played) continue;
+          await tx.pushDelivery.upsert({
+            where: {
+              subscriptionId_competitionId_throughEventId_kind_round: {
+                subscriptionId: id,
+                competitionId: x.competition.id,
+                throughEventId: 0,
+                kind: 'POOLRESULTS',
+                round: 'pools',
+              },
+            },
+            create: {
+              subscriptionId: id,
+              competitionId: x.competition.id,
+              throughEventId: 0,
+              kind: 'POOLRESULTS',
+              round: 'pools',
+              matchIds: [],
+            },
+            update: {},
+          });
+        }
+      }
+      if (!p.newMatches && !p.reminders && !p.roundResults) return;
       const followed = shared.filter((x) => follows(sub, x.competition) && x.matches.length);
       if (!followed.length) return;
       // Pronostics de ce joueur sur les matchs suivis, en une seule requête.
@@ -357,7 +406,8 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     (kind === 'POOLS' && !prefs.newMatches) ||
     (kind === 'AVAILABLE' && !prefs.newMatches) ||
     (kind === 'REMINDER' && !prefs.reminders) ||
-    (kind === 'ROUND' && !prefs.roundResults)
+    (kind === 'ROUND' && !prefs.roundResults) ||
+    (kind === 'POOLRESULTS' && !prefs.poolResults)
   )
     return cancel();
   let content, ttl;
@@ -417,6 +467,21 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     content = {
       title: c.name,
       body: `${roundLabel(round)} · tour terminé · ${recap.total} match${recap.total > 1 ? 's' : ''} · ${recap.points} point${recap.points > 1 ? 's' : ''}`,
+      tag: `pronos-${id}`,
+      url: `/?tournament=${c.tournamentId}&event=${c.id}&view=mine`,
+    };
+  } else if (kind === 'POOLRESULTS') {
+    if (Date.now() - delivery.createdAt.getTime() > 86400000) return cancel();
+    const rows = await db.poolPrediction.findMany({
+      where: { userId: sub.userId, fencer: { pool: { competitionId: c.id, isFinal: true } } },
+      select: { pointsEarned: true },
+    });
+    if (!rows.length) return cancel();
+    const points = rows.reduce((n, r) => n + (r.pointsEarned || 0), 0);
+    ttl = 3600;
+    content = {
+      title: c.name,
+      body: poolResultsText(points, rows.length),
       tag: `pronos-${id}`,
       url: `/?tournament=${c.tournamentId}&event=${c.id}&view=mine`,
     };
@@ -533,6 +598,8 @@ function startWorker(db) {
 }
 module.exports = {
   notificationContext,
+  poolsFinishedAt,
+  poolResultsText,
   retireLegacy,
   roundAlertPlan,
   queueSpecial,
