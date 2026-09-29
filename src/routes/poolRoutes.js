@@ -220,6 +220,49 @@ function createPoolRouter(db = prisma, { sourceCheck = require('../services/pool
     }),
   );
 
+  // Contrôle d'équité (administrateur, lecture seule) : pronostics enregistrés ou modifiés dans les
+  // 3 minutes qui précèdent le blocage de chaque tireur, période où des résultats ont pu être visibles
+  // sur FencingTimeLive avant le contrôle automatique suivant.
+  router.get(
+    '/:poolId/late-predictions',
+    admin,
+    handle(async (req, res) => {
+      const poolId = id(req.params.poolId);
+      const pool = await db.pool.findUnique({
+        where: { id: poolId },
+        include: {
+          fencers: {
+            orderBy: { position: 'asc' },
+            include: { predictions: { include: { user: { select: { id: true, name: true } } } } },
+          },
+        },
+      });
+      if (!pool) fail('Poule introuvable.', 404);
+      const WINDOW = 180000;
+      const rows = [];
+      for (const f of pool.fencers) {
+        if (!f.firstResultAt) continue;
+        const lock = new Date(f.firstResultAt).getTime();
+        for (const p of f.predictions) {
+          const at = new Date(p.updatedAt).getTime();
+          if (at >= lock - WINDOW && at <= lock + 60000)
+            rows.push({
+              predictionId: p.id,
+              fencer: f.name,
+              player: p.user?.name || `Joueur ${p.userId}`,
+              savedAt: p.updatedAt,
+              lockedAt: f.firstResultAt,
+              secondsBeforeLock: Math.round((lock - at) / 1000),
+              prediction: { wins: p.wins, indicator: p.indicator },
+              pointsEarned: p.pointsEarned,
+            });
+        }
+      }
+      rows.sort((a, b) => a.secondsBeforeLock - b.secondsBeforeLock);
+      res.json({ pool: { id: pool.id, name: pool.name }, windowSeconds: WINDOW / 1000, rows });
+    }),
+  );
+
   router.post(
     '/:poolId/close',
     admin,
