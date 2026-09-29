@@ -55,6 +55,25 @@ async function enroll(tx, league, userId) {
     create: { leagueId: league.id, userId },
   });
 }
+// Circuits (classements cumulés sur une série de tournois).
+router.get(
+  '/circuits',
+  wrap(async (req, res) => {
+    const circuits = await require('../services/circuits').getCircuits(db);
+    res.json(
+      circuits.map(({ id, name, tournamentIds, dropWorst }) => ({
+        id,
+        name,
+        tournaments: tournamentIds.length,
+        dropWorst,
+      })),
+    );
+  }),
+);
+router.get(
+  '/circuits/:id',
+  wrap(async (req, res) => res.json(await require('../services/circuits').circuitRanking(db, id(req.params.id)))),
+);
 // Club de l'application : tireurs mis en avant et ligue du club de chaque tournoi (créée automatiquement).
 let clubCheckedAt = 0;
 router.get(

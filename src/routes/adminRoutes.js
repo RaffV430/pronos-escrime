@@ -54,6 +54,17 @@ router.post(
     res.json(await require('../services/engagement').remind(prisma, id(req.params.competitionId), req.user.userId)),
   ),
 );
+// Circuits : classements cumulés sur plusieurs tournois.
+router.get(
+  '/circuits',
+  wrap(async (req, res) => res.json(await require('../services/circuits').getCircuits(prisma))),
+);
+router.put(
+  '/circuits',
+  wrap(async (req, res) =>
+    res.json(await require('../services/circuits').saveCircuits(prisma, req.body?.circuits, req.user.userId)),
+  ),
+);
 // Club : nom et liste des tireurs mis en avant ; enregistrer crée aussi les ligues du club manquantes.
 router.get(
   '/club',
