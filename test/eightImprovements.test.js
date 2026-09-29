@@ -84,7 +84,8 @@ test('pool guard preserves identities and old timestamps; partial never globally
       pool: {
         findUnique: async () => snapshot,
         update: async ({ data }) => {
-          assert.deepEqual(data, {});
+          // Score réciproque manquant : ni fraîcheur, ni blocage global, ni clôture (la piste peut être notée).
+          for (const k of ['sourceCheckedAt', 'isFinal', 'isLocked']) assert.ok(!(k in data), k);
         },
       },
       poolFencer: {

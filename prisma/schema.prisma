@@ -39,6 +39,7 @@ model Match {
   predictions   Prediction[]
   isLocked      Boolean      @default(false)
   startsAt      DateTime?
+  strip         String?
   sourceUrl     String?
   sourceKey     String?
   sourceCheckedAt DateTime?
@@ -151,6 +152,8 @@ model Pool {
   sourcePoolNumber Int?
   sourceCheckedAt DateTime?
   recomposedAt  DateTime?
+  strip         String?
+  startsAt      DateTime?
   rankingSystem String?
   rankingSourceUrl String?
   rankingAsOf DateTime?

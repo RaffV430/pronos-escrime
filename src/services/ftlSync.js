@@ -5,6 +5,7 @@ const { parseTable, clean, norm } = require('./ftlParser');
 const events = require('./ftlEvents');
 const { configuration } = require('./ftlConfiguration');
 const { parsePools, applyPool, pattern: poolPattern } = require('./ftlPools');
+const { localTime } = require('./localTime');
 const { captureRankings } = require('./rankingHistory');
 const { validateManifest } = require('./roundManifest');
 const { calculateMatchPoints } = require('./matchPoints');
@@ -326,6 +327,7 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       syncIssue: null,
       sourceCheckedAt: observation.checkedAt,
       ...(o.startsAt ? { startsAt: o.startsAt } : {}),
+      ...(o.strip ? { strip: o.strip } : {}),
     };
     if (o.isFinished)
       Object.assign(data, {
@@ -439,6 +441,14 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
       for (const table of tables) {
         try {
           const observed = parsePools($.html($(table).parent()))[0];
+          // Heure de la poule dans le fuseau du lieu ; une heure douteuse est simplement ignorée.
+          try {
+            observed.startsAt = observed.time
+              ? localTime(config.date, observed.time.hour, observed.time.minute, config.timezone)
+              : null;
+          } catch {
+            observed.startsAt = null;
+          }
           for (const row of observed.rows)
             if ((c.podiumRoster || []).filter((e) => norm(e.name) === norm(row.name)).length !== 1)
               throw failure('Composition de poule absente ou ambiguë dans les engagés.');
