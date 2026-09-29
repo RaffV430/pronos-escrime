@@ -32,6 +32,8 @@ Avant un déploiement sur la base actuelle : sauvegarder les données, inspecter
 
 Un environnement de test (staging) est décrit dans [docs/staging.md](docs/staging.md). Les changements de base passent par les migrations automatiques de [prisma/auto/](prisma/auto/README.md).
 
+Les sauvegardes nocturnes chiffrées de la base (et leur restauration) sont décrites dans [docs/sauvegardes.md](docs/sauvegardes.md).
+
 Une procédure pour repartir d'une migration de référence unique et réactiver `prisma migrate deploy` est décrite dans [docs/migrations-baseline.md](docs/migrations-baseline.md).
 
 La cause des erreurs 500 doit être confirmée dans les journaux Render et par un contrôle de connexion PostgreSQL. Les seuls codes HTTP ne prouvent pas une erreur de migration.
