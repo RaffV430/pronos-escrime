@@ -41,6 +41,20 @@ router.get(
     ),
   ),
 );
+// Club : nom et liste des tireurs mis en avant ; enregistrer crée aussi les ligues du club manquantes.
+router.get(
+  '/club',
+  wrap(async (req, res) => res.json(await require('../services/club').getClub(prisma))),
+);
+router.put(
+  '/club',
+  wrap(async (req, res) => {
+    const club = require('../services/club');
+    const saved = await club.saveClub(prisma, req.body, req.user.userId);
+    const created = await club.ensureClubLeagues(prisma, { actorId: req.user.userId });
+    res.json({ ...saved, leaguesCreated: created.length });
+  }),
+);
 // État du suivi automatique de chaque épreuve (erreurs, retards, dernier contrôle).
 router.get(
   '/sync-health',

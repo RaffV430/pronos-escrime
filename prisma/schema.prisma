@@ -315,3 +315,9 @@ model PushDelivery {
  @@unique([subscriptionId,competitionId,throughEventId,kind,round], map:"PushDelivery_scope_event_kind_round_key")
  @@index([status,nextAttemptAt])
 }
+// Réglages de l'application (ex. club : nom et tireurs mis en avant).
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @default(now()) @updatedAt
+}

@@ -208,7 +208,8 @@ test('F5: cleanup removes only old notification rows, routine sync traces and ol
     $executeRaw: async (strings, ...values) => ((calls.snapshots = [strings.join('?'), values]), 3),
   };
   const now = new Date('2026-10-31T00:00:00Z');
-  assert.deepEqual(await cleanup(db, now), { deliveries: 4, events: 1, routine: 10, snapshots: 3 });
+  db.appSetting = { findUnique: async () => null }; // pas de club configuré
+  assert.deepEqual(await cleanup(db, now), { deliveries: 4, events: 1, routine: 10, snapshots: 3, clubLeagues: 0 });
   assert.deepEqual(calls.deliveries.where.status, { in: ['SENT', 'CANCELLED', 'FAILED'] }, 'pending ones are kept');
   assert.equal(calls.deliveries.where.createdAt.lt.toISOString(), '2026-10-01T00:00:00.000Z');
   assert.deepEqual(

@@ -24,7 +24,14 @@ async function cleanup(db, now = new Date()) {
       ) t
       WHERE t.rang > 2 AND t."createdAt" < ${before(30)}
     )`;
-  return { deliveries: deliveries.count, events: events.count, routine: routine.count, snapshots };
+  // Ligue du club des nouveaux tournois (dès que leur horaire est connu).
+  let clubLeagues = 0;
+  try {
+    clubLeagues = (await require('./club').ensureClubLeagues(db, { now })).length;
+  } catch (error) {
+    reportError(error, 'ligue du club');
+  }
+  return { deliveries: deliveries.count, events: events.count, routine: routine.count, snapshots, clubLeagues };
 }
 
 function startWorker(db, every = 6 * 3600000) {
