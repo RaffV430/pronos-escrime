@@ -19,7 +19,7 @@ const { olympicCodeFor, entryRankFor } = require('../services/matchCountries');
 const { eventStartFor } = require('../services/eventStart');
 const { reportError } = require('../lib/report');
 
-function createPoolRouter(db = prisma) {
+function createPoolRouter(db = prisma, { sourceCheck = require('../services/poolFreshness').startedOnSource } = {}) {
   const admin = createAdminMiddleware(db);
   const router = express.Router();
   router.use(auth);
@@ -56,6 +56,21 @@ function createPoolRouter(db = prisma) {
       return fn(tx, pool);
     }, options);
 
+  // Avant d'enregistrer : si FencingTimeLive montre déjà un score pour ce tireur, la saisie est refusée
+  // et le contrôle automatique de l'épreuve est avancé pour poser le blocage officiel.
+  const refuseIfStarted = async (poolId, fencerId, start) => {
+    const pool = await db.pool.findUnique({ where: { id: poolId }, include: { fencers: true } });
+    const fencer = pool?.fencers.find((f) => f.id === fencerId);
+    if (!pool || !fencer || fencerClosed(pool, fencer, new Date(), start)) return;
+    if ((await sourceCheck(pool, fencer, { start })) !== true) return;
+    await db.ftlSyncState
+      .updateMany({
+        where: { competitionId: pool.competitionId, leaseToken: null },
+        data: { nextAutomaticAt: new Date() },
+      })
+      .catch(() => {});
+    fail('Ce tireur a déjà commencé sa poule sur FencingTimeLive : pronostics clos.', 409);
+  };
   const startForPool = async (poolId) => {
     try {
       const pool = await db.pool.findUnique({ where: { id: poolId }, select: { competitionId: true } });
@@ -158,6 +173,7 @@ function createPoolRouter(db = prisma) {
       const poolId = id(req.params.poolId);
       const fencerId = id(req.params.fencerId);
       const start = await startForPool(poolId);
+      await refuseIfStarted(poolId, fencerId, start);
       const prediction = await withPool(poolId, async (tx, pool) => {
         const fencer = pool.fencers.find((f) => f.id === fencerId);
         if (!fencer) fail('Tireur introuvable dans cette poule.', 404);
@@ -186,6 +202,7 @@ function createPoolRouter(db = prisma) {
       const poolId = id(req.params.poolId);
       const fencerId = id(req.params.fencerId);
       const start = await startForPool(poolId);
+      await refuseIfStarted(poolId, fencerId, start);
       await withPool(poolId, async (tx, pool) => {
         const fencer = pool.fencers.find((f) => f.id === fencerId);
         if (!fencer) fail('Tireur introuvable dans cette poule.', 404);
