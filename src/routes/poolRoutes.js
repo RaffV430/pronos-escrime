@@ -185,7 +185,7 @@ function createPoolRouter(db = prisma, { sourceCheck = require('../services/pool
               : 'Les pronostics de ce tireur sont clos.',
             409,
           );
-        const data = validatePrediction(req.body, pool.fencers.length);
+        const data = { ...validatePrediction(req.body, pool.fencers.length), savedAt: new Date() };
         return tx.poolPrediction.upsert({
           where: { userId_fencerId: { userId: req.user.userId, fencerId } },
           create: { userId: req.user.userId, fencerId, ...data },
@@ -244,13 +244,15 @@ function createPoolRouter(db = prisma, { sourceCheck = require('../services/pool
         if (!f.firstResultAt) continue;
         const lock = new Date(f.firstResultAt).getTime();
         for (const p of f.predictions) {
-          const at = new Date(p.updatedAt).getTime();
+          // Heure de saisie du joueur ; à défaut (pronostics antérieurs), heure de création.
+          const at = new Date(p.savedAt || p.createdAt).getTime();
           if (at >= lock - WINDOW && at <= lock + 60000)
             rows.push({
               predictionId: p.id,
               fencer: f.name,
               player: p.user?.name || `Joueur ${p.userId}`,
-              savedAt: p.updatedAt,
+              savedAt: p.savedAt || p.createdAt,
+              exact: Boolean(p.savedAt),
               lockedAt: f.firstResultAt,
               secondsBeforeLock: Math.round((lock - at) / 1000),
               prediction: { wins: p.wins, indicator: p.indicator },
