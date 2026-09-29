@@ -66,6 +66,11 @@ test('one threshold alert per round, reminder replaces coincident threshold, no 
       },
     },
   };
+  // Pronostics du joueur, lus séparément des matchs (une requête par abonné).
+  db.prediction = {
+    findMany: async () =>
+      (await db.match.findMany()).flatMap((m) => (m.predictions || []).map((p) => ({ ...p, matchId: m.id }))),
+  };
   db.$transaction = (f) => f(db);
   await push.queueSpecial(db, 's');
   assert.equal(deliveries.length, 0);

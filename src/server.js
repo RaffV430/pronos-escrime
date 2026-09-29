@@ -84,11 +84,29 @@ app.get('/api/tournaments', authMiddleware, async (req, res) => {
 
 app.get('/', (req, res) => res.json({ message: '🤺 API MPP Escrime opérationnelle !' }));
 app.get('/health', async (req, res) => {
+  const { lastBeat } = require('./lib/heartbeat');
+  const worker = (name, enabled) => {
+    const at = lastBeat(name);
+    const age = at ? Math.round((Date.now() - at) / 1000) : null;
+    // Une tâche active qui n'a pas terminé de passage depuis 5 min est signalée (sans couper le service).
+    return {
+      enabled,
+      lastRunAt: at ? new Date(at).toISOString() : null,
+      stale: enabled && (age === null || age > 300),
+    };
+  };
+  const workers = {
+    ftl: worker('ftl', process.env.FTL_AUTO_SYNC === 'true'),
+    notifications: worker('push', require('./services/pushNotifications').configured()),
+  };
+  const uptime = Math.round(process.uptime());
+  // Juste après le démarrage, aucune tâche n'a encore eu le temps de passer.
+  const stale = uptime > 120 && Object.values(workers).some((w) => w.stale);
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', database: 'connected' });
+    res.json({ status: stale ? 'degraded' : 'ok', database: 'connected', workers, uptime });
   } catch (error) {
-    res.status(503).json({ status: 'degraded', database: 'unavailable' });
+    res.status(503).json({ status: 'degraded', database: 'unavailable', workers, uptime });
   }
 });
 
@@ -117,13 +135,19 @@ async function start() {
 
   const stopNotifications = require('./services/pushNotifications').startWorker(prisma);
   const stopFtl = require('./services/ftlScheduler').startWorker(prisma);
+  const stopMaintenance = require('./services/maintenance').startWorker(prisma);
+  // Arrêt propre (redéploiement Render) : plus de nouvelles requêtes ni de nouveaux passages,
+  // on attend la fin des passages en cours (25 s au plus), puis on ferme la base.
+  let stopping = false;
   const shutdown = async () => {
-    stopFtl();
-    stopNotifications();
-    server.close(async () => {
-      await prisma.$disconnect();
-      process.exit(0);
-    });
+    if (stopping) return;
+    stopping = true;
+    const force = setTimeout(() => process.exit(0), 25000);
+    force.unref();
+    server.close();
+    await Promise.allSettled([stopFtl(), stopNotifications(), stopMaintenance()]);
+    await prisma.$disconnect().catch(() => {});
+    process.exit(0);
   };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);

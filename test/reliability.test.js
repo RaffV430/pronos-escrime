@@ -149,3 +149,96 @@ test('F4: admins are alerted once at the 3rd failure in a row, then when it reco
     console.error = original;
   }
 });
+
+test('F6: due events are checked in parallel (3 at a time); events not due are not even loaded', async () => {
+  const { tick } = require('../src/services/ftlScheduler');
+  const ids = [
+    'F11BB8AC692C4073BA38A7592EC7309E',
+    '647A20DB3116411181393C8F779CD2A4',
+    '3E02F3DE23C54C7683C06B07F23E85F4',
+  ];
+  let queried;
+  const db = {
+    competition: {
+      findMany: async ({ where }) => {
+        queried = where;
+        return [...ids, ids[0]]
+          .map((id, i) => ({ id: i + 5, rosterSourceUrl: `https://www.fencingtimelive.com/events/competitors/${id}` }))
+          .filter((c) => !where.id?.notIn.includes(c.id));
+      },
+    },
+    auditLog: { findFirst: async () => null },
+    ftlSyncState: {
+      findMany: async () => [{ competitionId: 8, nextAutomaticAt: new Date('2026-09-30'), leaseUntil: null }],
+    },
+  };
+  let active = 0,
+    peak = 0;
+  const outcomes = await tick(db, {
+    archive: async () => [],
+    now: new Date('2026-09-28'),
+    sync: async (db, id) => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 30));
+      active--;
+      if (id === 6) throw Object.assign(Error('upstream'), { status: 503 });
+      return { created: 1 };
+    },
+  });
+  assert.deepEqual(queried.id, { notIn: [8] }, 'the event not due yet is not loaded');
+  assert.equal(peak, 3, 'three checks at the same time');
+  assert.deepEqual(
+    outcomes.map((o) => [o.competitionId, o.ok]),
+    [
+      [5, true],
+      [6, false],
+      [7, true],
+    ],
+  );
+});
+
+test('F5: cleanup removes only old notification rows, routine sync traces and old ranking snapshots', async () => {
+  const { cleanup } = require('../src/services/maintenance');
+  const calls = {};
+  const db = {
+    pushDelivery: { deleteMany: async (a) => ((calls.deliveries = a), { count: 4 }) },
+    pushEvent: { deleteMany: async (a) => ((calls.events = a), { count: 1 }) },
+    auditLog: { deleteMany: async (a) => ((calls.routine = a), { count: 10 }) },
+    $executeRaw: async (strings, ...values) => ((calls.snapshots = [strings.join('?'), values]), 3),
+  };
+  const now = new Date('2026-10-31T00:00:00Z');
+  assert.deepEqual(await cleanup(db, now), { deliveries: 4, events: 1, routine: 10, snapshots: 3 });
+  assert.deepEqual(calls.deliveries.where.status, { in: ['SENT', 'CANCELLED', 'FAILED'] }, 'pending ones are kept');
+  assert.equal(calls.deliveries.where.createdAt.lt.toISOString(), '2026-10-01T00:00:00.000Z');
+  assert.deepEqual(
+    calls.routine.where.action,
+    { in: ['Contrôle FTL démarré', 'Contrôle FTL terminé'] },
+    'admin actions and failures are kept',
+  );
+  assert.match(calls.snapshots[0], /rang > 2/, 'the two latest snapshots per ranking are kept');
+});
+
+test('F7/F9: stopping a worker returns the pass in progress so shutdown can wait for it', async () => {
+  process.env.FTL_AUTO_SYNC = 'true';
+  const { startWorker } = require('../src/services/ftlScheduler');
+  let release;
+  const db = {
+    ftlSyncState: { findMany: () => new Promise((r) => (release = () => r([]))) },
+    competition: { findMany: async () => [] },
+    tournament: { findMany: async () => [] },
+  };
+  const log = console.log;
+  console.log = () => {};
+  const stop = startWorker(db);
+  console.log = log;
+  const pending = stop();
+  let done = false;
+  pending.then(() => (done = true));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(done, false, 'the pass in progress is still running');
+  release();
+  await pending;
+  assert.ok(require('../src/lib/heartbeat').lastBeat('ftl'), 'a finished pass records its heartbeat for /health');
+  delete process.env.FTL_AUTO_SYNC;
+});
