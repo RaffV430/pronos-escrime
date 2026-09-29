@@ -310,3 +310,15 @@ test('e) face-à-face : rencontres passées dans les deux sens, forme récente, 
   assert.equal(res.body.form.player1[0].opponent, c);
   assert.equal((await call('GET', '/api/matches/999999999/h2h', user.token)).status, 404);
 });
+
+test('f) tableau d’animation : participation et joueurs sans pronostic sur une vraie base', opts, async () => {
+  const [active, idle] = [await createUser(), await createUser()];
+  const competition = await createCompetition();
+  const match = await createOpenMatch(competition.id);
+  assert.equal((await predict(match, active, 15, 10)).status, 200);
+  const out = await require('../../src/services/engagement').engagement(prisma, competition.tournamentId);
+  assert.equal(out.competitions[0].players, 1);
+  assert.equal(out.competitions[0].openMatches, 1);
+  assert.ok(out.inactive.some((u) => u.id === idle.id));
+  assert.ok(!out.inactive.some((u) => u.id === active.id));
+});
