@@ -1,6 +1,7 @@
 const { load } = require('cheerio');
 const { createClient, failure, ORIGIN } = require('./ftlClient');
 const { clean, norm } = require('./ftlParser');
+const { cleanCity, utcOffset, offsetLabel } = require('./venue');
 const SOURCE = /^https:\/\/www\.fencingtimelive\.com\/(tableaus|pools)\/scores\/([a-f0-9]{32})\/[a-f0-9]{32}$/i;
 const CONFIG = 'Configuration FTL validée';
 async function configuration(db, competitionId) {
@@ -78,12 +79,14 @@ async function preview(db, input, actorId, client = createClient()) {
   const related = links.filter((url) => SOURCE.test(url) && SOURCE.exec(url)[2].toUpperCase() === eventId);
   const tableau = [...new Set(related.filter((u) => u.includes('/tableaus/')))];
   if (tableau.length > 1) throw failure('Plusieurs tableaux : sélectionner la source principale avant configuration.');
+  const city = cleanCity(input.city);
   const config = {
     tournament,
     event,
     eventTime,
     date,
     timezone,
+    ...(city ? { city } : {}),
     format,
     sourceUrl: tableau[0] || null,
     poolSources: [...new Set(related.filter((u) => u.includes('/pools/')))],
@@ -99,7 +102,14 @@ async function preview(db, input, actorId, client = createClient()) {
       after: { config, roster },
     },
   });
-  return { previewId: saved.id, ...config, entries: roster };
+  const start = require('./eventStart').eventStart(config);
+  return {
+    previewId: saved.id,
+    ...config,
+    offset: offsetLabel(utcOffset(timezone, start || Date.now())),
+    startsAt: start ? new Date(start).toISOString() : null,
+    entries: roster,
+  };
 }
 async function save(db, input, actorId) {
   const previewId = Number(input.previewId),

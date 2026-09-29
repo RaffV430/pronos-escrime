@@ -170,6 +170,11 @@ router.post(
     res.json({ success: true, adjustment: result });
   }),
 );
+// Lieu de compétition : recherche d'une ville, le fuseau horaire en est déduit.
+router.get(
+  '/ftl/cities',
+  wrap(async (req, res) => res.json(await require('../services/venue').searchCities(req.query.q))),
+);
 router.post(
   '/ftl/preview',
   wrap(async (req, res) =>
