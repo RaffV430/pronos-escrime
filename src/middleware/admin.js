@@ -8,10 +8,16 @@ function createAdminMiddleware(db = prisma) {
     }
     try {
       // A session claim can predate a promotion or revocation of admin rights.
-      const user = await db.user.findUnique({ where: { id: userId }, select: { isAdmin: true } });
+      const user = await db.user.findUnique({ where: { id: userId }, select: { isAdmin: true, totpEnabledAt: true } });
       if (!user?.isAdmin) {
         return res.status(403).json({ error: 'Accès administrateur requis.' });
       }
+      // REQUIRE_ADMIN_2FA=true : l'administration exige la double authentification activée.
+      if (process.env.REQUIRE_ADMIN_2FA === 'true' && !user.totpEnabledAt)
+        return res.status(403).json({
+          error: 'Activez la double authentification (Mon compte → Sécurité) pour accéder à l’administration.',
+          twoFactorSetupRequired: true,
+        });
       req.user.isAdmin = true;
       next();
     } catch (error) {

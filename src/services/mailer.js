@@ -6,13 +6,28 @@ function mailConfigured() {
   return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.MAIL_FROM?.trim());
 }
 
-async function sendMail({ to, subject, html, text }, http = axios) {
-  if (!mailConfigured()) throw Object.assign(new Error('Envoi d’e-mails non configuré.'), { status: 503 });
-  await http.post(
-    'https://api.resend.com/emails',
-    { from: process.env.MAIL_FROM.trim(), to: [to], subject, html, text },
-    { headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY.trim()}` }, timeout: 10000 },
-  );
+// Une erreur axios contient la requête complète (clé API, destinataire, lien de
+// réinitialisation) : on ne laisse jamais remonter que le code HTTP et le code réseau.
+function safeMailError(error) {
+  const status = error?.response?.status;
+  return Object.assign(new Error(`Envoi d’e-mail refusé (${status || error?.code || 'erreur réseau'}).`), {
+    status: 502,
+    providerStatus: status || null,
+    code: error?.code || null,
+  });
 }
 
-module.exports = { mailConfigured, sendMail };
+async function sendMail({ to, subject, html, text }, http = axios) {
+  if (!mailConfigured()) throw Object.assign(new Error('Envoi d’e-mails non configuré.'), { status: 503 });
+  try {
+    await http.post(
+      'https://api.resend.com/emails',
+      { from: process.env.MAIL_FROM.trim(), to: [to], subject, html, text },
+      { headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY.trim()}` }, timeout: 10000 },
+    );
+  } catch (error) {
+    throw safeMailError(error);
+  }
+}
+
+module.exports = { mailConfigured, sendMail, safeMailError };

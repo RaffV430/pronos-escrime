@@ -269,6 +269,51 @@ router.get('/summary/:tournamentId', async (req, res) => {
   }
 });
 // Historique complet d'une saison (1er septembre → 31 août), tous tournois confondus.
+// Droit d'accès et de portabilité (RGPD art. 15 et 20) : toutes les données du compte, en JSON.
+router.get('/export', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const [user, predictions, poolPredictions, podiums, picks, adjustments, memberships, devices] = await Promise.all([
+      db.user.findUnique({
+        where: { id: userId },
+        select: { id: true, name: true, email: true, isAdmin: true, createdAt: true, totpEnabledAt: true },
+      }),
+      db.prediction.findMany({
+        where: { userId },
+        include: { match: { select: { player1: true, player2: true, round: true, competitionId: true } } },
+      }),
+      db.poolPrediction.findMany({
+        where: { userId },
+        include: { fencer: { select: { name: true, pool: { select: { name: true, competitionId: true } } } } },
+      }),
+      db.podiumPrediction.findMany({ where: { userId } }),
+      db.challengePick.findMany({ where: { userId }, include: { challenge: { select: { name: true } } } }),
+      db.pointAdjustment.findMany({ where: { userId } }),
+      db.leagueMember.findMany({ where: { userId }, include: { league: { select: { name: true, kind: true } } } }),
+      db.pushSubscription.findMany({
+        where: { userId },
+        select: { createdAt: true, enabled: true, tournamentIds: true, competitionIds: true, preferences: true },
+      }),
+    ]);
+    if (!user) return res.status(404).json({ error: 'Compte introuvable.' });
+    res.setHeader('Content-Disposition', 'attachment; filename="pronos-escrime-mes-donnees.json"');
+    res.json({
+      exportedAt: new Date().toISOString(),
+      account: user,
+      matchPredictions: predictions,
+      poolPredictions,
+      podiumPredictions: podiums,
+      challengePicks: picks,
+      pointAdjustments: adjustments,
+      leagues: memberships,
+      notificationDevices: devices,
+    });
+  } catch (error) {
+    console.error('Erreur export des données :', error);
+    res.status(500).json({ error: 'Export impossible. Réessayez.' });
+  }
+});
+
 router.get('/season', async (req, res) => {
   try {
     const userId = req.user.userId;

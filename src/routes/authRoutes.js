@@ -11,6 +11,8 @@ const { rateLimit } = require('express-rate-limit');
 // souvent la même adresse IP (wifi du club). On ne compte donc que les échecs,
 // par identifiant visé, avec un plafond par IP beaucoup plus large.
 const tooMany = { error: 'Trop de tentatives. Réessayez dans quelques minutes.' };
+const BCRYPT_COST = 12;
+const DUMMY_HASH = bcrypt.hashSync('pronos-escrime-compte-inexistant', BCRYPT_COST);
 const limiter = (options) =>
   rateLimit({ standardHeaders: 'draft-8', legacyHeaders: false, message: tooMany, ...options });
 const identifierKey = (req) =>
@@ -27,6 +29,13 @@ const loginPerIdentifier = limiter({
 });
 const loginPerIp = limiter({ windowMs: 15 * 60 * 1000, limit: 200, skipSuccessfulRequests: true });
 const registerPerIp = limiter({ windowMs: 60 * 60 * 1000, limit: 60 });
+// Actions sensibles d'un compte connecté (suppression, 2FA, mot de passe) : 5 échecs / 15 min par compte.
+const passwordChecksPerUser = limiter({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => `user:${req.user?.userId}`,
+});
 
 // ---------------------------------------------------------
 // 2. Route GET /api/auth/me (Vérification de la session)
@@ -95,7 +104,7 @@ router.post('/register', registerPerIp, async (req, res) => {
       return res.status(400).json({ error: 'Cet identifiant ou e-mail est déjà utilisé.' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_COST);
 
     const newUser = await prisma.user.create({
       data: {
@@ -177,7 +186,7 @@ router.post('/2fa/enable', authMiddleware, twoFactorLimiter, async (req, res) =>
   }
 });
 
-router.post('/2fa/disable', authMiddleware, twoFactorLimiter, async (req, res) => {
+router.post('/2fa/disable', authMiddleware, passwordChecksPerUser, twoFactorLimiter, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
     if (!user?.totpEnabledAt) return res.status(409).json({ error: 'La double authentification n’est pas active.' });
@@ -222,13 +231,22 @@ router.post('/login', loginPerIp, loginPerIdentifier, async (req, res) => {
     let user = email.includes('@') ? await prisma.user.findUnique({ where: { email: email.toLowerCase() } }) : null;
     if (!user) user = await prisma.user.findFirst({ where: { name: email } });
 
-    if (!user || !user.password) {
+    // Comparaison toujours effectuée (avec une empreinte factice si besoin) : le temps de
+    // réponse ne révèle pas si le compte existe.
+    const validPassword = await bcrypt.compare(password, user?.password || DUMMY_HASH);
+    if (!user || !user.password || !validPassword) {
       return res.status(400).json({ error: 'Identifiant ou mot de passe incorrect.' });
     }
-
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-      return res.status(400).json({ error: 'Identifiant ou mot de passe incorrect.' });
+    // Empreintes anciennes (coût 10) renforcées à la première connexion réussie.
+    if (bcrypt.getRounds(user.password) < BCRYPT_COST) {
+      try {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { password: await bcrypt.hash(password, BCRYPT_COST) },
+        });
+      } catch {
+        // Renforcement retenté à la prochaine connexion.
+      }
     }
 
     // Double authentification : un code à 6 chiffres est exigé après le mot de passe.
@@ -281,11 +299,15 @@ router.post('/forgot-password', forgotPerIp, forgotPerEmail, async (req, res) =>
   if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Adresse e-mail invalide.' });
   try {
     const user = await prisma.user.findUnique({ where: { email } });
-    if (user) await sendMail(account.resetEmail(user, account.createResetToken(user)));
+    // Même réponse, au même moment, que le compte existe ou non ; l'envoi se fait ensuite.
     done();
+    if (user)
+      sendMail(account.resetEmail(user, account.createResetToken(user))).catch((err) =>
+        console.error('Erreur mot de passe oublié :', err.message),
+      );
   } catch (err) {
-    console.error('Erreur mot de passe oublié:', err);
-    res.status(502).json({ error: 'L’e-mail n’a pas pu être envoyé. Réessayez dans quelques minutes.' });
+    console.error('Erreur mot de passe oublié :', err.message);
+    if (!res.headersSent) done();
   }
 });
 
@@ -296,7 +318,7 @@ router.post('/reset-password', resetPerIp, async (req, res) => {
   try {
     const user = await account.verifyResetToken(prisma, token);
     if (!user) return res.status(400).json({ error: 'Ce lien a expiré ou a déjà servi. Refaites une demande.' });
-    await prisma.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash(password, 10) } });
+    await prisma.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash(password, BCRYPT_COST) } });
     // Toutes les sessions ouvertes avec l'ancien mot de passe sont coupées.
     await session.revokeSessions(prisma, user.id);
     res.json({ message: 'Mot de passe modifié. Vous pouvez vous connecter.' });
@@ -306,7 +328,7 @@ router.post('/reset-password', resetPerIp, async (req, res) => {
   }
 });
 
-router.delete('/account', authMiddleware, async (req, res) => {
+router.delete('/account', authMiddleware, passwordChecksPerUser, async (req, res) => {
   const { password, confirm } = req.body || {};
   if (confirm !== 'SUPPRIMER' || typeof password !== 'string')
     return res.status(400).json({ error: 'Saisissez votre mot de passe et tapez SUPPRIMER pour confirmer.' });
@@ -334,14 +356,14 @@ router.post('/refresh', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
     if (!user) return res.status(401).json({ error: 'Session expirée.' });
-    res.json({ token: session.issueToken(user) });
+    res.json({ token: session.issueToken(user, { since: session.sessionStart(req.user) }) });
   } catch (err) {
     console.error('Erreur refresh:', err);
     res.status(500).json({ error: 'Renouvellement impossible.' });
   }
 });
 
-router.post('/change-password', authMiddleware, loginPerIp, async (req, res) => {
+router.post('/change-password', authMiddleware, passwordChecksPerUser, loginPerIp, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   if (!validPassword(newPassword))
     return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir entre 10 et 128 caractères.' });
@@ -349,7 +371,10 @@ router.post('/change-password', authMiddleware, loginPerIp, async (req, res) => 
     const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
     if (!user || !(await bcrypt.compare(String(currentPassword || ''), user.password)))
       return res.status(400).json({ error: 'Mot de passe actuel incorrect.' });
-    await prisma.user.update({ where: { id: user.id }, data: { password: await bcrypt.hash(newPassword, 10) } });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { password: await bcrypt.hash(newPassword, BCRYPT_COST) },
+    });
     const updated = await session.revokeSessions(prisma, user.id);
     res.json({
       message: 'Mot de passe modifié. Vos autres appareils ont été déconnectés.',

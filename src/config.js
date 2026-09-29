@@ -35,10 +35,21 @@ function originAllowed(origin, allowed = getAllowedOrigins()) {
   });
 }
 
+// Recommandations signalées au démarrage (sans bloquer : un redéploiement ne doit pas échouer pour ça).
+function configWarnings(env = process.env) {
+  const warnings = [];
+  if (env.NODE_ENV === 'production' && Buffer.byteLength(env.JWT_SECRET?.trim() || '') < 32)
+    warnings.push('JWT_SECRET fait moins de 32 caractères : utilisez une valeur longue et aléatoire.');
+  if (env.NODE_ENV === 'production' && !env.TOTP_ENC_KEY?.trim())
+    warnings.push('TOTP_ENC_KEY absent : la 2FA dépend de JWT_SECRET (le changer bloquerait les administrateurs).');
+  return warnings;
+}
+
 function validateRuntimeConfig() {
   requiredEnv('DATABASE_URL');
   getJwtSecret();
   getAllowedOrigins();
+  for (const warning of configWarnings()) console.warn(`Configuration : ${warning}`);
 }
 
-module.exports = { getAllowedOrigins, originAllowed, getJwtSecret, validateRuntimeConfig };
+module.exports = { getAllowedOrigins, originAllowed, getJwtSecret, validateRuntimeConfig, configWarnings };

@@ -35,6 +35,18 @@ function createPoolRouter(db = prisma) {
   };
   // All mutations for a pool acquire the same lock, preventing a save from
   // racing a manual closure or result publication. No migration is run here.
+  // Toute action d'administration sur une poule laisse une trace (qui, quoi, avant/après).
+  const audit = (req, action, poolId, before, after, client = db) =>
+    client.auditLog.create({
+      data: {
+        actorId: req.user.userId,
+        action,
+        targetType: 'Pool',
+        targetId: poolId,
+        before: before ?? undefined,
+        after: after ?? undefined,
+      },
+    });
   const withPool = (poolId, fn, options) =>
     db.$transaction(async (tx) => {
       const rows = await tx.$queryRaw`SELECT "id" FROM "Pool" WHERE "id" = ${poolId} FOR UPDATE`;
@@ -134,6 +146,7 @@ function createPoolRouter(db = prisma) {
         },
         include: { fencers: true },
       });
+      await audit(req, 'Création de poule', pool.id, null, { name, lockMode, fencers: names });
       res.status(201).json(pool);
     }),
   );
@@ -193,9 +206,11 @@ function createPoolRouter(db = prisma) {
     '/:poolId/close',
     admin,
     handle(async (req, res) => {
-      await withPool(id(req.params.poolId), (tx) =>
-        tx.pool.update({ where: { id: id(req.params.poolId) }, data: { isLocked: true } }),
-      );
+      const poolId = id(req.params.poolId);
+      await withPool(poolId, async (tx, pool) => {
+        await tx.pool.update({ where: { id: poolId }, data: { isLocked: true } });
+        await audit(req, 'Fermeture de poule', poolId, { isLocked: pool.isLocked }, { isLocked: true }, tx);
+      });
       res.json({ message: 'Pronostics clos.' });
     }),
   );
@@ -209,6 +224,7 @@ function createPoolRouter(db = prisma) {
         async (tx, pool) => {
           if (!closed(pool)) fail('Fermez les pronostics avant de publier les résultats.', 409);
           const results = validateResults(req.body.results, pool.fencers);
+          const before = pool.fencers.map((f) => ({ id: f.id, name: f.name, wins: f.wins, indicator: f.indicator }));
           for (const { fencerId, ...data } of results) {
             await tx.poolFencer.update({ where: { id: fencerId }, data });
             const predictions = await tx.poolPrediction.findMany({ where: { fencerId } });
@@ -221,6 +237,7 @@ function createPoolRouter(db = prisma) {
             );
           }
           await tx.pool.update({ where: { id: pool.id }, data: { isLocked: true, isFinal: true } });
+          await audit(req, 'Publication des résultats de poule', pool.id, { fencers: before }, { results }, tx);
         },
         { timeout: 30000 },
       );

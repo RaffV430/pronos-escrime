@@ -79,7 +79,13 @@ function otpauthUrl(base32Secret, account, issuer = 'Pronos Escrime') {
 
 // Le secret est chiffré en base (AES-256-GCM, clé dérivée de JWT_SECRET) : une
 // fuite de la seule base de données ne suffit pas à générer des codes.
-const key = () => crypto.createHash('sha256').update(`totp:${getJwtSecret()}`).digest();
+// TOTP_ENC_KEY (recommandé) rend la 2FA indépendante de JWT_SECRET : changer JWT_SECRET ne
+// bloque plus les administrateurs. Les secrets scellés avec l'ancienne clé restent lisibles.
+const legacyKey = () => crypto.createHash('sha256').update(`totp:${getJwtSecret()}`).digest();
+const key = () =>
+  process.env.TOTP_ENC_KEY?.trim()
+    ? crypto.createHash('sha256').update(`totp-key:${process.env.TOTP_ENC_KEY.trim()}`).digest()
+    : legacyKey();
 function sealSecret(base32Secret) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key(), iv);
@@ -91,9 +97,17 @@ function sealSecret(base32Secret) {
 function openSecret(sealed) {
   const [version, iv, tag, data] = String(sealed || '').split('.');
   if (version !== 'v1') throw new Error('Secret 2FA illisible.');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key(), Buffer.from(iv, 'base64url'));
-  decipher.setAuthTag(Buffer.from(tag, 'base64url'));
-  return Buffer.concat([decipher.update(Buffer.from(data, 'base64url')), decipher.final()]).toString('utf8');
+  const open = (k) => {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', k, Buffer.from(iv, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tag, 'base64url'));
+    return Buffer.concat([decipher.update(Buffer.from(data, 'base64url')), decipher.final()]).toString('utf8');
+  };
+  try {
+    return open(key());
+  } catch (error) {
+    if (!process.env.TOTP_ENC_KEY?.trim()) throw error;
+    return open(legacyKey());
+  }
 }
 
 module.exports = {

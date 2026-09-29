@@ -19,6 +19,7 @@ function fixture() {
     ],
   };
   const predictions = [];
+  const audits = [];
   let locked = false;
   const db = {
     $queryRaw: async () => {
@@ -26,6 +27,7 @@ function fixture() {
       return [{ id: 1 }];
     },
     user: { findUnique: async ({ where }) => ({ isAdmin: where.id === 3 }) },
+    auditLog: { create: async ({ data }) => (audits.push(data), data) },
     // Liste des engagés de l'épreuve : nation (code olympique) et rang d'entrée.
     competition: {
       findUnique: async () => ({
@@ -92,11 +94,11 @@ function fixture() {
     locked = false;
     return fn(db);
   };
-  return { db, pool, predictions };
+  return { db, pool, predictions, audits };
 }
 
 test('HTTP authentication, ownership, closure and corrected results', async (t) => {
-  const { db, pool, predictions } = fixture();
+  const { db, pool, predictions, audits } = fixture();
   const app = express();
   app.use(express.json());
   app.use('/pools', createPoolRouter(db));
@@ -143,6 +145,10 @@ test('HTTP authentication, ownership, closure and corrected results', async (t) 
   assert.equal((await request('/1/fencers/10/prediction', 'PUT', { wins: 0, losses: 1, indicator: -3 })).status, 409);
   assert.equal((await request('/1/fencers/10/prediction', 'DELETE')).status, 409);
   assert.equal((await request('/1/results', 'PUT', { results }, 1, true)).status, 200);
+  const published = audits.find((a) => a.action === 'Publication des résultats de poule');
+  assert.ok(published, 'publishing pool results is recorded in the admin audit log');
+  assert.deepEqual([published.targetType, published.targetId], ['Pool', 1]);
+  assert.ok(published.before.fencers && published.after.results);
   assert.equal(predictions[0].pointsEarned, 8);
   assert.equal(predictions[1].pointsEarned, 1);
   assert.equal((await request('/1/results', 'PUT', { results }, 1, true)).status, 200);

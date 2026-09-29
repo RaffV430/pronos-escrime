@@ -9,11 +9,20 @@ const SESSION_TTL = '30d';
 const CACHE_MS = 30000;
 const cache = new Map(); // userId → { version, at }
 
-function issueToken(user) {
-  return jwt.sign({ userId: user.id, isAdmin: user.isAdmin, sv: user.sessionVersion ?? 0 }, getJwtSecret(), {
-    expiresIn: SESSION_TTL,
-    algorithm: 'HS256',
-  });
+// Une session renouvelée garde sa date d'ouverture (« s0 ») : au-delà de 90 jours, reconnexion obligatoire.
+const MAX_SESSION_SECONDS = 90 * 24 * 3600;
+const sessionStart = (claims) => (Number.isSafeInteger(claims?.s0) ? claims.s0 : claims?.iat);
+function issueToken(user, { since } = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  return jwt.sign(
+    { userId: user.id, isAdmin: user.isAdmin, sv: user.sessionVersion ?? 0, s0: since ?? now },
+    getJwtSecret(),
+    { expiresIn: SESSION_TTL, algorithm: 'HS256' },
+  );
+}
+function sessionTooOld(claims, now = Math.floor(Date.now() / 1000)) {
+  const start = sessionStart(claims);
+  return Number.isSafeInteger(start) && now - start > MAX_SESSION_SECONDS;
 }
 
 // Version actuelle (mise en cache 30 s pour ne pas interroger la base à chaque requête).
@@ -34,4 +43,4 @@ async function revokeSessions(db, userId) {
 
 const forget = (userId) => cache.delete(userId);
 
-module.exports = { issueToken, currentVersion, revokeSessions, forget, SESSION_TTL };
+module.exports = { issueToken, currentVersion, revokeSessions, forget, sessionStart, sessionTooOld, SESSION_TTL };
