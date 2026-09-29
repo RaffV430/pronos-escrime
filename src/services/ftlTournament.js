@@ -73,7 +73,8 @@ function linksOf($) {
 async function readEvent(event, client) {
   const page = await client.eventPage(event.eventSourceUrl),
     $ = load(page.html),
-    links = linksOf($);
+    // La page d'épreuve redirige vers le tableau une fois publié : son adresse compte comme lien.
+    links = [...linksOf($), page.url].map((u) => u.replace(/#.*$/, ''));
   const eventTime = clean($('.desktop.eventTime').text()),
     stamp = Date.parse(eventTime + ' UTC');
   if (
@@ -290,6 +291,41 @@ async function applyEvent(tx, c, { config, roster }, actorId) {
     data: { actorId, action: CONFIG, targetType: 'Competition', targetId: c.id, after: { ...config, name: c.name } },
   });
 }
+// Épreuve configurée par un lien de poules avant la publication du tableau (sans page d'épreuve
+// mémorisée) : à chaque contrôle, le tableau est recherché sur la page officielle de l'épreuve, puis
+// enregistré dans la configuration. Aucun tableau deviné : un seul lien, de la même épreuve.
+async function discoverTableau(db, c, config, actorId, client) {
+  if (config.sourceUrl || config.eventSourceUrl || !/^[a-f0-9]{32}$/i.test(config.eventId || '')) return config;
+  const eventId = config.eventId.toUpperCase();
+  const page = await client.eventPage(`${ORIGIN}/events/view/${eventId}`);
+  const $ = load(page.html);
+  if (
+    norm($('.desktop.tournName').text()) !== norm(config.tournament) ||
+    norm($('.desktop.eventName').text()) !== norm(config.event) ||
+    norm($('.desktop.eventTime').text()) !== norm(config.eventTime)
+  )
+    throw failure('Page officielle de l’épreuve non concordante : tableau non recherché.');
+  const tableaus = [
+    ...new Set(
+      [...linksOf($), page.url]
+        .map((u) => u.replace(/#.*$/, ''))
+        .filter((u) => u.includes('/tableaus/') && SOURCE.test(u) && SOURCE.exec(u)[2].toUpperCase() === eventId),
+    ),
+  ];
+  if (tableaus.length > 1) throw failure('Plusieurs tableaux publiés : sélection manuelle nécessaire.');
+  if (!tableaus.length) return config;
+  const next = { ...config, sourceUrl: tableaus[0] };
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
+    const previous = await configuration(tx, c.id);
+    if (!previous || previous.sourceUrl || String(previous.eventId).toUpperCase() !== eventId)
+      throw failure('Configuration modifiée pendant le contrôle.', 409);
+    await tx.auditLog.create({
+      data: { actorId, action: CONFIG, targetType: 'Competition', targetId: c.id, after: { ...next, name: c.name } },
+    });
+  });
+  return next;
+}
 async function refreshPending(db, c, config, actorId, client) {
   if (!config.eventSourceUrl || (c.podiumRoster && config.sourceUrl)) return { c, config };
   const observation = await readEvent(config, client);
@@ -306,4 +342,4 @@ async function refreshPending(db, c, config, actorId, client) {
     config: { ...observation.config, name: c.name },
   };
 }
-module.exports = { scheduleUrl, parseSchedule, readEvent, preview, save, refreshPending };
+module.exports = { scheduleUrl, parseSchedule, readEvent, preview, save, refreshPending, discoverTableau };
