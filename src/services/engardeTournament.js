@@ -25,7 +25,12 @@ function createEngardeClient({ http = axios } = {}) {
         maxContentLength: 4 * 1024 * 1024,
         responseType: 'text',
         validateStatus: () => true,
-        headers: { Accept: 'text/html,application/xml', 'Accept-Language': 'fr-FR', ...headers },
+        headers: {
+          Accept: 'text/html,application/xml',
+          'Accept-Language': 'fr-FR',
+          'User-Agent': 'PronosEscrime/1.0 (+https://pronos-escrime.vercel.app)',
+          ...headers,
+        },
       });
     } catch {
       throw new E.EngardeError('engarde-service ne répond pas. Réessayez plus tard.');
@@ -76,10 +81,22 @@ async function preview(db, input, actorId, client = createEngardeClient()) {
     });
   }
   const timezone = String(input.timezone || '') || events.find((e) => e.timezone)?.timezone || null;
+  let title = null;
+  try {
+    title = E.parseTournamentTitle(await client.get(`${E.ORIGIN}/tournament/${link.org}/${link.event}`));
+  } catch {
+    title = null;
+  }
+  // Heure de début en UTC (l'admin la voit aussi à l'heure de Paris pour vérifier le fuseau).
+  const { eventStart } = require('./eventStart');
+  for (const e of events) {
+    const start = timezone ? eventStart({ date: e.date, time: e.time, timezone }) : null;
+    e.startsAt = start ? new Date(start).toISOString() : null;
+  }
   const result = {
     provider: 'engarde',
     sourceUrl: `${E.ORIGIN}/tournament/${link.org}/${link.event}`,
-    tournament: events[0].title.replace(/\s+\S+$/, '') || link.event,
+    tournament: title || link.event,
     city: events[0].city,
     timezone,
     events,

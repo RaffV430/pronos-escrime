@@ -151,7 +151,11 @@ test('admin preview of an engarde-service tournament lists events, venue time zo
       return fixture('tournament-idf1fm20mennecy.xml');
     },
     get: async (url) =>
-      url.endsWith('/tireurs.htm') ? fixture('fdm20-tireurs-extrait.html') : menu(url.split('/').pop()),
+      url.endsWith('/tireurs.htm')
+        ? fixture('fdm20-tireurs-extrait.html')
+        : url.includes('/tournament/')
+          ? '<div class="tounament-titles"><strong class="tounament-title">IDF 1 Fleuret M20 - MENNECY</strong></div>'
+          : menu(url.split('/').pop()),
   };
   const out = await preview(
     db,
@@ -162,6 +166,8 @@ test('admin preview of an engarde-service tournament lists events, venue time zo
   assert.equal(out.provider, 'engarde');
   assert.equal(out.previewId, 42);
   assert.equal(out.timezone, 'Europe/Paris');
+  assert.equal(out.tournament, 'IDF 1 Fleuret M20 - MENNECY');
+  assert.equal(out.events[0].startsAt, '2026-09-20T09:15:00.000Z');
   assert.deepEqual(
     out.events.map((e) => [e.eventId, e.event, e.entries, e.published.tableau]),
     [

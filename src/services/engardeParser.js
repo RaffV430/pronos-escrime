@@ -137,6 +137,12 @@ function parseCompetitions(xml, { org, event } = {}) {
   return events;
 }
 
+// Nom officiel du tournoi (bandeau de sa page).
+function parseTournamentTitle(html) {
+  const $ = load(String(html || ''));
+  return clean($('.tounament-title, .tournament-title').first().text()) || null;
+}
+
 // Pages d'une épreuve, d'après le menu officiel de sa page (aucune adresse devinée).
 function competitionPages(html, link) {
   const $ = load(String(html || ''));
@@ -472,6 +478,7 @@ module.exports = {
   parseLink,
   competitionsRequest,
   parseCompetitions,
+  parseTournamentTitle,
   competitionPages,
   parseRoster,
   parsePools,
