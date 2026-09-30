@@ -599,7 +599,9 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
       throw failure('Configurez la source et l’identité de cette épreuve dans Administration.', 409);
     let poolSummary,
       summary,
-      discoveryWarning = null;
+      discoveryWarning = null,
+      renameWarning = null,
+      renames = [];
     if (config.provider === 'engarde') {
       // engarde-service : engagés, poules et tableau lus par son module, importés par ce même moteur.
       ({ c, poolSummary, summary } = await require('./engardeSync').control(
@@ -613,6 +615,11 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     } else {
       await client.login();
       ({ c, config } = await require('./ftlTournament').refreshPending(db, c, config, actorId, client));
+      try {
+        ({ c, renames } = await require('./ftlRenames').reconcileRenames(db, c, config.eventId, client, actorId));
+      } catch (e) {
+        renameWarning = e.status ? e.message : 'Vérification des noms officiels impossible pour le moment.';
+      }
       try {
         config = await require('./ftlTournament').discoverTableau(db, c, config, actorId, client);
       } catch (e) {
@@ -672,6 +679,12 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
       else summary.notes = ['Tableau pas encore publié. Il sera recherché au prochain contrôle.'];
     }
     if (discoveryWarning) summary.warnings.push(discoveryWarning);
+    if (renameWarning) summary.warnings.push(renameWarning);
+    if (renames.length)
+      summary.notes = [
+        ...(summary.notes || []),
+        ...renames.map((r) => `Nom officiel corrigé par FencingTimeLive : ${r.from} → ${r.to}.`),
+      ];
     summary.automatic = automatic;
     summary.eventDate = config.date;
     const start = require('./eventStart').eventStart(config);
