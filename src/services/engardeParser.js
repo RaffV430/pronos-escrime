@@ -401,6 +401,12 @@ function tableauMatches(grid) {
     const club = grid[c.row].find((x) => x.col === c.col + 1 && x.role === 'club');
     if (club && c.text) clubs.set(c.text, club.text);
   }
+  // Numéro d'entrée (colonne « place ») des tireurs de la première colonne de la page.
+  const places = new Map();
+  for (const c of cells.filter((c) => c.role === 'fencer' && c.col === fencerCols[0] && c.text)) {
+    const place = Number(grid[c.row].find((x) => x.col === c.col - 1 && x.role === 'place')?.text);
+    if (Number.isSafeInteger(place) && place > 0) places.set(c.text, place);
+  }
   const matches = [];
   const rounds = [];
   fencerCols.forEach((col, index) => {
@@ -455,21 +461,33 @@ function tableauMatches(grid) {
     }
     rounds.push({ round, size, expectedMatchCount: real, previousRound: null });
   });
-  return { matches, rounds };
+  return { matches, rounds, places };
 }
 
 // Plusieurs pages de tableau (T128-32, T16…) : réunies par tour, sans doublon.
 function parseTableaus(pages) {
   const byKey = new Map(),
-    rounds = new Map();
+    rounds = new Map(),
+    pageSeeds = [];
   for (const html of pages) {
-    const { matches, rounds: found } = tableauMatches(tableauGrid(html));
+    const { matches, rounds: found, places } = tableauMatches(tableauGrid(html));
     for (const m of matches) byKey.set(m.sourceKey, m);
     for (const r of found) rounds.set(r.round, r);
+    pageSeeds.push({ size: Math.max(0, ...found.map((r) => r.size)), places });
   }
+  // Classement d'entrée : numéro de la page au plus grand tableau (sur les pages suivantes, le numéro
+  // affiché est la position dans le tableau réduit, pas la tête de série).
+  const seeds = new Map();
+  for (const { places } of pageSeeds.sort((a, b) => b.size - a.size))
+    for (const [name, place] of places) if (!seeds.has(name)) seeds.set(name, place);
   const ordered = [...rounds.values()].sort((a, b) => b.size - a.size);
   ordered.forEach((r, i) => (r.previousRound = i ? ordered[i - 1].round : null));
-  return { matches: [...byKey.values()], rounds: ordered };
+  const matches = [...byKey.values()].map((m) => ({
+    ...m,
+    seed1: seeds.get(m.player1) ?? null,
+    seed2: seeds.get(m.player2) ?? null,
+  }));
+  return { matches, rounds: ordered };
 }
 
 module.exports = {
