@@ -350,6 +350,8 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       sourceCheckedAt: observation.checkedAt,
       ...(o.startsAt ? { startsAt: o.startsAt } : {}),
       ...(o.strip ? { strip: o.strip } : {}),
+      ...(o.seed1 ? { seed1: o.seed1 } : {}),
+      ...(o.seed2 ? { seed2: o.seed2 } : {}),
     };
     if (o.isFinished)
       Object.assign(data, {

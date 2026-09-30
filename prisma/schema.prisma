@@ -33,6 +33,8 @@ model Match {
   competition   Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
   player1       String
   player2       String
+  seed1         Int?
+  seed2         Int?
   score1        Int?
   score2        Int?
   isFinished    Boolean      @default(false)
