@@ -189,7 +189,7 @@ function parseRoster(html) {
     .map((_, th) => norm($(th).text()))
     .get();
   const col = (label) => headers.findIndex((h) => h === label);
-  const [rank, last, first, club] = [col('r.i.'), col('nom'), col('prénom'), col('club')];
+  const [rank, last, first, club, nation] = [col('r.i.'), col('nom'), col('prénom'), col('club'), col('nation')];
   if (last < 0 || first < 0) fail('Colonnes des engagés non reconnues.');
   const entries = table
     .find('tr')
@@ -198,12 +198,15 @@ function parseRoster(html) {
     .map((tr) => {
       const cells = $(tr).children('td').toArray();
       const name = `${clean($(cells[last]).text()).toUpperCase()} ${clean($(cells[first]).text())}`.trim();
+      // Identifiant : nom + club (épreuve nationale). Épreuve internationale : nation lue à part, sans
+      // entrer dans l'identifiant (qui reste celui des listes déjà enregistrées).
       const clubName = club >= 0 ? clubOf($, cells[club]) : '';
+      const nationName = nation >= 0 ? clean($(cells[nation]).text()) : '';
       const seed = rank >= 0 ? Number(clean($(cells[rank]).text())) : NaN;
       return {
         id: entryId(name, clubName),
         name,
-        country: clubName,
+        country: clubName || nationName,
         active: true,
         entryRanking: Number.isSafeInteger(seed) && seed > 0 ? seed : null,
       };
@@ -355,6 +358,7 @@ function parseFinalRanking(html) {
     .get();
   const col = (label) => headers.findIndex((h) => h === label);
   const [rank, last, first] = [col('rg'), col('nom'), col('prénom')];
+  const club = col('club') >= 0 ? col('club') : col('nation');
   if (rank < 0 || last < 0 || first < 0) fail('Colonnes du classement non reconnues.');
   return table
     .find('tr')
@@ -365,6 +369,7 @@ function parseFinalRanking(html) {
       return {
         place: clean($(cells[rank]).text()),
         name: `${clean($(cells[last]).text()).toUpperCase()} ${clean($(cells[first]).text())}`.trim(),
+        club: club >= 0 ? clubOf($, cells[club]) : '',
       };
     })
     .filter((r) => r.place && r.name);
@@ -523,6 +528,7 @@ function parseTableaus(pages) {
 }
 
 module.exports = {
+  clean,
   ORIGIN,
   EngardeError,
   parseLink,
