@@ -109,7 +109,7 @@ test('plan: unchanged pools are left alone; changed, added, removed and reordere
   );
 });
 
-test('plan: a started pool or an unknown fencer is never rewritten automatically', () => {
+test('plan: a pool started in the app or an unknown fencer is never rewritten automatically', () => {
   const pools = [stored(1, ['A', 'B', 'C']), stored(2, ['D', 'E', 'F'])];
   const started = [stored(1, ['A', 'B', 'C']), { ...stored(2, ['D', 'E', 'F']) }];
   started[1].fencers[0].firstResultAt = new Date();
@@ -117,15 +117,16 @@ test('plan: a started pool or an unknown fencer is never rewritten automatically
     () => planRecomposition(started, URL_, [seen(1, ['A', 'B', 'C']), seen(2, ['D', 'E', 'G'])], roster),
     /après leur début/,
   );
-  assert.throws(
-    () =>
-      planRecomposition(
-        pools,
-        URL_,
-        [seen(1, ['A', 'B', 'C']), seen(2, ['D', 'E', 'G'], { firstResult: true })],
-        roster,
-      ),
-    /après leur début/,
+  // Poule officielle commencée mais jamais importée dans cette composition (tirage refait) : remplacée.
+  const late = planRecomposition(
+    pools,
+    URL_,
+    [seen(1, ['A', 'B', 'C']), seen(2, ['D', 'E', 'G'], { firstResult: true })],
+    roster,
+  );
+  assert.deepEqual(
+    late.changed.map((x) => x.pool.name),
+    ['Poule 2'],
   );
   assert.throws(
     () => planRecomposition(pools, URL_, [seen(1, ['A', 'B', 'C']), seen(2, ['D', 'E', 'Z'])], roster),

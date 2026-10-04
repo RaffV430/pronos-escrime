@@ -17,6 +17,7 @@ const clean = (s) =>
   String(s ?? '')
     .normalize('NFC')
     .replace(/\u00a0/g, ' ')
+    .replace(/''/g, "'") // apostrophe doublée sur certaines pages (« Nicolo'' », « s''actualise »)
     .replace(/\s+/g, ' ')
     .trim();
 const norm = (s) => clean(s).toLowerCase();
@@ -415,6 +416,16 @@ function tableauMatches(grid) {
   if (!titles.length) fail('Tours du tableau non reconnus.');
   const cells = grid.flatMap((row, r) => row.map((c) => ({ ...c, row: r })));
   const fencerCols = [...new Set(cells.filter((c) => c.role === 'fencer').map((c) => c.col))].sort((a, b) => a - b);
+  // Épreuves internationales : aux tours suivants, engarde ajoute la nation au nom (« MONTI Lucrezia ITA »).
+  // Le nom est ramené à celui de la première colonne quand il n'y a aucune ambiguïté.
+  const firstColumn = new Set(
+    cells.filter((c) => c.role === 'fencer' && c.col === fencerCols[0] && c.text).map((c) => c.text),
+  );
+  for (const c of cells)
+    if (c.role === 'fencer' && c.text && !firstColumn.has(c.text)) {
+      const bare = c.text.replace(/\s+[A-Z]{3}$/, '');
+      if (bare !== c.text && firstColumn.has(bare)) c.text = bare;
+    }
   const roundAt = new Map();
   for (const t of titles) {
     const round = roundOf(t.text);

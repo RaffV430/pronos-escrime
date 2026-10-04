@@ -35,13 +35,64 @@ async function refreshRoster(db, c, url, client) {
       const started = await tx.poolFencer.count({
         where: { pool: { competitionId: c.id }, OR: [{ firstResultAt: { not: null } }, { wins: { not: null } }] },
       });
-      if (started || (await tx.match.count({ where: { competitionId: c.id } }))) return fresh; // épreuve commencée : la liste ne bouge plus
+      if (started || (await tx.match.count({ where: { competitionId: c.id } }))) {
+        // Épreuve commencée : la liste ne change plus, sauf engagé ajouté en retard (nouvel identifiant).
+        const known = new Set(fresh.podiumRoster.map((e) => e.id));
+        const late = observed.filter((e) => !known.has(e.id));
+        if (!late.length) return fresh;
+        return tx.competition.update({
+          where: { id: c.id },
+          data: {
+            podiumRoster: [...fresh.podiumRoster, ...late].sort((a, b) => a.name.localeCompare(b.name, 'fr')),
+            rosterCheckedAt: new Date(),
+          },
+        });
+      }
     }
     return tx.competition.update({
       where: { id: c.id },
       data: { podiumRoster: merged, rosterSourceUrl: url, rosterCheckedAt: new Date() },
     });
   });
+}
+
+async function addLateEntrants(db, c, rows) {
+  const current = c.podiumRoster || [];
+  const withClubs = current.some((e) => e.country);
+  const missing = [];
+  for (const r of rows)
+    if (!current.some((e) => norm(e.name) === norm(r.name)) && !missing.some((e) => norm(e.name) === norm(r.name)))
+      missing.push({
+        id: E.entryId(r.name, withClubs ? r.club || '' : ''),
+        name: r.name,
+        country: withClubs ? r.club || '' : '',
+        active: true,
+        entryRanking: null,
+      });
+  if (!missing.length || missing.some((m) => current.some((e) => e.id === m.id))) return;
+  const updated = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
+    const fresh = await tx.competition.findUnique({ where: { id: c.id } });
+    if (JSON.stringify(fresh.podiumRoster) !== JSON.stringify(c.podiumRoster))
+      throw failure('Liste des engagés modifiée pendant le contrôle.', 409);
+    await tx.auditLog.create({
+      data: {
+        actorId: 0,
+        action: 'Engagés ajoutés depuis les poules',
+        targetType: 'Competition',
+        targetId: c.id,
+        after: { names: missing.map((m) => m.name) },
+      },
+    });
+    return tx.competition.update({
+      where: { id: c.id },
+      data: {
+        podiumRoster: [...fresh.podiumRoster, ...missing].sort((a, b) => a.name.localeCompare(b.name, 'fr')),
+        rosterCheckedAt: new Date(),
+      },
+    });
+  });
+  c.podiumRoster = updated.podiumRoster;
 }
 
 function startsAt(config, time) {
@@ -63,13 +114,30 @@ async function syncPools(db, c, config, url, client, leaseToken) {
     return summary;
   }
   const inRoster = (name) => (c.podiumRoster || []).filter((e) => norm(e.name) === norm(name)).length === 1;
+  // Tireur engagé sur place, présent en poule mais pas (encore) dans la liste publiée : ajouté aux engagés.
+  try {
+    await addLateEntrants(
+      db,
+      c,
+      observedAll.filter((o) => !o.error).flatMap((o) => o.rows),
+    );
+  } catch (e) {
+    summary.warnings.push(e.status ? e.message : 'Engagés de dernière minute non ajoutés.');
+  }
   let pools = await db.pool.findMany({
     where: { competitionId: c.id },
     include: { fencers: { orderBy: { position: 'asc' } } },
     orderBy: { id: 'asc' },
   });
   try {
-    const plan = recompose.planRecomposition(pools, url, observedAll, c.podiumRoster);
+    // Une poule illisible ce contrôle-ci n'est ni comparée ni supprimée.
+    const unreadable = new Set(observedAll.filter((o) => o.error).map((o) => o.number));
+    const plan = recompose.planRecomposition(
+      pools.filter((p) => !unreadable.has(p.sourcePoolNumber)),
+      url,
+      observedAll.filter((o) => !o.error),
+      c.podiumRoster,
+    );
     if (plan) {
       if (leaseToken) await db.$transaction((tx) => require('./ftlScheduler').assertClaim(tx, c.id, leaseToken));
       const result = await recompose.applyRecomposition(db, c, url, plan, config);
