@@ -86,6 +86,7 @@ async function syncPools(db, c, config, url, client, leaseToken) {
   }
   for (const observed of observedAll) {
     try {
+      if (observed.error) throw failure(observed.error);
       observed.startsAt = startsAt(config, observed.time);
       if (observed.rows.some((r) => !inRoster(r.name)))
         throw failure(`Poule ${observed.number} : tireur absent ou ambigu dans les engagés.`);

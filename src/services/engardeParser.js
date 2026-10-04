@@ -230,83 +230,108 @@ function parsePools(html) {
     const number = Number(/Poule No\s*(\d+)/i.exec(header || $(table).attr('summary') || '')?.[1]);
     if (!number || numbers.has(number)) fail('Numérotation des poules ambiguë.');
     numbers.add(number);
-    const trs = $(table).find('tr').slice(1).toArray();
-    const n = trs.length;
-    if (n < 2 || n > 12) fail(`Composition inhabituelle de la poule ${number}.`);
-    const rows = trs.map((tr, i) => {
-      const cells = $(tr).children('td').toArray();
-      const name = clean($(cells[0]).text());
-      if (!name) fail(`Structure de la poule ${number} non reconnue.`);
-      const results = cells.slice(3, 3 + n).map((c, j) => {
-        const text = clean($(c).text());
-        if (i === j || !text) return null;
-        const v = /^V(\d{0,2})$/.exec(text);
-        if (v || $(c).find('.victory-cell').length) return { win: true, touches: v?.[1] ? Number(v[1]) : null };
-        if (/^\d{1,2}$/.test(text)) return { win: false, touches: Number(text) };
-        fail(`Abandon, exclusion ou score inhabituel dans la poule ${number}.`);
-      });
-      const stats = cells.slice(3 + n).map((c) => clean($(c).text()));
-      const indice = stats.find((x, k) => k > 0 && /^-?\d+$/.test(x) && k === stats.length - 2);
-      return { name, club: clubOf($, cells[1]), position: i + 1, results, officialIndicator: indice };
-    });
-    if (new Set(rows.map((r) => norm(r.name))).size !== n) fail('Noms ambigus dans la poule.');
-    const values = rows.map(() => ({ wins: 0, losses: 0, indicator: 0, touches: 0, received: 0, hasResult: false }));
-    const evidence = new Set();
-    let complete = true,
-      ambiguous = false;
-    for (let i = 0; i < n; i++)
-      for (let j = i + 1; j < n; j++) {
-        const a = rows[i].results[j],
-          b = rows[j].results[i];
-        if (a || b) {
-          evidence.add(i + 1);
-          evidence.add(j + 1);
-          values[i].hasResult = values[j].hasResult = true;
-        }
-        if (!a || !b) {
-          complete = false;
-          if (a || b) {
-            ambiguous = true;
-            values[i].wins = values[i].losses = values[i].indicator = null;
-            values[j].wins = values[j].losses = values[j].indicator = null;
-          }
-          continue;
-        }
-        if (a.win === b.win) fail(`Scores réciproques incohérents dans la poule ${number}.`);
-        const [w, l] = a.win ? [a, b] : [b, a];
-        const given = w.touches ?? 5;
-        if (given <= l.touches) fail(`Scores réciproques incohérents dans la poule ${number}.`);
-        for (const [k, res, own, other] of [
-          [i, a, a.win ? given : a.touches, a.win ? b.touches : given],
-          [j, b, b.win ? given : b.touches, b.win ? a.touches : given],
-        ]) {
-          const r = values[k];
-          if (r.wins !== null) r.wins += res.win ? 1 : 0;
-          if (r.losses !== null) r.losses += res.win ? 0 : 1;
-          if (r.indicator !== null) r.indicator += own - other;
-          r.touches += own;
-          r.received += other;
-        }
-      }
-    // Poule terminée : l'indice officiel prime (touches maximales propres à la formule de l'épreuve).
-    if (complete)
-      rows.forEach((r, i) => {
-        if (/^-?\d+$/.test(r.officialIndicator || '')) values[i].indicator = Number(r.officialIndicator);
-      });
-    return {
-      number,
-      ...timeAndStrip(header),
-      complete,
-      ambiguous,
-      rows: rows.map((r, i) => ({
-        name: r.name,
-        club: r.club,
-        position: r.position,
-        firstResult: evidence.has(r.position),
-        ...values[i],
-      })),
-    };
+    // Une poule illisible n'empêche pas l'import des autres : elle est signalée seule.
+    try {
+      return parsePool($, table, number, header);
+    } catch (e) {
+      if (!(e instanceof EngardeError)) throw e;
+      return { number, error: e.message };
+    }
   });
+}
+
+// Forfait avant le début (« DNS ») : tous ses assauts sont notés F, ceux des autres contre lui X.
+// Le tireur est absent de la poule et ses assauts ne comptent pour personne (comme sur FencingTimeLive).
+function parsePool($, table, number, header) {
+  const trs = $(table).find('tr').slice(1).toArray();
+  const n = trs.length;
+  if (n < 2 || n > 12) fail(`Composition inhabituelle de la poule ${number}.`);
+  const rows = trs.map((tr, i) => {
+    const cells = $(tr).children('td').toArray();
+    const name = clean($(cells[0]).text());
+    if (!name) fail(`Structure de la poule ${number} non reconnue.`);
+    const texts = cells.slice(3, 3 + n).map((c) => clean($(c).text()));
+    const absent = texts.every((t, j) => i === j || t === 'F');
+    const results = cells.slice(3, 3 + n).map((c, j) => {
+      const text = texts[j];
+      if (i === j || !text || absent) return null;
+      if (text === 'X') return 'X';
+      const v = /^V(\d{0,2})$/.exec(text);
+      if (v || $(c).find('.victory-cell').length) return { win: true, touches: v?.[1] ? Number(v[1]) : null };
+      if (/^\d{1,2}$/.test(text)) return { win: false, touches: Number(text) };
+      fail(`Abandon, exclusion ou score inhabituel dans la poule ${number}.`);
+    });
+    const stats = cells.slice(3 + n).map((c) => clean($(c).text()));
+    const indice = stats.find((x, k) => k > 0 && /^-?\d+$/.test(x) && k === stats.length - 2);
+    return { name, club: clubOf($, cells[1]), position: i + 1, results, absent, officialIndicator: indice };
+  });
+  if (rows.filter((r) => !r.absent).length < 2) fail(`Pas assez de tireurs présents dans la poule ${number}.`);
+  // « X » seulement face à un absent ; face à un absent, rien d'autre que « X » ou une case vide.
+  for (const [i, r] of rows.entries())
+    for (const [j, res] of r.results.entries()) {
+      if (res === 'X' && !rows[j].absent) fail(`Assaut annulé inattendu dans la poule ${number}.`);
+      if (res && res !== 'X' && rows[j].absent) fail(`Score attribué à un absent dans la poule ${number}.`);
+      if (res === 'X') r.results[j] = null;
+    }
+  if (new Set(rows.map((r) => norm(r.name))).size !== n) fail('Noms ambigus dans la poule.');
+  const values = rows.map(() => ({ wins: 0, losses: 0, indicator: 0, touches: 0, received: 0, hasResult: false }));
+  const evidence = new Set();
+  let complete = true,
+    ambiguous = false;
+  for (let i = 0; i < n; i++)
+    for (let j = i + 1; j < n; j++) {
+      if (rows[i].absent || rows[j].absent) continue;
+      const a = rows[i].results[j],
+        b = rows[j].results[i];
+      if (a || b) {
+        evidence.add(i + 1);
+        evidence.add(j + 1);
+        values[i].hasResult = values[j].hasResult = true;
+      }
+      if (!a || !b) {
+        complete = false;
+        if (a || b) {
+          ambiguous = true;
+          values[i].wins = values[i].losses = values[i].indicator = null;
+          values[j].wins = values[j].losses = values[j].indicator = null;
+        }
+        continue;
+      }
+      if (a.win === b.win) fail(`Scores réciproques incohérents dans la poule ${number}.`);
+      const [w, l] = a.win ? [a, b] : [b, a];
+      const given = w.touches ?? 5;
+      if (given <= l.touches) fail(`Scores réciproques incohérents dans la poule ${number}.`);
+      for (const [k, res, own, other] of [
+        [i, a, a.win ? given : a.touches, a.win ? b.touches : given],
+        [j, b, b.win ? given : b.touches, b.win ? a.touches : given],
+      ]) {
+        const r = values[k];
+        if (r.wins !== null) r.wins += res.win ? 1 : 0;
+        if (r.losses !== null) r.losses += res.win ? 0 : 1;
+        if (r.indicator !== null) r.indicator += own - other;
+        r.touches += own;
+        r.received += other;
+      }
+    }
+  // Poule terminée : l'indice officiel prime (touches maximales propres à la formule de l'épreuve).
+  if (complete)
+    rows.forEach((r, i) => {
+      if (!r.absent && /^-?\d+$/.test(r.officialIndicator || '')) values[i].indicator = Number(r.officialIndicator);
+    });
+  return {
+    number,
+    ...timeAndStrip(header),
+    complete,
+    ambiguous,
+    rows: rows.map((r, i) => ({
+      name: r.name,
+      club: r.club,
+      position: r.position,
+      firstResult: evidence.has(r.position),
+      ...values[i],
+      ...(r.absent ? { absent: true, status: 'DNS', wins: null, losses: null, indicator: null } : {}),
+    })),
+  };
 }
 
 // Classement général (clasfinal.htm) : place et « NOM Prénom ».
