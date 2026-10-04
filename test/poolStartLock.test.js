@@ -92,3 +92,20 @@ test('applyPool : la poule suit l’heure officielle (France)', async () => {
   );
   assert.equal(saved.lockMode, undefined, 'hors de France : rien ne change');
 });
+
+test('tirage provisoire (engarde, avant l’appel) : poule visible mais fermée', () => {
+  const E = require('../src/services/engardeParser');
+  assert.equal(
+    E.rosterCheckedIn(
+      '<h3>Tireurs (présents - 235)</h3><table class="liste" summary="Tireurs (présents - 235)"></table>',
+    ),
+    true,
+  );
+  assert.equal(E.rosterCheckedIn('<h3>Tireuses (présentes - 37)</h3>'), true);
+  assert.equal(E.rosterCheckedIn('<h3>Tireurs (inscrits - 245)</h3><table class="liste"></table>'), false);
+  const lock = R.sourceLock(start, true, new Date(0), true);
+  assert.equal(lock.lockMode, R.PROVISIONAL);
+  const pool = { ...lock, isLocked: false, isFinal: false };
+  assert.equal(R.closed(pool, new Date('2026-10-03T12:00:00Z')), true);
+  assert.equal(R.followsSource(pool), true);
+});

@@ -14,8 +14,8 @@ const linkOf = (config) => ({ org: config.org, event: config.tournamentSlug, com
 
 // Engagés : pris tels quels à la première publication ; ensuite, tant qu'aucune poule n'a commencé,
 // les nouveaux arrivent et les absents passent inactifs (leurs identifiants restent pour les pronostics).
-async function refreshRoster(db, c, url, client) {
-  const observed = E.parseRoster(await client.get(url));
+async function refreshRoster(db, c, url, client, html = null) {
+  const observed = E.parseRoster(html ?? (await client.get(url)));
   const current = c.podiumRoster || [];
   const byId = new Map(current.map((e) => [e.id, e]));
   const seen = new Set(observed.map((e) => e.id));
@@ -104,7 +104,7 @@ function startsAt(config, time) {
   }
 }
 
-async function syncPools(db, c, config, url, client, leaseToken) {
+async function syncPools(db, c, config, url, client, leaseToken, { provisional = false } = {}) {
   const summary = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [] };
   let observedAll;
   try {
@@ -158,6 +158,7 @@ async function syncPools(db, c, config, url, client, leaseToken) {
       if (observed.error) throw failure(observed.error);
       observed.startsAt = startsAt(config, observed.time);
       observed.closeAtStart = config.timezone === 'Europe/Paris';
+      observed.provisional = provisional;
       if (observed.rows.some((r) => !inRoster(r.name)))
         throw failure(`Poule ${observed.number} : tireur absent ou ambigu dans les engagés.`);
       let snapshot = pools.find((p) => p.sourceUrl === url && p.sourcePoolNumber === observed.number);
@@ -278,7 +279,20 @@ async function control(db, c, config, actorId, claim, client) {
   const { planMatches, applyObservation, cancellable, drawSignature } = require('./ftlSync');
   const notes = [];
   const pages = E.competitionPages(await client.get(config.eventSourceUrl), linkOf(config));
-  if (pages.roster) c = await refreshRoster(db, c, pages.roster, client);
+  // Tirage publié la veille, avant l'appel : poules provisoires, fermées aux pronostics jusqu'à l'appel
+  // (liste « présents ») ou, faute d'appel sur engarde, jusqu'au jour de l'épreuve.
+  let provisional = false;
+  if (pages.roster) {
+    const rosterHtml = await client.get(pages.roster);
+    c = await refreshRoster(db, c, pages.roster, client, rosterHtml);
+    let dayStart = null;
+    try {
+      dayStart = localTime(config.date, 0, 0, config.timezone).getTime();
+    } catch {
+      dayStart = null;
+    }
+    provisional = !E.rosterCheckedIn(rosterHtml) && dayStart !== null && Date.now() < dayStart;
+  }
   const empty = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [] };
   let summary = {
     createdIds: [],
@@ -296,7 +310,7 @@ async function control(db, c, config, actorId, claim, client) {
     return { c, poolSummary: empty, summary: { ...summary, notes } };
   }
   const poolSummary = pages.pools.length
-    ? await syncPools(db, c, config, pages.pools[0], client, claim.token)
+    ? await syncPools(db, c, config, pages.pools[0], client, claim.token, { provisional })
     : { ...empty, notes: ['Poules pas encore publiées.'] };
   const existing = await db.match.findMany({ where: { competitionId: c.id } });
   if (pages.tableaus.length) {

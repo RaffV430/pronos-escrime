@@ -171,6 +171,13 @@ const entryId = (name, club) =>
     .slice(0, 32);
 const clubOf = ($, cell) => clean($(cell).find('.club, .club-container span').first().text() || $(cell).text());
 
+// Appel des tireurs fait : engarde titre alors la liste « Tireurs (présents - 235) » / « présentes ».
+function rosterCheckedIn(html) {
+  const $ = load(String(html || ''));
+  const title = `${$('table.liste').first().attr('summary') || ''} ${$('h3').first().text()}`;
+  return /présent/i.test(clean(title));
+}
+
 function parseRoster(html) {
   const $ = load(String(html || ''));
   const table = $('table.liste').first();
@@ -524,6 +531,7 @@ module.exports = {
   parseTournamentTitle,
   competitionPages,
   parseRoster,
+  rosterCheckedIn,
   parsePools,
   parseFinalRanking,
   tableauGrid,

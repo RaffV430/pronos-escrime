@@ -209,7 +209,12 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
   // Clôture à l'heure annoncée (épreuves en France) : suit l'heure officielle tant que la poule est ouverte.
   const lock =
     observed.closeAtStart !== undefined && followsSource(current) && !current.isFinal
-      ? sourceLock(observed.startsAt, observed.closeAtStart, current.closesAt)
+      ? sourceLock(
+          observed.startsAt,
+          observed.closeAtStart,
+          current.closesAt, // ignoré en mode « premier résultat »
+          observed.provisional,
+        )
       : null;
   await tx.pool.update({
     where: { id: current.id },
