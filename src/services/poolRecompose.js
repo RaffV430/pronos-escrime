@@ -5,6 +5,7 @@ const { norm } = require('./ftlParser');
 const { failure } = require('./ftlClient');
 
 const ACTION = 'Poules recomposées';
+const URGENT_WINDOW = 3 * 3600000;
 const sameOrder = (pool, observed) =>
   pool.fencers.length === observed.rows.length &&
   pool.fencers.every(
@@ -134,6 +135,13 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
         predictionsCleared: cleared,
         players: players.size,
       };
+      // Épreuve en France modifiée peu avant le début (3 h) : notification prioritaire, même en heures calmes.
+      const starts = [...plan.changed.map((x) => x.observed), ...plan.added]
+        .map((o) => (o.startsAt ? new Date(o.startsAt).getTime() : null))
+        .filter((t) => t !== null && t > now.getTime() - 30 * 60000);
+      const soonest = starts.length ? Math.min(...starts) : null;
+      const urgent = config?.timezone === 'Europe/Paris' && soonest !== null && soonest - now.getTime() < URGENT_WINDOW;
+      if (urgent) summary.urgentStart = new Date(soonest).toISOString();
       const audit = await tx.auditLog.create({
         data: { actorId: 0, action: ACTION, targetType: 'Competition', targetId: c.id, after: summary },
       });
@@ -153,7 +161,7 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
               competitionId: c.id,
               throughEventId: 0,
               kind: 'POOLS',
-              round: `pools-${audit.id}`,
+              round: `${urgent ? 'pools-urgent' : 'pools'}-${audit.id}`,
               matchIds: notified,
             },
           });
@@ -175,9 +183,23 @@ function describe(summary) {
 }
 
 // Texte de la notification : les poules encore présentes sont nommées, sinon un message général.
-function poolsNotification(c, pools) {
+function poolsNotification(c, pools, { urgent = false } = {}) {
   const names = pools.map((p) => p.name).sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} et ${names.at(-1)}` : names[0];
+  if (urgent) {
+    const start = pools
+      .map((p) => p.startsAt && new Date(p.startsAt).getTime())
+      .filter(Boolean)
+      .sort((a, b) => a - b)[0];
+    const at = start
+      ? new Date(start).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' })
+      : null;
+    return {
+      title: `⚠ Poules modifiées · ${c.name}`,
+      body: `${names.length ? `${list} ${names.length > 1 ? 'ont' : 'a'} changé` : 'Les poules ont changé'}${at ? `, début à ${at}` : ''} : refaites vos pronostics avant le début.`,
+      url: `/?tournament=${c.tournamentId}&event=${c.id}&view=pools`,
+    };
+  }
   return {
     title: `Poules modifiées · ${c.name}`,
     body: names.length

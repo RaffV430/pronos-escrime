@@ -1,7 +1,7 @@
 const { load } = require('cheerio');
 const { clean, norm } = require('./ftlParser');
 const { failure } = require('./ftlClient');
-const { poolPoints, validateResults } = require('./poolRules');
+const { poolPoints, validateResults, followsSource, sourceLock } = require('./poolRules');
 const { rescore } = require('./rescore');
 const WITHDRAWALS = new Set(['Failed to Appear', 'Medical Withdrawal']);
 const pattern = /^https:\/\/www\.fencingtimelive\.com\/pools\/scores\/([a-f0-9]{32})\/[a-f0-9]{32}$/i;
@@ -180,7 +180,7 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
   for (const [i, f] of current.fencers.entries()) {
     const r = observed.rows[i],
       data = {};
-    if (r.firstResult && !f.firstResultAt && current.lockMode === 'FIRST_RESULT') {
+    if (r.firstResult && !f.firstResultAt && followsSource(current)) {
       data.firstResultAt = checkedAt;
       locks++;
     }
@@ -206,9 +206,18 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
       );
   }
   // A missing reciprocal score does not refresh source freshness, but certain first-result locks persist.
+  // Clôture à l'heure annoncée (épreuves en France) : suit l'heure officielle tant que la poule est ouverte.
+  const lock =
+    observed.closeAtStart !== undefined && followsSource(current) && !current.isFinal
+      ? sourceLock(observed.startsAt, observed.closeAtStart, current.closesAt)
+      : null;
   await tx.pool.update({
     where: { id: current.id },
     data: {
+      ...(lock && lock.lockMode !== current.lockMode ? { lockMode: lock.lockMode } : {}),
+      ...(lock && new Date(lock.closesAt).getTime() !== new Date(current.closesAt).getTime()
+        ? { closesAt: lock.closesAt }
+        : {}),
       ...(!observed.ambiguous ? { sourceCheckedAt: checkedAt } : {}),
       ...(observed.complete ? { isFinal: true, isLocked: true } : {}),
       ...(observed.strip && observed.strip !== current.strip ? { strip: observed.strip } : {}),
