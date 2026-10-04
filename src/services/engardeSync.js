@@ -95,17 +95,35 @@ async function addLateEntrants(db, c, rows) {
   c.podiumRoster = updated.podiumRoster;
 }
 
-function startsAt(config, time) {
+// engarde n'affiche que l'heure (« 09:00 Piste 3 ») : la date vient de l'épreuve, décalée d'un jour
+// à chaque phase qui commence plus tôt que la précédente (épreuve sur plusieurs jours).
+function dayOf(config, offset = 0) {
+  if (!offset) return config.date;
+  return new Date(Date.parse(`${config.date}T12:00:00Z`) + offset * 86400000).toISOString().slice(0, 10);
+}
+function startsAt(config, time, offset = 0) {
   if (!time) return null;
   try {
-    return localTime(config.date, time.hour, time.minute, config.timezone);
+    return localTime(dayOf(config, offset), time.hour, time.minute, config.timezone);
   } catch {
     return null;
   }
 }
+const minutes = (times) => {
+  const all = times.filter(Boolean).map((t) => t.hour * 60 + t.minute);
+  return all.length ? Math.min(...all) : null;
+};
+// Phase suivante (tour de poules, tour de tableau) : même jour, ou lendemain si elle commence plus tôt.
+function nextDay(prev, min) {
+  if (!prev) return { min, offset: 0 };
+  if (min === null) return prev;
+  return { min, offset: prev.min !== null && min <= prev.min ? prev.offset + 1 : prev.offset };
+}
 
-async function syncPools(db, c, config, url, client, leaseToken, { provisional = false } = {}) {
-  const summary = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [] };
+async function syncPools(db, c, config, url, client, leaseToken, { provisional = false, round = 1, prev = null } = {}) {
+  const summary = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [], day: prev };
+  // Second tour de poules et suivants : « Tour 2 · Poule 3 » (les numéros repartent de 1 à chaque tour).
+  const label = (n) => (round > 1 ? `Tour ${round} · Poule ${n}` : `Poule ${n}`);
   let observedAll;
   try {
     observedAll = E.parsePools(await client.get(url));
@@ -116,10 +134,11 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
   const inRoster = (name) => (c.podiumRoster || []).filter((e) => norm(e.name) === norm(name)).length === 1;
   // Tireur engagé sur place, présent en poule mais pas (encore) dans la liste publiée : ajouté aux engagés.
   try {
+    // Un forfait (DNS) n'est jamais ajouté aux engagés.
     await addLateEntrants(
       db,
       c,
-      observedAll.filter((o) => !o.error).flatMap((o) => o.rows),
+      observedAll.filter((o) => !o.error).flatMap((o) => o.rows.filter((r) => !r.absent)),
     );
   } catch (e) {
     summary.warnings.push(e.status ? e.message : 'Engagés de dernière minute non ajoutés.');
@@ -129,8 +148,10 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
     include: { fencers: { orderBy: { position: 'asc' } } },
     orderBy: { id: 'asc' },
   });
+  const day = nextDay(prev, minutes(observedAll.filter((o) => !o.error).map((o) => o.time)));
+  summary.day = day;
   try {
-    for (const o of observedAll) if (!o.error) o.startsAt = startsAt(config, o.time);
+    for (const o of observedAll) if (!o.error) o.startsAt = startsAt(config, o.time, day.offset);
     // Une poule illisible ce contrôle-ci n'est ni comparée ni supprimée.
     const unreadable = new Set(observedAll.filter((o) => o.error).map((o) => o.number));
     const plan = recompose.planRecomposition(
@@ -138,6 +159,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
       url,
       observedAll.filter((o) => !o.error),
       c.podiumRoster,
+      label,
     );
     if (plan) {
       if (leaseToken) await db.$transaction((tx) => require('./ftlScheduler').assertClaim(tx, c.id, leaseToken));
@@ -156,15 +178,23 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
   for (const observed of observedAll) {
     try {
       if (observed.error) throw failure(observed.error);
-      observed.startsAt = startsAt(config, observed.time);
+      observed.startsAt = startsAt(config, observed.time, day.offset);
       observed.closeAtStart = config.timezone === 'Europe/Paris';
       observed.provisional = provisional;
-      if (observed.rows.some((r) => !inRoster(r.name)))
-        throw failure(`Poule ${observed.number} : tireur absent ou ambigu dans les engagés.`);
+      if (observed.rows.some((r) => !r.absent && !inRoster(r.name)))
+        throw failure(`${label(observed.number)} : tireur absent ou ambigu dans les engagés.`);
       let snapshot = pools.find((p) => p.sourceUrl === url && p.sourcePoolNumber === observed.number);
       if (!snapshot) {
-        if (pools.some((p) => p.fencers.some((f) => observed.rows.some((r) => norm(r.name) === norm(f.name)))))
-          throw failure(`Poule ${observed.number} déjà présente sans correspondance de source certaine.`);
+        // Les mêmes tireurs figurent normalement dans les poules des autres tours : seules comptent
+        // les poules de ce tour et celles saisies à la main.
+        if (
+          pools.some(
+            (p) =>
+              (!p.sourceUrl || p.sourceUrl === url) &&
+              p.fencers.some((f) => observed.rows.some((r) => norm(r.name) === norm(f.name))),
+          )
+        )
+          throw failure(`${label(observed.number)} déjà présente sans correspondance de source certaine.`);
         snapshot = await db.$transaction(async (tx) => {
           await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
           const duplicate = await tx.pool.findFirst({
@@ -175,7 +205,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
           return tx.pool.create({
             data: {
               competitionId: c.id,
-              name: `Poule ${observed.number}`,
+              name: label(observed.number),
               closesAt: new Date(config.date + 'T00:00:00Z'),
               lockMode: 'FIRST_RESULT',
               sourceUrl: url,
@@ -198,7 +228,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
       for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
       if (observed.ambiguous)
         summary.warnings.push(
-          `Poule ${observed.number} : score réciproque manquant ; tireurs concernés verrouillés, bilan incomplet non inventé.`,
+          `${label(observed.number)} : score réciproque manquant ; tireurs concernés verrouillés, bilan incomplet non inventé.`,
         );
     } catch (e) {
       summary.warnings.push(e.status ? e.message : 'Une poule n’a pas pu être importée. Réessayez.');
@@ -222,7 +252,7 @@ function manifest(rounds) {
   return validateManifest(out);
 }
 
-async function observeTableau(c, config, pages, client) {
+async function observeTableau(c, config, pages, client, prev = null) {
   const { podiumFromResults } = require('./ftlSync');
   const htmls = [];
   for (const url of pages.tableaus) htmls.push(await client.get(url));
@@ -232,6 +262,13 @@ async function observeTableau(c, config, pages, client) {
     if (hits.length !== 1) throw failure(`Nom officiel ambigu ou absent des engagés : ${name}.`);
     return hits[0];
   };
+  // Jour de chaque tour : à la suite des poules, lendemain quand un tour commence plus tôt que le précédent.
+  const offsets = new Map();
+  let day = prev;
+  for (const r of [...parsed.rounds].sort((a, b) => b.size - a.size)) {
+    day = nextDay(day, minutes(parsed.matches.filter((m) => m.round === r.round).map((m) => m.time)));
+    offsets.set(r.round, day.offset);
+  }
   const matches = parsed.matches.map((m) => {
     entry(m.player1);
     entry(m.player2);
@@ -240,7 +277,7 @@ async function observeTableau(c, config, pages, client) {
       round: m.round,
       player1: m.player1,
       player2: m.player2,
-      startsAt: startsAt(config, m.time),
+      startsAt: startsAt(config, m.time, offsets.get(m.round) || 0),
       strip: m.strip,
       winner: m.winner,
       score1: m.score1,
@@ -309,13 +346,27 @@ async function control(db, c, config, actorId, claim, client) {
     notes.push('Épreuve pas encore publiée sur engarde-service. Elle sera recherchée au prochain contrôle.');
     return { c, poolSummary: empty, summary: { ...summary, notes } };
   }
-  const poolSummary = pages.pools.length
-    ? await syncPools(db, c, config, pages.pools[0], client, claim.token, { provisional })
-    : { ...empty, notes: ['Poules pas encore publiées.'] };
+  // Tous les tours de poules publiés (poules1.htm, poules2.htm…), dans l'ordre.
+  const poolPages = [...pages.pools].sort(
+    (a, b) => Number(/poules(\d+)\.htm$/.exec(a)?.[1]) - Number(/poules(\d+)\.htm$/.exec(b)?.[1]),
+  );
+  let poolSummary = { ...empty, notes: ['Poules pas encore publiées.'] },
+    day = null;
+  if (poolPages.length) {
+    poolSummary = { ...empty, warnings: [] };
+    for (const [i, url] of poolPages.entries()) {
+      const s = await syncPools(db, c, config, url, client, claim.token, { provisional, round: i + 1, prev: day });
+      day = s.day;
+      for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated']) poolSummary[k] += s[k];
+      poolSummary.warnings.push(...s.warnings);
+      if (s.notes) poolSummary.notes = [...(poolSummary.notes || []), ...s.notes];
+      if (s.recomposed) poolSummary.recomposed = [...(poolSummary.recomposed || []), ...s.recomposed];
+    }
+  }
   const existing = await db.match.findMany({ where: { competitionId: c.id } });
   if (pages.tableaus.length) {
     try {
-      let observation = await observeTableau(c, config, pages, client);
+      let observation = await observeTableau(c, config, pages, client, day);
       const conflicts = planMatches(existing, observation, { allowPartial: true }).conflicts;
       if (
         conflicts.some((i) =>
@@ -325,7 +376,7 @@ async function control(db, c, config, actorId, claim, client) {
           ),
         )
       ) {
-        const confirmation = await observeTableau(c, config, pages, client);
+        const confirmation = await observeTableau(c, config, pages, client, day);
         if (drawSignature(observation) !== drawSignature(confirmation))
           throw failure('Le tableau officiel change pendant le contrôle. Nouvelle vérification nécessaire.');
         observation = { ...confirmation, drawConfirmed: true };
@@ -343,4 +394,4 @@ async function control(db, c, config, actorId, claim, client) {
   return { c, poolSummary, summary };
 }
 
-module.exports = { control, refreshRoster, observeTableau, manifest, syncPools };
+module.exports = { nextDay, dayOf, startsAt, control, refreshRoster, observeTableau, manifest, syncPools };

@@ -21,7 +21,7 @@ const started = (pool) =>
   pool.fencers.some((f) => f.firstResultAt || f.wins !== null || f.losses !== null || f.indicator !== null);
 
 // Pure : compare les poules enregistrées pour une source et les poules observées.
-function planRecomposition(pools, url, observed, roster = []) {
+function planRecomposition(pools, url, observed, roster = [], label = (n) => `Poule ${n}`) {
   const stored = pools.filter((p) => p.sourceUrl === url);
   if (!stored.length) return null; // premier import : géré par l'import normal.
   const byNumber = new Map(stored.map((p) => [p.sourcePoolNumber, p]));
@@ -43,11 +43,12 @@ function planRecomposition(pools, url, observed, roster = []) {
     throw failure('Composition des poules modifiée après leur début : vérification manuelle nécessaire.', 409);
   for (const o of [...plan.changed.map((x) => x.observed), ...plan.added])
     for (const r of o.rows)
-      if ((roster || []).filter((e) => norm(e.name) === norm(r.name)).length !== 1)
-        throw failure(`Poule ${o.number} modifiée : tireur absent ou ambigu dans les engagés.`, 409);
+      if (!r.absent && (roster || []).filter((e) => norm(e.name) === norm(r.name)).length !== 1)
+        throw failure(`${label(o.number)} modifiée : tireur absent ou ambigu dans les engagés.`, 409);
   const names = new Set(pools.filter((p) => p.sourceUrl !== url).map((p) => p.name));
-  if (plan.added.some((o) => names.has(`Poule ${o.number}`)))
+  if (plan.added.some((o) => names.has(label(o.number))))
     throw failure('Nouvelle poule en conflit avec une poule saisie à la main.', 409);
+  plan.label = label;
   return plan;
 }
 
@@ -115,7 +116,7 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
         const created = await tx.pool.create({
           data: {
             competitionId: c.id,
-            name: `Poule ${observed.number}`,
+            name: (plan.label || ((n) => `Poule ${n}`))(observed.number),
             closesAt: new Date(`${config.date}T00:00:00Z`),
             lockMode: 'FIRST_RESULT',
             sourceUrl: url,
@@ -129,7 +130,7 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
       }
       const summary = {
         changed: plan.changed.map((x) => x.pool.name),
-        added: plan.added.map((o) => `Poule ${o.number}`),
+        added: plan.added.map((o) => (plan.label || ((n) => `Poule ${n}`))(o.number)),
         removed: plan.removed.map((p) => p.name),
         reordered: plan.reordered.map((x) => x.pool.name),
         predictionsCleared: cleared,
