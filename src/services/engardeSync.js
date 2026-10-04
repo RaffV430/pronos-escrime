@@ -258,9 +258,17 @@ function manifest(rounds) {
 
 async function observeTableau(c, config, pages, client, prev = null) {
   const { podiumFromResults } = require('./ftlSync');
-  const htmls = [];
-  for (const url of pages.tableaus) htmls.push(await client.get(url));
-  const parsed = E.parseTableaus(htmls);
+  const htmls = [],
+    pageIssues = [];
+  for (const url of pages.tableaus) {
+    try {
+      htmls.push(await client.get(url));
+    } catch (error) {
+      if (!error.status) throw error;
+      pageIssues.push({ message: `${url} : ${error.message}` });
+    }
+  }
+  const parsed = E.parseTableaus(htmls, { allowPartial: true });
   const entry = (name, club = '') => {
     const found = entryFor(c.podiumRoster, name, club);
     if (!found) throw failure(`Nom officiel ambigu ou absent des engagés : ${name}.`);
@@ -273,29 +281,43 @@ async function observeTableau(c, config, pages, client, prev = null) {
     day = nextDay(day, minutes(parsed.matches.filter((m) => m.round === r.round).map((m) => m.time)));
     offsets.set(r.round, day.offset);
   }
-  const matches = parsed.matches.map((m) => {
-    // Forfait (DNS) au tableau : le perdant peut ne plus figurer dans la liste des présents.
-    const walkoverLoser = m.isFinished && m.resultType === 'MEDICAL_WITHDRAWAL' ? 3 - m.winner : null;
-    if (walkoverLoser !== 1) entry(m.player1, m.club1);
-    if (walkoverLoser !== 2) entry(m.player2, m.club2);
-    return {
-      sourceKey: m.sourceKey,
-      round: m.round,
-      player1: m.player1,
-      player2: m.player2,
-      seed1: m.seed1,
-      seed2: m.seed2,
-      startsAt: startsAt(config, m.time, offsets.get(m.round) || 0),
-      strip: m.strip,
-      winner: m.winner,
-      score1: m.score1,
-      score2: m.score2,
-      resultType: m.resultType,
-      isFinished: m.isFinished,
-    };
+  const identityIssues = [];
+  const matches = parsed.matches.flatMap((m) => {
+    try {
+      // Forfait (DNS) au tableau : le perdant peut ne plus figurer dans la liste des présents.
+      const walkoverLoser = m.isFinished && m.resultType === 'MEDICAL_WITHDRAWAL' ? 3 - m.winner : null;
+      if (walkoverLoser !== 1) entry(m.player1, m.club1);
+      if (walkoverLoser !== 2) entry(m.player2, m.club2);
+      return {
+        pointsPending: Boolean(m.pointsPending),
+        syncIssue: m.syncIssue || null,
+        sourceKey: m.sourceKey,
+        round: m.round,
+        player1: m.player1,
+        player2: m.player2,
+        seed1: m.seed1,
+        seed2: m.seed2,
+        startsAt: startsAt(config, m.time, offsets.get(m.round) || 0),
+        strip: m.strip,
+        winner: m.winner,
+        score1: m.score1,
+        score2: m.score2,
+        resultType: m.resultType,
+        isFinished: m.isFinished,
+      };
+    } catch (error) {
+      if (!error.status) throw error;
+      identityIssues.push({
+        sourceKey: m.sourceKey,
+        round: m.round,
+        message: `${m.round} · ${m.sourceKey} : ${error.message}`,
+      });
+      return [];
+    }
   });
   const rounds = manifest(parsed.rounds);
-  const warnings = [];
+  const issues = [...pageIssues, ...(parsed.issues || []), ...identityIssues];
+  const warnings = issues.map((i) => i.message);
   let officialPodium = null,
     resultsSourceUrl = null;
   if (matches.some((m) => m.round === 'T2' && m.isFinished) && pages.final) {
@@ -314,6 +336,7 @@ async function observeTableau(c, config, pages, client, prev = null) {
     sourceUrl: `${config.eventSourceUrl}/tableau`,
     matches,
     rounds,
+    issues,
     officialPodium,
     resultsSourceUrl,
     warnings,
@@ -336,21 +359,27 @@ async function control(db, c, config, actorId, claim, client) {
     },
   };
   const { planMatches, applyObservation, cancellable, drawSignature } = require('./ftlSync');
-  const notes = [];
+  const notes = [],
+    rosterWarnings = [];
   const pages = E.competitionPages(await client.get(config.eventSourceUrl), linkOf(config));
   // Tirage publié la veille, avant l'appel : poules provisoires, fermées aux pronostics jusqu'à l'appel
   // (liste « présents ») ou, faute d'appel sur engarde, jusqu'au jour de l'épreuve.
   let provisional = false;
   if (pages.roster) {
-    const rosterHtml = await client.get(pages.roster);
-    c = await refreshRoster(db, c, pages.roster, client, rosterHtml);
-    let dayStart = null;
     try {
-      dayStart = localTime(config.date, 0, 0, config.timezone).getTime();
-    } catch {
-      dayStart = null;
+      const rosterHtml = await client.get(pages.roster);
+      c = await refreshRoster(db, c, pages.roster, client, rosterHtml);
+      let dayStart = null;
+      try {
+        dayStart = localTime(config.date, 0, 0, config.timezone).getTime();
+      } catch {
+        dayStart = null;
+      }
+      provisional = !E.rosterCheckedIn(rosterHtml) && dayStart !== null && Date.now() < dayStart;
+    } catch (error) {
+      if (!error.status) throw error;
+      rosterWarnings.push(`Liste des engagés : ${error.message} Identités déjà vérifiées conservées.`);
     }
-    provisional = !E.rosterCheckedIn(rosterHtml) && dayStart !== null && Date.now() < dayStart;
   }
   const empty = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [] };
   let summary = {
@@ -377,13 +406,18 @@ async function control(db, c, config, actorId, claim, client) {
   if (poolPages.length) {
     poolSummary = { ...empty, warnings: [] };
     for (const [i, url] of poolPages.entries()) {
-      const s = await syncPools(db, c, config, url, client, claim.token, { provisional, round: i + 1, prev: day });
-      day = s.day;
-      for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated']) poolSummary[k] += s[k];
-      poolSummary.warnings.push(...s.warnings);
-      if (s.notes) poolSummary.notes = [...(poolSummary.notes || []), ...s.notes];
-      if (s.recomposed) poolSummary.recomposed = [...(poolSummary.recomposed || []), ...s.recomposed];
-      if (s.outs) poolSummary.outs = [...(poolSummary.outs || []), ...s.outs];
+      try {
+        const s = await syncPools(db, c, config, url, client, claim.token, { provisional, round: i + 1, prev: day });
+        day = s.day;
+        for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated']) poolSummary[k] += s[k];
+        poolSummary.warnings.push(...s.warnings);
+        if (s.notes) poolSummary.notes = [...(poolSummary.notes || []), ...s.notes];
+        if (s.recomposed) poolSummary.recomposed = [...(poolSummary.recomposed || []), ...s.recomposed];
+        if (s.outs) poolSummary.outs = [...(poolSummary.outs || []), ...s.outs];
+      } catch (error) {
+        if (!error.status) throw error;
+        poolSummary.warnings.push(`Tour ${i + 1} de poules : ${error.message}`);
+      }
     }
   }
   if (poolSummary.outs?.length) await require('./podiumAlerts').alertPodiumOut(db, c, poolSummary.outs);
@@ -414,6 +448,7 @@ async function control(db, c, config, actorId, claim, client) {
       summary.warnings.push(e.status ? e.message : 'Tableau non vérifiable pour le moment.');
     }
   } else notes.push('Tableau pas encore publié. Il sera recherché au prochain contrôle.');
+  summary.warnings.push(...rosterWarnings);
   if (notes.length) summary.notes = [...(summary.notes || []), ...notes];
   if (publishedAt) summary.publishedAt = publishedAt.toISOString();
   return { c, poolSummary, summary };

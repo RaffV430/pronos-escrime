@@ -38,6 +38,8 @@ function matchRow(p) {
   };
   if (m.resultType === 'CANCELLED')
     return { ...base, outcome: 'cancelled', result: 'Affiche annulée', points: 0, details: [] };
+  if (m.pointsPending)
+    return { ...base, outcome: 'pending', result: 'Points en attente de validation', points: null, details: [] };
   if (!m.isFinished) return { ...base, outcome: 'pending', result: null, points: null, details: [] };
   const medical = m.resultType === 'MEDICAL_WITHDRAWAL';
   const expected = calculateMatchPoints(

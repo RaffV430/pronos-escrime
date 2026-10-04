@@ -9,7 +9,7 @@ function title(value) {
   return value.trim();
 }
 function challengePoints(pick, match, bonus = 3) {
-  if (!match?.isFinished) return 0;
+  if (!match?.isFinished || match.pointsPending) return 0;
   const winner =
     match.resultType === 'MEDICAL_WITHDRAWAL'
       ? match.winner
