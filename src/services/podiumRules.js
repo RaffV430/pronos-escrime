@@ -57,7 +57,7 @@ function verifiedPodium(competition) {
     new RegExp(`^https://engarde-service\\.com/competition/([a-z0-9_-]+/[a-z0-9_-]+/[a-z0-9_-]+)/${suffix}$`, 'i').exec(
       url || '',
     )?.[1];
-  const engardeEvent = engarde('tireurs\\.htm', competition.rosterSourceUrl);
+  const engardeEvent = engarde('(?:tireurs|equipes)\\.htm', competition.rosterSourceUrl);
   const sameEvent = engardeEvent
     ? engardeEvent.toLowerCase() === engarde('clasfinal\\.htm', competition.resultsSourceUrl)?.toLowerCase()
     : Boolean(event) && event.toUpperCase() === result?.toUpperCase();
