@@ -240,7 +240,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
 
 // Manifeste des tours : du premier tour publié jusqu'à la finale (exemptions exclues du premier tour).
 function manifest(rounds) {
-  const played = rounds.filter((r) => r.expectedMatchCount > 0).sort((a, b) => b.size - a.size);
+  const played = rounds.filter((r) => r.round !== 'Bronze' && r.expectedMatchCount > 0).sort((a, b) => b.size - a.size);
   if (!played.length) throw failure('Tableau sans rencontre publiée.');
   const first = played[0].size;
   const out = [];
@@ -250,6 +250,9 @@ function manifest(rounds) {
       previousRound: n === first ? null : `T${n * 2}`,
       expectedMatchCount: n === first ? played[0].expectedMatchCount : n / 2,
     });
+  // Épreuve par équipes : match pour la 3e place après les demi-finales.
+  if (rounds.some((r) => r.round === 'Bronze'))
+    out.push({ round: 'Bronze', previousRound: 'T4', expectedMatchCount: 1 });
   return validateManifest(out);
 }
 
@@ -271,8 +274,10 @@ async function observeTableau(c, config, pages, client, prev = null) {
     offsets.set(r.round, day.offset);
   }
   const matches = parsed.matches.map((m) => {
-    entry(m.player1, m.club1);
-    entry(m.player2, m.club2);
+    // Forfait (DNS) au tableau : le perdant peut ne plus figurer dans la liste des présents.
+    const walkoverLoser = m.isFinished && m.resultType === 'MEDICAL_WITHDRAWAL' ? 3 - m.winner : null;
+    if (walkoverLoser !== 1) entry(m.player1, m.club1);
+    if (walkoverLoser !== 2) entry(m.player2, m.club2);
     return {
       sourceKey: m.sourceKey,
       round: m.round,

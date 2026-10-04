@@ -154,7 +154,7 @@ function competitionPages(html, link) {
     if (!href.startsWith(base)) return;
     const file = href.slice(base.length);
     const url = ORIGIN + href;
-    if (file === 'tireurs.htm') pages.roster = url;
+    if (file === 'tireurs.htm' || file === 'equipes.htm') pages.roster = url;
     else if (/^poules\d+\.htm$/.test(file)) pages.pools.push(url);
     else if (/^tableau[\d-]+\.htm$/.test(file)) pages.tableaus.push(url);
     else if (file === 'clasfinal.htm') pages.final = url;
@@ -178,6 +178,15 @@ function rosterCheckedIn(html) {
   return /présent/i.test(clean(title));
 }
 
+// Épreuve par équipes : la case « Nom » porte le nom de l'équipe, puis ses tireurs, un par ligne.
+function teamCell($, cell) {
+  const [team, ...members] = String($(cell).html() || '')
+    .split(/<br\s*\/?>/i)
+    .map((part) => clean(load(`<p>${part}</p>`)('p').text()))
+    .filter(Boolean);
+  return { team: team || '', members };
+}
+
 function parseRoster(html) {
   const $ = load(String(html || ''));
   const table = $('table.liste').first();
@@ -190,14 +199,19 @@ function parseRoster(html) {
     .get();
   const col = (label) => headers.findIndex((h) => h === label);
   const [rank, last, first, club, nation] = [col('r.i.'), col('nom'), col('prénom'), col('club'), col('nation')];
-  if (last < 0 || first < 0) fail('Colonnes des engagés non reconnues.');
+  // Sans colonne « Prénom » : liste des équipes (equipes.htm).
+  const teams = first < 0;
+  if (last < 0) fail('Colonnes des engagés non reconnues.');
   const entries = table
     .find('tr')
     .slice(1)
     .toArray()
     .map((tr) => {
       const cells = $(tr).children('td').toArray();
-      const name = `${clean($(cells[last]).text()).toUpperCase()} ${clean($(cells[first]).text())}`.trim();
+      const squad = teams ? teamCell($, cells[last]) : null;
+      const name = teams
+        ? squad.team
+        : `${clean($(cells[last]).text()).toUpperCase()} ${clean($(cells[first]).text())}`.trim();
       // Identifiant : nom + club (épreuve nationale). Épreuve internationale : nation lue à part, sans
       // entrer dans l'identifiant (qui reste celui des listes déjà enregistrées).
       const clubName = club >= 0 ? clubOf($, cells[club]) : '';
@@ -209,6 +223,7 @@ function parseRoster(html) {
         country: clubName || nationName,
         active: true,
         entryRanking: Number.isSafeInteger(seed) && seed > 0 ? seed : null,
+        ...(squad?.members.length ? { members: squad.members } : {}),
       };
     })
     .filter((e) => e.name);
@@ -414,7 +429,7 @@ function parseFinalRanking(html) {
   const col = (label) => headers.findIndex((h) => h === label);
   const [rank, last, first] = [col('rg'), col('nom'), col('prénom')];
   const club = col('club') >= 0 ? col('club') : col('nation');
-  if (rank < 0 || last < 0 || first < 0) fail('Colonnes du classement non reconnues.');
+  if (rank < 0 || last < 0) fail('Colonnes du classement non reconnues.');
   return table
     .find('tr')
     .slice(1)
@@ -423,7 +438,11 @@ function parseFinalRanking(html) {
       const cells = $(tr).children('td').toArray();
       return {
         place: clean($(cells[rank]).text()),
-        name: `${clean($(cells[last]).text()).toUpperCase()} ${clean($(cells[first]).text())}`.trim(),
+        // Équipes : pas de prénom, nom de l'équipe en première ligne de la case.
+        name:
+          first < 0
+            ? teamCell($, cells[last]).team
+            : `${clean($(cells[last]).text()).toUpperCase()} ${clean($(cells[first]).text())}`.trim(),
         club: club >= 0 ? clubOf($, cells[club]) : '',
       };
     })
@@ -478,45 +497,60 @@ function tableauGrid(html) {
 
 // Qualifié sans score : « DNF » (abandon), forfait.
 // Qualifié sans score : abandon, forfait ou exclusion de l'adversaire (« vainqueur seul » au barème).
-const WITHDRAWAL = /^(DNF|ABD|ABANDON|F|FORFAIT|EXC|EXCL|EXCLU|EXCLUSION)$/i;
+const WITHDRAWAL = /^(DNF|DNS|ABD|ABANDON|F|FORFAIT|EXC|EXCL|EXCLU|EXCLUSION)$/i;
 
-// Matchs d'une grille. Chaque tour occupe une colonne de noms ; un match est une paire de noms
-// consécutifs de cette colonne ; son vainqueur, son score et son horaire se trouvent entre les deux lignes.
+// Tableau principal et match pour la 3e place (épreuves par équipes). Les tableaux de classement
+// (9e, 13e place…) partagent la même grille, à gauche : ils sont ignorés.
+const BRONZE = /^(troisi[eè]me place|3e place|match pour la 3e place)$/i;
+function bracketOf(title) {
+  if (BRONZE.test(clean(title))) return 'Bronze';
+  return roundOf(title);
+}
+
+// Matchs d'une grille. Chaque tour occupe une colonne de noms, sous son titre et jusqu'au titre suivant
+// de la même colonne ; un match est une paire de noms consécutifs de cette zone ; son vainqueur, son
+// score et son horaire se trouvent entre les deux lignes, le vainqueur dans la colonne de noms suivante.
 function tableauMatches(grid) {
-  const titles = grid[0].filter((c) => c.role === 'title');
-  if (!titles.length) fail('Tours du tableau non reconnus.');
   const cells = grid.flatMap((row, r) => row.map((c) => ({ ...c, row: r })));
-  const fencerCols = [...new Set(cells.filter((c) => c.role === 'fencer').map((c) => c.col))].sort((a, b) => a - b);
+  const titles = cells.filter((c) => c.role === 'title');
+  const kept = titles
+    .map((t) => ({ ...t, round: bracketOf(t.text) }))
+    .filter((t) => t.round)
+    .map((t) => {
+      const below = titles.filter((x) => x.col === t.col && x.row > t.row).map((x) => x.row);
+      return { ...t, until: below.length ? Math.min(...below) : Infinity };
+    });
+  if (!kept.length) return { matches: [], rounds: [] }; // page de tableaux de classement seulement
+  const inZone = (z) => (c) => c.row > z.row && c.row < z.until;
+  const fencersIn = (z, col) => cells.filter((c) => c.role === 'fencer' && c.col === col && inZone(z)(c));
   // Épreuves internationales : aux tours suivants, engarde ajoute la nation au nom (« MONTI Lucrezia ITA »).
-  // Le nom est ramené à celui de la première colonne quand il n'y a aucune ambiguïté.
+  // Le nom est ramené à celui de la colonne d'entrée du premier tour quand il n'y a aucune ambiguïté.
+  const main = kept.filter((t) => t.round !== 'Bronze').sort((x, y) => y.round.slice(1) - x.round.slice(1));
+  const entry = main[0] || kept[0];
   const firstColumn = new Set(
-    cells.filter((c) => c.role === 'fencer' && c.col === fencerCols[0] && c.text).map((c) => c.text),
+    fencersIn(entry, entry.col)
+      .map((c) => c.text)
+      .filter(Boolean),
   );
   for (const c of cells)
     if (c.role === 'fencer' && c.text && !firstColumn.has(c.text)) {
       const bare = c.text.replace(/\s+[A-Z]{3}$/, '');
       if (bare !== c.text && firstColumn.has(bare)) c.text = bare;
     }
-  const roundAt = new Map();
-  for (const t of titles) {
-    const round = roundOf(t.text);
-    if (!round) fail(`Tour non reconnu : ${t.text}.`);
-    roundAt.set(t.col, round);
-  }
-  const clubs = new Map(); // nom → club (colonne d'entrée du premier tour)
+  const clubs = new Map(); // nom → club (colonne d'entrée)
   for (const c of cells.filter((c) => c.role === 'fencer')) {
     const club = grid[c.row].find((x) => x.col === c.col + 1 && x.role === 'club');
     if (club && c.text) clubs.set(c.text, club.text);
   }
   const matches = [];
   const rounds = [];
-  fencerCols.forEach((col, index) => {
-    const round = roundAt.get(col);
-    if (!round) return; // dernière colonne : qualifiés du tour suivant (page suivante) ou vainqueur
-    const size = Number(round.slice(1));
-    const entrants = cells.filter((c) => c.col === col && c.role === 'fencer');
+  for (const zone of kept) {
+    const { round, col } = zone;
+    const entrants = fencersIn(zone, col);
     if (entrants.length % 2) fail(`Tour ${round} incomplet.`);
-    const next = fencerCols[index + 1];
+    const next = cells
+      .filter((c) => c.role === 'fencer' && c.col > col && inZone(zone)(c))
+      .reduce((m, c) => Math.min(m, c.col), Infinity);
     let real = 0;
     for (let i = 0; i < entrants.length; i += 2) {
       const [a, b] = [entrants[i], entrants[i + 1]];
@@ -524,12 +558,12 @@ function tableauMatches(grid) {
       const position = i / 2 + 1;
       if (!a.text || !b.text) continue; // exemption : pas de match
       real++;
-      const winnerCell =
-        next === undefined ? null : cells.find((c) => c.col === next && c.role === 'fencer' && between(c));
-      const scoreCell =
-        next === undefined ? null : cells.find((c) => c.col === next && c.role === 'score' && between(c));
+      const winnerCell = cells.find((c) => c.col === next && c.role === 'fencer' && between(c));
+      const scoreCell = cells.find((c) => c.col === next && c.role === 'score' && between(c));
       const timeCell = cells.find((c) => c.role === 'time' && c.col === col && c.row > a.row && c.row < b.row);
       const { time, strip } = timeAndStrip(timeCell?.text || '');
+      // « 45/20 >> » : lien vers la feuille de match des épreuves par équipes.
+      const scoreText = (scoreCell?.text || '').replace(/\s*>>\s*$/, '');
       let winner = null,
         score1 = null,
         score2 = null,
@@ -538,13 +572,13 @@ function tableauMatches(grid) {
       if (winnerCell?.text) {
         winner =
           winnerCell.text === a.text ? 1 : winnerCell.text === b.text ? 2 : fail(`Vainqueur incohérent au ${round}.`);
-        const s = /^(\d{1,2})\s*\/\s*(\d{1,2})$/.exec(scoreCell?.text || '');
+        const s = /^(\d{1,2})\s*\/\s*(\d{1,2})$/.exec(scoreText);
         if (s) {
           const [w, l] = [Number(s[1]), Number(s[2])];
           [score1, score2] = winner === 1 ? [w, l] : [l, w];
           isFinished = true;
-        } else if (WITHDRAWAL.test(scoreCell?.text || '')) {
-          withdrawal = true; // abandon ou forfait de l'adversaire : qualifié sans score
+        } else if (WITHDRAWAL.test(scoreText)) {
+          withdrawal = true; // abandon, forfait ou exclusion de l'adversaire : qualifié sans score
           isFinished = true;
         }
       }
@@ -564,8 +598,13 @@ function tableauMatches(grid) {
         isFinished,
       });
     }
-    rounds.push({ round, size, expectedMatchCount: real, previousRound: null });
-  });
+    rounds.push({
+      round,
+      size: round === 'Bronze' ? 0 : Number(round.slice(1)),
+      expectedMatchCount: real,
+      previousRound: null,
+    });
+  }
   return { matches, rounds };
 }
 
@@ -578,8 +617,11 @@ function parseTableaus(pages) {
     for (const m of matches) byKey.set(m.sourceKey, m);
     for (const r of found) rounds.set(r.round, r);
   }
-  const ordered = [...rounds.values()].sort((a, b) => b.size - a.size);
+  // Tours principaux du plus grand à la finale ; le match pour la 3e place suit les demi-finales.
+  const ordered = [...rounds.values()].filter((r) => r.round !== 'Bronze').sort((a, b) => b.size - a.size);
   ordered.forEach((r, i) => (r.previousRound = i ? ordered[i - 1].round : null));
+  const bronze = rounds.get('Bronze');
+  if (bronze) ordered.push({ ...bronze, previousRound: 'T4' });
   return { matches: [...byKey.values()], rounds: ordered };
 }
 
