@@ -27,7 +27,16 @@ function roundName(label) {
 }
 function parseTable(
   html,
-  { roster, date, offset = '+03:00', timezone, maxScore = 45, bronze = false, requireComplete = true },
+  {
+    roster,
+    date,
+    offset = '+03:00',
+    timezone,
+    maxScore = 45,
+    bronze = false,
+    requireComplete = true,
+    entrySeeds = new Map(),
+  },
 ) {
   const $ = load(html),
     table = $('table.elimTableau');
@@ -45,7 +54,7 @@ function parseTable(
   const cell = (r, c) => $(rows[r]).children('td').eq(c);
   const out = [],
     rounds = [],
-    seeds = new Map();
+    seeds = entrySeeds;
   for (let c = 0; c < headers.length - 1; c++) {
     const label = headers[c],
       round = roundName(label);
@@ -59,7 +68,7 @@ function parseTable(
     if (slots.length !== capacity) throw failure(`Tableau ${round} incomplet : positions non vérifiables.`);
     // Tête de série : celle de la première apparition du tireur (aux tours suivants, FencingTimeLive
     // affiche le numéro de la position gagnée, pas celui du tireur).
-    for (const s of slots) if (s.name && !seeds.has(norm(s.name))) seeds.set(norm(s.name), s.seed);
+    if (!bronze) for (const s of slots) if (s.name && !seeds.has(norm(s.name))) seeds.set(norm(s.name), s.seed);
     const names = slots.map((s) => norm(s.name)).filter((s) => s && s !== '- bye -');
     if (new Set(names).size !== names.length) throw failure('Un adversaire apparaît plusieurs fois dans le même tour.');
     let real = 0;

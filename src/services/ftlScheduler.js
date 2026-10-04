@@ -70,6 +70,16 @@ async function finish(db, competitionId, token, summary, error = null, now = new
   await require('./syncHealth')
     .alertAdmins(db, { competitionId, failures, previousFailures: state.failures || 0, error })
     .catch(() => {});
+  // Import bloqué sans panne pendant l'épreuve (avertissements répétés), puis rétablissement.
+  if (!error)
+    await require('./syncHealth')
+      .alertAttention(db, {
+        competitionId,
+        previousStatus: state.status,
+        warnings: [...(summary?.warnings || []), ...(summary?.conflicts || []).map((c) => c.message)],
+        duringEvent: !beforeEvent,
+      })
+      .catch(() => {});
   // Phase finale close faute d'horaire : alerte des administrateurs (une fois par match).
   if (!error)
     try {

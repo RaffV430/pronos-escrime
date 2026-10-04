@@ -24,6 +24,20 @@ function validatePrediction(value, size) {
   }
   return { wins, losses, indicator };
 }
+// Poules suivies sur la source officielle : clôture tireur par tireur au premier résultat publié.
+// Épreuves en France : la poule se ferme aussi à son heure de début annoncée (engarde ne publie une
+// poule qu'une fois terminée) ; closesAt suit alors l'heure annoncée, y compris quand elle change.
+const START_LOCK = 'START_OR_FIRST_RESULT';
+// Tirage provisoire (engarde, avant l'appel) : poule visible mais fermée aux pronostics.
+const PROVISIONAL = 'PROVISIONAL';
+const followsSource = (pool) => ['FIRST_RESULT', START_LOCK, PROVISIONAL].includes(pool?.lockMode);
+// Mode et heure de clôture d'une poule suivie, d'après l'heure de début officielle.
+function sourceLock(observedStart, closeAtStart, fallbackClosesAt, provisional = false) {
+  if (provisional) return { lockMode: PROVISIONAL, closesAt: new Date(0) };
+  return closeAtStart && observedStart
+    ? { lockMode: START_LOCK, closesAt: new Date(observedStart) }
+    : { lockMode: 'FIRST_RESULT', closesAt: fallbackClosesAt };
+}
 function closed(pool, now = new Date()) {
   return Boolean(pool.isLocked || pool.isFinal || (pool.lockMode !== 'FIRST_RESULT' && new Date(pool.closesAt) <= now));
 }
@@ -31,7 +45,7 @@ function closed(pool, now = new Date()) {
 // pendant l'épreuve (plus la durée du contrôle), 5 minutes laissent une marge sans bloquer.
 const SOURCE_WINDOW = 300000;
 function sourceUnavailable(pool, now = new Date(), start = null) {
-  if (pool.lockMode !== 'FIRST_RESULT') return false;
+  if (!followsSource(pool)) return false;
   // Avant le jour de l'épreuve, aucun résultat ne peut exister : la saisie reste ouverte.
   if (start && now.getTime() < start) return false;
   return !pool.sourceCheckedAt || now - new Date(pool.sourceCheckedAt) > SOURCE_WINDOW;
@@ -118,6 +132,10 @@ function poolPoints(prediction, result, size = null) {
   return { winsPoints, indicatorPoints, total: winsPoints + indicatorPoints, ...(adjusted ? { adjusted } : {}) };
 }
 module.exports = {
+  START_LOCK,
+  PROVISIONAL,
+  followsSource,
+  sourceLock,
   poolPoints,
   adjustForAnnulled,
   fail,

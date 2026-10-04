@@ -125,7 +125,18 @@ test('transaction preserves predictions, locks and result timestamp; recalculate
     checkedAt: new Date(),
     rounds: [],
     warnings: [],
-    matches: [{ ...m, isFinished: true, winner: 1, score1: null, score2: null, resultType: 'MEDICAL_WITHDRAWAL' }],
+    matches: [
+      {
+        ...m,
+        seed1: 12,
+        seed2: 5,
+        isFinished: true,
+        winner: 1,
+        score1: null,
+        score2: null,
+        resultType: 'MEDICAL_WITHDRAWAL',
+      },
+    ],
   };
   const a = await applyObservation(db, c, observation, 1);
   assert.equal(a.results, 1);
@@ -133,6 +144,7 @@ test('transaction preserves predictions, locks and result timestamp; recalculate
   assert.equal(p.predictedScore1, 45);
   assert.equal(p.predictedScore2, 30);
   assert.equal(m.isLocked, true);
+  assert.deepEqual([m.id, m.seed1, m.seed2, p.id, p.matchId], [7, 12, 5, 2, 7]);
   locks = 0;
   const b = await applyObservation(db, c, observation, 1);
   assert.equal(b.results, 0);

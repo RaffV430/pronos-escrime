@@ -9,34 +9,41 @@ const { localTime } = require('./localTime');
 const { validateManifest } = require('./roundManifest');
 const { norm } = require('./ftlParser');
 const { failure } = require('./ftlClient');
+const { mergeRoster, entryFor } = require('./engardeRoster');
 
 const linkOf = (config) => ({ org: config.org, event: config.tournamentSlug, compe: config.compe });
 
 // Engagés : pris tels quels à la première publication ; ensuite, tant qu'aucune poule n'a commencé,
 // les nouveaux arrivent et les absents passent inactifs (leurs identifiants restent pour les pronostics).
-async function refreshRoster(db, c, url, client) {
-  const observed = E.parseRoster(await client.get(url));
+// Engagés : nouveaux ajoutés, absents de la liste marqués inactifs (identifiants conservés pour les
+// pronostics), nation et rang mis à jour, noms corrigés suivis sans changer d'identifiant (poules et
+// rencontres prennent le nouveau nom).
+async function refreshRoster(db, c, url, client, html = null) {
+  const observed = E.parseRoster(html ?? (await client.get(url)));
   const current = c.podiumRoster || [];
-  const byId = new Map(current.map((e) => [e.id, e]));
-  const seen = new Set(observed.map((e) => e.id));
-  const merged = [
-    ...current.map((e) =>
-      seen.has(e.id) ? { ...e, ...observed.find((o) => o.id === e.id) } : { ...e, active: false },
-    ),
-    ...observed.filter((e) => !byId.has(e.id)),
-  ].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  const { merged, renames } = mergeRoster(current, observed);
   if (c.podiumRoster && JSON.stringify(merged) === JSON.stringify(current) && c.rosterSourceUrl === url) return c;
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
     const fresh = await tx.competition.findUnique({ where: { id: c.id } });
     if (JSON.stringify(fresh.podiumRoster) !== JSON.stringify(c.podiumRoster))
       throw failure('Liste des engagés modifiée pendant le contrôle.', 409);
-    if (fresh.podiumRoster) {
-      const started = await tx.poolFencer.count({
-        where: { pool: { competitionId: c.id }, OR: [{ firstResultAt: { not: null } }, { wins: { not: null } }] },
-      });
-      if (started || (await tx.match.count({ where: { competitionId: c.id } }))) return fresh; // épreuve commencée : la liste ne bouge plus
+    for (const r of renames) {
+      await tx.poolFencer.updateMany({ where: { name: r.from, pool: { competitionId: c.id } }, data: { name: r.to } });
+      await tx.match.updateMany({ where: { competitionId: c.id, player1: r.from }, data: { player1: r.to } });
+      await tx.match.updateMany({ where: { competitionId: c.id, player2: r.from }, data: { player2: r.to } });
     }
+    if (renames.length)
+      await tx.auditLog.create({
+        data: {
+          actorId: 0,
+          action: 'Renommage officiel d’engagés',
+          targetType: 'Competition',
+          targetId: c.id,
+          before: { names: renames.map((r) => ({ id: r.id, name: r.from })) },
+          after: { names: renames.map((r) => ({ id: r.id, name: r.to })) },
+        },
+      });
     return tx.competition.update({
       where: { id: c.id },
       data: { podiumRoster: merged, rosterSourceUrl: url, rosterCheckedAt: new Date() },
@@ -44,17 +51,74 @@ async function refreshRoster(db, c, url, client) {
   });
 }
 
-function startsAt(config, time) {
+async function addLateEntrants(db, c, rows) {
+  const current = c.podiumRoster || [];
+  const withClubs = current.some((e) => e.country);
+  const missing = [];
+  for (const r of rows)
+    if (!current.some((e) => norm(e.name) === norm(r.name)) && !missing.some((e) => norm(e.name) === norm(r.name)))
+      missing.push({
+        id: E.entryId(r.name, withClubs ? r.club || '' : ''),
+        name: r.name,
+        country: withClubs ? r.club || '' : '',
+        active: true,
+        entryRanking: null,
+      });
+  if (!missing.length || missing.some((m) => current.some((e) => e.id === m.id))) return;
+  const updated = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
+    const fresh = await tx.competition.findUnique({ where: { id: c.id } });
+    if (JSON.stringify(fresh.podiumRoster) !== JSON.stringify(c.podiumRoster))
+      throw failure('Liste des engagés modifiée pendant le contrôle.', 409);
+    await tx.auditLog.create({
+      data: {
+        actorId: 0,
+        action: 'Engagés ajoutés depuis les poules',
+        targetType: 'Competition',
+        targetId: c.id,
+        after: { names: missing.map((m) => m.name) },
+      },
+    });
+    return tx.competition.update({
+      where: { id: c.id },
+      data: {
+        podiumRoster: [...fresh.podiumRoster, ...missing].sort((a, b) => a.name.localeCompare(b.name, 'fr')),
+        rosterCheckedAt: new Date(),
+      },
+    });
+  });
+  c.podiumRoster = updated.podiumRoster;
+}
+
+// engarde n'affiche que l'heure (« 09:00 Piste 3 ») : la date vient de l'épreuve, décalée d'un jour
+// à chaque phase qui commence plus tôt que la précédente (épreuve sur plusieurs jours).
+function dayOf(config, offset = 0) {
+  if (!offset) return config.date;
+  return new Date(Date.parse(`${config.date}T12:00:00Z`) + offset * 86400000).toISOString().slice(0, 10);
+}
+function startsAt(config, time, offset = 0) {
   if (!time) return null;
   try {
-    return localTime(config.date, time.hour, time.minute, config.timezone);
+    return localTime(dayOf(config, offset), time.hour, time.minute, config.timezone);
   } catch {
     return null;
   }
 }
+const minutes = (times) => {
+  const all = times.filter(Boolean).map((t) => t.hour * 60 + t.minute);
+  return all.length ? Math.min(...all) : null;
+};
+// Phase suivante (tour de poules, tour de tableau) : même jour, ou lendemain si elle commence plus tôt.
+function nextDay(prev, min) {
+  if (!prev) return { min, offset: 0 };
+  if (min === null) return prev;
+  return { min, offset: prev.min !== null && min <= prev.min ? prev.offset + 1 : prev.offset };
+}
 
-async function syncPools(db, c, config, url, client, leaseToken) {
-  const summary = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [] };
+async function syncPools(db, c, config, url, client, leaseToken, { provisional = false, round = 1, prev = null } = {}) {
+  const summary = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [], day: prev };
+  // Second tour de poules et suivants : « Tour 2 · Poule 3 » (les numéros repartent de 1 à chaque tour).
+  const label = (n) => (round > 1 ? `Tour ${round} · Poule ${n}` : `Poule ${n}`);
   let observedAll;
   try {
     observedAll = E.parsePools(await client.get(url));
@@ -62,14 +126,37 @@ async function syncPools(db, c, config, url, client, leaseToken) {
     summary.warnings.push(e.status ? e.message : 'Poules engarde-service illisibles pour le moment.');
     return summary;
   }
-  const inRoster = (name) => (c.podiumRoster || []).filter((e) => norm(e.name) === norm(name)).length === 1;
+  // Homonymes départagés par la nation ou le club affiché à côté du nom.
+  const inRoster = (name, club) => Boolean(entryFor(c.podiumRoster, name, club));
+  // Tireur engagé sur place, présent en poule mais pas (encore) dans la liste publiée : ajouté aux engagés.
+  try {
+    // Un forfait (DNS) n'est jamais ajouté aux engagés.
+    await addLateEntrants(
+      db,
+      c,
+      observedAll.filter((o) => !o.error).flatMap((o) => o.rows.filter((r) => !r.absent)),
+    );
+  } catch (e) {
+    summary.warnings.push(e.status ? e.message : 'Engagés de dernière minute non ajoutés.');
+  }
   let pools = await db.pool.findMany({
     where: { competitionId: c.id },
     include: { fencers: { orderBy: { position: 'asc' } } },
     orderBy: { id: 'asc' },
   });
+  const day = nextDay(prev, minutes(observedAll.filter((o) => !o.error).map((o) => o.time)));
+  summary.day = day;
   try {
-    const plan = recompose.planRecomposition(pools, url, observedAll, c.podiumRoster);
+    for (const o of observedAll) if (!o.error) o.startsAt = startsAt(config, o.time, day.offset);
+    // Une poule illisible ce contrôle-ci n'est ni comparée ni supprimée.
+    const unreadable = new Set(observedAll.filter((o) => o.error).map((o) => o.number));
+    const plan = recompose.planRecomposition(
+      pools.filter((p) => !unreadable.has(p.sourcePoolNumber)),
+      url,
+      observedAll.filter((o) => !o.error),
+      c.podiumRoster,
+      label,
+    );
     if (plan) {
       if (leaseToken) await db.$transaction((tx) => require('./ftlScheduler').assertClaim(tx, c.id, leaseToken));
       const result = await recompose.applyRecomposition(db, c, url, plan, config);
@@ -86,13 +173,24 @@ async function syncPools(db, c, config, url, client, leaseToken) {
   }
   for (const observed of observedAll) {
     try {
-      observed.startsAt = startsAt(config, observed.time);
-      if (observed.rows.some((r) => !inRoster(r.name)))
-        throw failure(`Poule ${observed.number} : tireur absent ou ambigu dans les engagés.`);
+      if (observed.error) throw failure(observed.error);
+      observed.startsAt = startsAt(config, observed.time, day.offset);
+      observed.closeAtStart = config.timezone === 'Europe/Paris';
+      observed.provisional = provisional;
+      if (observed.rows.some((r) => !r.absent && !inRoster(r.name, r.club)))
+        throw failure(`${label(observed.number)} : tireur absent ou ambigu dans les engagés.`);
       let snapshot = pools.find((p) => p.sourceUrl === url && p.sourcePoolNumber === observed.number);
       if (!snapshot) {
-        if (pools.some((p) => p.fencers.some((f) => observed.rows.some((r) => norm(r.name) === norm(f.name)))))
-          throw failure(`Poule ${observed.number} déjà présente sans correspondance de source certaine.`);
+        // Les mêmes tireurs figurent normalement dans les poules des autres tours : seules comptent
+        // les poules de ce tour et celles saisies à la main.
+        if (
+          pools.some(
+            (p) =>
+              (!p.sourceUrl || p.sourceUrl === url) &&
+              p.fencers.some((f) => observed.rows.some((r) => norm(r.name) === norm(f.name))),
+          )
+        )
+          throw failure(`${label(observed.number)} déjà présente sans correspondance de source certaine.`);
         snapshot = await db.$transaction(async (tx) => {
           await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
           const duplicate = await tx.pool.findFirst({
@@ -103,7 +201,7 @@ async function syncPools(db, c, config, url, client, leaseToken) {
           return tx.pool.create({
             data: {
               competitionId: c.id,
-              name: `Poule ${observed.number}`,
+              name: label(observed.number),
               closesAt: new Date(config.date + 'T00:00:00Z'),
               lockMode: 'FIRST_RESULT',
               sourceUrl: url,
@@ -124,9 +222,14 @@ async function syncPools(db, c, config, url, client, leaseToken) {
       );
       summary.checked++;
       for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
+      // Tireurs sortis de la compétition (forfait, abandon, exclusion) : alerte podium plus bas.
+      for (const r of observed.rows.filter((x) => x.absent)) {
+        const found = entryFor(c.podiumRoster, r.name, r.club);
+        if (found) summary.outs = [...(summary.outs || []), { id: found.id, status: r.status || 'DNS' }];
+      }
       if (observed.ambiguous)
         summary.warnings.push(
-          `Poule ${observed.number} : score réciproque manquant ; tireurs concernés verrouillés, bilan incomplet non inventé.`,
+          `${label(observed.number)} : score réciproque manquant ; tireurs concernés verrouillés, bilan incomplet non inventé.`,
         );
     } catch (e) {
       summary.warnings.push(e.status ? e.message : 'Une poule n’a pas pu être importée. Réessayez.');
@@ -137,7 +240,7 @@ async function syncPools(db, c, config, url, client, leaseToken) {
 
 // Manifeste des tours : du premier tour publié jusqu'à la finale (exemptions exclues du premier tour).
 function manifest(rounds) {
-  const played = rounds.filter((r) => r.expectedMatchCount > 0).sort((a, b) => b.size - a.size);
+  const played = rounds.filter((r) => r.round !== 'Bronze' && r.expectedMatchCount > 0).sort((a, b) => b.size - a.size);
   if (!played.length) throw failure('Tableau sans rencontre publiée.');
   const first = played[0].size;
   const out = [];
@@ -147,22 +250,34 @@ function manifest(rounds) {
       previousRound: n === first ? null : `T${n * 2}`,
       expectedMatchCount: n === first ? played[0].expectedMatchCount : n / 2,
     });
+  // Épreuve par équipes : match pour la 3e place après les demi-finales.
+  if (rounds.some((r) => r.round === 'Bronze'))
+    out.push({ round: 'Bronze', previousRound: 'T4', expectedMatchCount: 1 });
   return validateManifest(out);
 }
 
-async function observeTableau(c, config, pages, client) {
+async function observeTableau(c, config, pages, client, prev = null) {
   const { podiumFromResults } = require('./ftlSync');
   const htmls = [];
   for (const url of pages.tableaus) htmls.push(await client.get(url));
   const parsed = E.parseTableaus(htmls);
-  const entry = (name) => {
-    const hits = (c.podiumRoster || []).filter((e) => norm(e.name) === norm(name));
-    if (hits.length !== 1) throw failure(`Nom officiel ambigu ou absent des engagés : ${name}.`);
-    return hits[0];
+  const entry = (name, club = '') => {
+    const found = entryFor(c.podiumRoster, name, club);
+    if (!found) throw failure(`Nom officiel ambigu ou absent des engagés : ${name}.`);
+    return found;
   };
+  // Jour de chaque tour : à la suite des poules, lendemain quand un tour commence plus tôt que le précédent.
+  const offsets = new Map();
+  let day = prev;
+  for (const r of [...parsed.rounds].sort((a, b) => b.size - a.size)) {
+    day = nextDay(day, minutes(parsed.matches.filter((m) => m.round === r.round).map((m) => m.time)));
+    offsets.set(r.round, day.offset);
+  }
   const matches = parsed.matches.map((m) => {
-    entry(m.player1);
-    entry(m.player2);
+    // Forfait (DNS) au tableau : le perdant peut ne plus figurer dans la liste des présents.
+    const walkoverLoser = m.isFinished && m.resultType === 'MEDICAL_WITHDRAWAL' ? 3 - m.winner : null;
+    if (walkoverLoser !== 1) entry(m.player1, m.club1);
+    if (walkoverLoser !== 2) entry(m.player2, m.club2);
     return {
       sourceKey: m.sourceKey,
       round: m.round,
@@ -170,7 +285,7 @@ async function observeTableau(c, config, pages, client) {
       player2: m.player2,
       seed1: m.seed1,
       seed2: m.seed2,
-      startsAt: startsAt(config, m.time),
+      startsAt: startsAt(config, m.time, offsets.get(m.round) || 0),
       strip: m.strip,
       winner: m.winner,
       score1: m.score1,
@@ -185,7 +300,10 @@ async function observeTableau(c, config, pages, client) {
     resultsSourceUrl = null;
   if (matches.some((m) => m.round === 'T2' && m.isFinished) && pages.final) {
     try {
-      const rows = E.parseFinalRanking(await client.get(pages.final)).map((r) => ({ ...r, id: entry(r.name).id }));
+      const rows = E.parseFinalRanking(await client.get(pages.final)).map((r) => ({
+        ...r,
+        id: entry(r.name, r.club).id,
+      }));
       officialPodium = podiumFromResults(rows, c, matches);
       resultsSourceUrl = pages.final;
     } catch (e) {
@@ -205,11 +323,35 @@ async function observeTableau(c, config, pages, client) {
 
 // Partie propre à engarde-service d'un contrôle ; la suite (résumé, classements, rythme) est commune.
 async function control(db, c, config, actorId, claim, client) {
-  client ||= createEngardeClient();
+  const source = client || createEngardeClient();
+  // Heure de publication la plus récente lue en pied des pages consultées (affichée aux joueurs).
+  let publishedAt = null;
+  client = {
+    ...source,
+    get: async (url) => {
+      const html = await source.get(url);
+      const at = E.publishedAt(html, config.timezone);
+      if (at && (!publishedAt || at > publishedAt)) publishedAt = at;
+      return html;
+    },
+  };
   const { planMatches, applyObservation, cancellable, drawSignature } = require('./ftlSync');
   const notes = [];
   const pages = E.competitionPages(await client.get(config.eventSourceUrl), linkOf(config));
-  if (pages.roster) c = await refreshRoster(db, c, pages.roster, client);
+  // Tirage publié la veille, avant l'appel : poules provisoires, fermées aux pronostics jusqu'à l'appel
+  // (liste « présents ») ou, faute d'appel sur engarde, jusqu'au jour de l'épreuve.
+  let provisional = false;
+  if (pages.roster) {
+    const rosterHtml = await client.get(pages.roster);
+    c = await refreshRoster(db, c, pages.roster, client, rosterHtml);
+    let dayStart = null;
+    try {
+      dayStart = localTime(config.date, 0, 0, config.timezone).getTime();
+    } catch {
+      dayStart = null;
+    }
+    provisional = !E.rosterCheckedIn(rosterHtml) && dayStart !== null && Date.now() < dayStart;
+  }
   const empty = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [] };
   let summary = {
     createdIds: [],
@@ -226,13 +368,29 @@ async function control(db, c, config, actorId, claim, client) {
     notes.push('Épreuve pas encore publiée sur engarde-service. Elle sera recherchée au prochain contrôle.');
     return { c, poolSummary: empty, summary: { ...summary, notes } };
   }
-  const poolSummary = pages.pools.length
-    ? await syncPools(db, c, config, pages.pools[0], client, claim.token)
-    : { ...empty, notes: ['Poules pas encore publiées.'] };
+  // Tous les tours de poules publiés (poules1.htm, poules2.htm…), dans l'ordre.
+  const poolPages = [...pages.pools].sort(
+    (a, b) => Number(/poules(\d+)\.htm$/.exec(a)?.[1]) - Number(/poules(\d+)\.htm$/.exec(b)?.[1]),
+  );
+  let poolSummary = { ...empty, notes: ['Poules pas encore publiées.'] },
+    day = null;
+  if (poolPages.length) {
+    poolSummary = { ...empty, warnings: [] };
+    for (const [i, url] of poolPages.entries()) {
+      const s = await syncPools(db, c, config, url, client, claim.token, { provisional, round: i + 1, prev: day });
+      day = s.day;
+      for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated']) poolSummary[k] += s[k];
+      poolSummary.warnings.push(...s.warnings);
+      if (s.notes) poolSummary.notes = [...(poolSummary.notes || []), ...s.notes];
+      if (s.recomposed) poolSummary.recomposed = [...(poolSummary.recomposed || []), ...s.recomposed];
+      if (s.outs) poolSummary.outs = [...(poolSummary.outs || []), ...s.outs];
+    }
+  }
+  if (poolSummary.outs?.length) await require('./podiumAlerts').alertPodiumOut(db, c, poolSummary.outs);
   const existing = await db.match.findMany({ where: { competitionId: c.id } });
   if (pages.tableaus.length) {
     try {
-      let observation = await observeTableau(c, config, pages, client);
+      let observation = await observeTableau(c, config, pages, client, day);
       const conflicts = planMatches(existing, observation, { allowPartial: true }).conflicts;
       if (
         conflicts.some((i) =>
@@ -242,7 +400,7 @@ async function control(db, c, config, actorId, claim, client) {
           ),
         )
       ) {
-        const confirmation = await observeTableau(c, config, pages, client);
+        const confirmation = await observeTableau(c, config, pages, client, day);
         if (drawSignature(observation) !== drawSignature(confirmation))
           throw failure('Le tableau officiel change pendant le contrôle. Nouvelle vérification nécessaire.');
         observation = { ...confirmation, drawConfirmed: true };
@@ -257,7 +415,8 @@ async function control(db, c, config, actorId, claim, client) {
     }
   } else notes.push('Tableau pas encore publié. Il sera recherché au prochain contrôle.');
   if (notes.length) summary.notes = [...(summary.notes || []), ...notes];
+  if (publishedAt) summary.publishedAt = publishedAt.toISOString();
   return { c, poolSummary, summary };
 }
 
-module.exports = { control, refreshRoster, observeTableau, manifest, syncPools };
+module.exports = { nextDay, dayOf, startsAt, control, refreshRoster, observeTableau, manifest, syncPools };

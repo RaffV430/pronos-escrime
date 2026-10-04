@@ -80,6 +80,7 @@ test('engarde-service : tournoi créé vide, puis engagés, poules, tableau et p
       return {
         'tireurs.htm': roster.html,
         'poules1.htm': stage.pools,
+        'poules2.htm': stage.pools2,
         'tableau16.htm': fixture('fdm20-tableau16.html'),
         // Le classement officiel écrit les prénoms en capitales : comparaison sans tenir compte de la casse.
         'clasfinal.htm': finalRanking,
@@ -146,6 +147,14 @@ test('engarde-service : tournoi créé vide, puis engagés, poules, tableau et p
   assert.deepEqual([done.wins, done.losses, done.indicator], [6, 0, 21]);
   const pp = await prisma.poolPrediction.findFirst({ where: { userId: player.id } });
   assert.ok(pp.pointsEarned > 0, 'pronostic exact récompensé');
+
+  // 3 bis. Second tour de poules publié (mêmes tireuses, plus tard dans la journée) : poules distinctes.
+  stage.published.push('poules2.htm');
+  stage.pools2 = fixture('fdm20-poules-1-2.html').replace(/12:30/g, '14:00');
+  summary = await run();
+  const round2 = await prisma.pool.findMany({ where: { competitionId: id, sourceUrl: { endsWith: '/poules2.htm' } } });
+  assert.deepEqual(round2.map((p) => p.name).sort(), ['Tour 2 · Poule 1', 'Tour 2 · Poule 2']);
+  assert.equal(round2[0].startsAt.toISOString().slice(0, 10), '2026-09-20', 'même jour : 14 h après 12 h 30');
 
   // 4. Tableau et classement final publiés : rencontres, horaires (heure de Paris) et podium officiel.
   stage.published.push('tableau16.htm', 'clasfinal.htm');

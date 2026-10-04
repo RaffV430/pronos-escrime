@@ -121,6 +121,8 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
     throw failure('Tableau principal ou petite finale non identifiable.');
   let matches = [],
     rounds = [];
+  // La petite finale renumérote ses deux équipes 1 et 2 : garder les têtes de série du tableau principal.
+  const entrySeeds = new Map();
   for (const t of [...main, ...(c.podiumFormat === 'TEAM' ? bronzes : [])]) {
     if (!/^[a-f0-9]{32}$/i.test(t.guid) || !Number.isSafeInteger(t.numTables) || t.numTables < 1 || t.numTables > 10)
       throw failure('Structure officielle inattendue.');
@@ -130,6 +132,7 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
       ...config,
       maxScore: c.podiumFormat === 'TEAM' ? 45 : 15,
       bronze: t !== main[0],
+      entrySeeds,
     });
     matches.push(...parsed.matches);
     rounds.push(...parsed.rounds);
@@ -455,6 +458,12 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
         observedAll = null; // l'import poule par poule ci-dessous signalera la poule illisible.
       }
       if (observedAll) {
+        for (const o of observedAll)
+          try {
+            o.startsAt = o.time ? localTime(config.date, o.time.hour, o.time.minute, config.timezone) : null;
+          } catch {
+            o.startsAt = null;
+          }
         try {
           const plan = recompose.planRecomposition(pools, url, observedAll, c.podiumRoster);
           if (plan) {
@@ -484,6 +493,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           } catch {
             observed.startsAt = null;
           }
+          observed.closeAtStart = config.timezone === 'Europe/Paris';
           for (const row of observed.rows)
             if ((c.podiumRoster || []).filter((e) => norm(e.name) === norm(row.name)).length !== 1)
               throw failure('Composition de poule absente ou ambiguë dans les engagés.');
@@ -564,6 +574,15 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           );
           summary.checked++;
           for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
+          // Forfait ou abandon médical en poule : alerte aux joueurs qui ont ce tireur sur leur podium.
+          for (const r of observed.rows.filter((x) => x.absent)) {
+            const hits = (c.podiumRoster || []).filter((e) => norm(e.name) === norm(r.name));
+            if (hits.length === 1)
+              summary.outs = [
+                ...(summary.outs || []),
+                { id: hits[0].id, status: r.status === 'Medical Withdrawal' ? 'ABANDON' : 'DNS' },
+              ];
+          }
           if (observed.ambiguous)
             summary.warnings.push(
               `Poule ${observed.number} : score réciproque manquant ; tireurs concernés verrouillés, bilan incomplet non inventé.`,
@@ -576,6 +595,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
       summary.warnings.push(e.status ? e.message : 'Source de poules temporairement indisponible.');
     }
   }
+  if (summary.outs?.length) await require('./podiumAlerts').alertPodiumOut(db, c, summary.outs);
   return summary;
 }
 async function syncCompetition(db, competitionId, actorId, client = createClient(), { automatic = false } = {}) {
@@ -694,7 +714,12 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     // Poules encore ouvertes au « premier résultat » : le suivi doit rester frais (2 min) pendant l'épreuve.
     try {
       summary.openFirstResultPools = await db.pool.count({
-        where: { competitionId: c.id, lockMode: 'FIRST_RESULT', isLocked: false, isFinal: false },
+        where: {
+          competitionId: c.id,
+          lockMode: { in: ['FIRST_RESULT', 'START_OR_FIRST_RESULT'] },
+          isLocked: false,
+          isFinal: false,
+        },
       });
     } catch {
       summary.openFirstResultPools = 0;

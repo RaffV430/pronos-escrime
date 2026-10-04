@@ -5,6 +5,7 @@ const { norm } = require('./ftlParser');
 const { failure } = require('./ftlClient');
 
 const ACTION = 'Poules recomposées';
+const URGENT_WINDOW = 3 * 3600000;
 const sameOrder = (pool, observed) =>
   pool.fencers.length === observed.rows.length &&
   pool.fencers.every(
@@ -20,7 +21,7 @@ const started = (pool) =>
   pool.fencers.some((f) => f.firstResultAt || f.wins !== null || f.losses !== null || f.indicator !== null);
 
 // Pure : compare les poules enregistrées pour une source et les poules observées.
-function planRecomposition(pools, url, observed, roster = []) {
+function planRecomposition(pools, url, observed, roster = [], label = (n) => `Poule ${n}`) {
   const stored = pools.filter((p) => p.sourceUrl === url);
   if (!stored.length) return null; // premier import : géré par l'import normal.
   const byNumber = new Map(stored.map((p) => [p.sourcePoolNumber, p]));
@@ -34,18 +35,20 @@ function planRecomposition(pools, url, observed, roster = []) {
     else plan.changed.push({ pool: p, observed: o });
   }
   if (!plan.reordered.length && !plan.changed.length && !plan.added.length && !plan.removed.length) return null;
-  // Une poule commencée n'est jamais réécrite automatiquement.
+  // Une poule commencée dans l'application (résultats déjà importés) n'est jamais réécrite automatiquement.
+  // Une poule enregistrée sans aucun résultat peut l'être, même si la poule officielle a commencé : elle
+  // n'a jamais eu lieu dans cette composition (tirage refait après forfaits), ses pronostics sont à refaire.
   const touched = [...plan.changed.map((x) => x.pool), ...plan.reordered.map((x) => x.pool), ...plan.removed];
-  const incoming = [...plan.changed.map((x) => x.observed), ...plan.added, ...plan.reordered.map((x) => x.observed)];
-  if (touched.some(started) || incoming.some((o) => o.rows.some((r) => r.firstResult || r.hasResult)))
+  if (touched.some(started))
     throw failure('Composition des poules modifiée après leur début : vérification manuelle nécessaire.', 409);
   for (const o of [...plan.changed.map((x) => x.observed), ...plan.added])
     for (const r of o.rows)
-      if ((roster || []).filter((e) => norm(e.name) === norm(r.name)).length !== 1)
-        throw failure(`Poule ${o.number} modifiée : tireur absent ou ambigu dans les engagés.`, 409);
+      if (!r.absent && (roster || []).filter((e) => norm(e.name) === norm(r.name)).length !== 1)
+        throw failure(`${label(o.number)} modifiée : tireur absent ou ambigu dans les engagés.`, 409);
   const names = new Set(pools.filter((p) => p.sourceUrl !== url).map((p) => p.name));
-  if (plan.added.some((o) => names.has(`Poule ${o.number}`)))
+  if (plan.added.some((o) => names.has(label(o.number))))
     throw failure('Nouvelle poule en conflit avec une poule saisie à la main.', 409);
+  plan.label = label;
   return plan;
 }
 
@@ -113,7 +116,7 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
         const created = await tx.pool.create({
           data: {
             competitionId: c.id,
-            name: `Poule ${observed.number}`,
+            name: (plan.label || ((n) => `Poule ${n}`))(observed.number),
             closesAt: new Date(`${config.date}T00:00:00Z`),
             lockMode: 'FIRST_RESULT',
             sourceUrl: url,
@@ -127,12 +130,19 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
       }
       const summary = {
         changed: plan.changed.map((x) => x.pool.name),
-        added: plan.added.map((o) => `Poule ${o.number}`),
+        added: plan.added.map((o) => (plan.label || ((n) => `Poule ${n}`))(o.number)),
         removed: plan.removed.map((p) => p.name),
         reordered: plan.reordered.map((x) => x.pool.name),
         predictionsCleared: cleared,
         players: players.size,
       };
+      // Épreuve en France modifiée peu avant le début (3 h) : notification prioritaire, même en heures calmes.
+      const starts = [...plan.changed.map((x) => x.observed), ...plan.added]
+        .map((o) => (o.startsAt ? new Date(o.startsAt).getTime() : null))
+        .filter((t) => t !== null && t > now.getTime() - 30 * 60000);
+      const soonest = starts.length ? Math.min(...starts) : null;
+      const urgent = config?.timezone === 'Europe/Paris' && soonest !== null && soonest - now.getTime() < URGENT_WINDOW;
+      if (urgent) summary.urgentStart = new Date(soonest).toISOString();
       const audit = await tx.auditLog.create({
         data: { actorId: 0, action: ACTION, targetType: 'Competition', targetId: c.id, after: summary },
       });
@@ -152,7 +162,7 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
               competitionId: c.id,
               throughEventId: 0,
               kind: 'POOLS',
-              round: `pools-${audit.id}`,
+              round: `${urgent ? 'pools-urgent' : 'pools'}-${audit.id}`,
               matchIds: notified,
             },
           });
@@ -174,9 +184,23 @@ function describe(summary) {
 }
 
 // Texte de la notification : les poules encore présentes sont nommées, sinon un message général.
-function poolsNotification(c, pools) {
+function poolsNotification(c, pools, { urgent = false } = {}) {
   const names = pools.map((p) => p.name).sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} et ${names.at(-1)}` : names[0];
+  if (urgent) {
+    const start = pools
+      .map((p) => p.startsAt && new Date(p.startsAt).getTime())
+      .filter(Boolean)
+      .sort((a, b) => a - b)[0];
+    const at = start
+      ? new Date(start).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' })
+      : null;
+    return {
+      title: `⚠ Poules modifiées · ${c.name}`,
+      body: `${names.length ? `${list} ${names.length > 1 ? 'ont' : 'a'} changé` : 'Les poules ont changé'}${at ? `, début à ${at}` : ''} : refaites vos pronostics avant le début.`,
+      url: `/?tournament=${c.tournamentId}&event=${c.id}&view=pools`,
+    };
+  }
   return {
     title: `Poules modifiées · ${c.name}`,
     body: names.length
