@@ -121,6 +121,8 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
     throw failure('Tableau principal ou petite finale non identifiable.');
   let matches = [],
     rounds = [];
+  // La petite finale renumérote ses deux équipes 1 et 2 : garder les têtes de série du tableau principal.
+  const entrySeeds = new Map();
   for (const t of [...main, ...(c.podiumFormat === 'TEAM' ? bronzes : [])]) {
     if (!/^[a-f0-9]{32}$/i.test(t.guid) || !Number.isSafeInteger(t.numTables) || t.numTables < 1 || t.numTables > 10)
       throw failure('Structure officielle inattendue.');
@@ -130,6 +132,7 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
       ...config,
       maxScore: c.podiumFormat === 'TEAM' ? 45 : 15,
       bronze: t !== main[0],
+      entrySeeds,
     });
     matches.push(...parsed.matches);
     rounds.push(...parsed.rounds);
@@ -350,6 +353,8 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       sourceCheckedAt: observation.checkedAt,
       ...(o.startsAt ? { startsAt: o.startsAt } : {}),
       ...(o.strip ? { strip: o.strip } : {}),
+      ...(o.seed1 ? { seed1: o.seed1 } : {}),
+      ...(o.seed2 ? { seed2: o.seed2 } : {}),
     };
     if (o.isFinished)
       Object.assign(data, {

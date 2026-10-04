@@ -283,6 +283,8 @@ async function observeTableau(c, config, pages, client, prev = null) {
       round: m.round,
       player1: m.player1,
       player2: m.player2,
+      seed1: m.seed1,
+      seed2: m.seed2,
       startsAt: startsAt(config, m.time, offsets.get(m.round) || 0),
       strip: m.strip,
       winner: m.winner,

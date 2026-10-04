@@ -520,7 +520,7 @@ function tableauMatches(grid) {
       const below = titles.filter((x) => x.col === t.col && x.row > t.row).map((x) => x.row);
       return { ...t, until: below.length ? Math.min(...below) : Infinity };
     });
-  if (!kept.length) return { matches: [], rounds: [] }; // page de tableaux de classement seulement
+  if (!kept.length) return { matches: [], rounds: [], places: new Map() }; // page de tableaux de classement seulement
   const inZone = (z) => (c) => c.row > z.row && c.row < z.until;
   const fencersIn = (z, col) => cells.filter((c) => c.role === 'fencer' && c.col === col && inZone(z)(c));
   // Épreuves internationales : aux tours suivants, engarde ajoute la nation au nom (« MONTI Lucrezia ITA »).
@@ -548,6 +548,14 @@ function tableauMatches(grid) {
     const club = grid[c.row].find((x) => x.col === c.col + 1 && x.role === 'club');
     if (club && c.text) clubs.set(c.text, club.text);
   }
+  // Têtes de série de la colonne d'entrée du tableau principal, après normalisation des nations.
+  // Les positions des tableaux de classement et de la petite finale ne sont pas des classements d'entrée.
+  const places = new Map();
+  if (main.length)
+    for (const c of fencersIn(entry, entry.col).filter((c) => c.text)) {
+      const place = Number(grid[c.row].find((x) => x.col === c.col - 1 && x.role === 'place')?.text);
+      if (Number.isSafeInteger(place) && place > 0) places.set(c.text, place);
+    }
   const matches = [];
   const rounds = [];
   for (const zone of kept) {
@@ -611,24 +619,35 @@ function tableauMatches(grid) {
       previousRound: null,
     });
   }
-  return { matches, rounds };
+  return { matches, rounds, places };
 }
 
 // Plusieurs pages de tableau (T128-32, T16…) : réunies par tour, sans doublon.
 function parseTableaus(pages) {
   const byKey = new Map(),
-    rounds = new Map();
+    rounds = new Map(),
+    pageSeeds = [];
   for (const html of pages) {
-    const { matches, rounds: found } = tableauMatches(tableauGrid(html));
+    const { matches, rounds: found, places } = tableauMatches(tableauGrid(html));
     for (const m of matches) byKey.set(m.sourceKey, m);
     for (const r of found) rounds.set(r.round, r);
+    pageSeeds.push({ size: Math.max(0, ...found.map((r) => r.size)), places });
   }
+  // Le plus grand tableau publié fait référence ; les pages suivantes peuvent renuméroter les qualifiés.
+  const seeds = new Map();
+  for (const { places } of pageSeeds.sort((a, b) => b.size - a.size))
+    for (const [name, place] of places) if (!seeds.has(name)) seeds.set(name, place);
   // Tours principaux du plus grand à la finale ; le match pour la 3e place suit les demi-finales.
   const ordered = [...rounds.values()].filter((r) => r.round !== 'Bronze').sort((a, b) => b.size - a.size);
   ordered.forEach((r, i) => (r.previousRound = i ? ordered[i - 1].round : null));
   const bronze = rounds.get('Bronze');
   if (bronze) ordered.push({ ...bronze, previousRound: 'T4' });
-  return { matches: [...byKey.values()], rounds: ordered };
+  const matches = [...byKey.values()].map((m) => ({
+    ...m,
+    seed1: seeds.get(m.player1) ?? null,
+    seed2: seeds.get(m.player2) ?? null,
+  }));
+  return { matches, rounds: ordered };
 }
 
 module.exports = {

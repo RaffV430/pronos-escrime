@@ -109,6 +109,7 @@ test('engarde-service par équipes : équipes, tableau, 3e place et podium impor
   assert.equal(matches.length, 16);
   const bronze = matches.find((m) => m.round === 'Bronze');
   assert.deepEqual([bronze.player2, bronze.winner, bronze.isFinished], ['LYON MDF 1', 2, true]);
+  assert.deepEqual([bronze.seed1, bronze.seed2], [5, 11], 'têtes de série persistées, y compris pour le bronze');
   assert.equal(await prisma.matchRound.count({ where: { competitionId: c.id } }), 5);
   const byId = (id) => fresh.podiumRoster.find((e) => e.id === id)?.name;
   assert.deepEqual([fresh.officialPodium.gold, fresh.officialPodium.silver, fresh.officialPodium.bronze1].map(byId), [

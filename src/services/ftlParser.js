@@ -15,6 +15,11 @@ const name = ($, cell) =>
       .get()
       .join(' '),
   );
+// Tête de série affichée devant le nom (« (12) ») ; absente ou illisible : null, jamais bloquant.
+function seedOf($, cell) {
+  const n = Number(/^\((\d{1,4})\)$/.exec(clean($(cell).find('.tseed').text()))?.[1]);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
 function roundName(label) {
   return /^Table of (\d+)$/.test(label)
     ? `T${label.slice(9)}`
@@ -22,7 +27,16 @@ function roundName(label) {
 }
 function parseTable(
   html,
-  { roster, date, offset = '+03:00', timezone, maxScore = 45, bronze = false, requireComplete = true },
+  {
+    roster,
+    date,
+    offset = '+03:00',
+    timezone,
+    maxScore = 45,
+    bronze = false,
+    requireComplete = true,
+    entrySeeds = new Map(),
+  },
 ) {
   const $ = load(html),
     table = $('table.elimTableau');
@@ -39,16 +53,22 @@ function parseTable(
   };
   const cell = (r, c) => $(rows[r]).children('td').eq(c);
   const out = [],
-    rounds = [];
+    rounds = [],
+    seeds = entrySeeds;
   for (let c = 0; c < headers.length - 1; c++) {
     const label = headers[c],
       round = roundName(label);
     if (!round || Boolean(round === 'Bronze') !== bronze) throw failure('Tour officiel non reconnu.');
     const slots = rows.flatMap((r, index) =>
-      cell(index, c).is('.tbb,.tbbr') ? [{ index, name: name($, cell(index, c)) }] : [],
+      cell(index, c).is('.tbb,.tbbr')
+        ? [{ index, name: name($, cell(index, c)), seed: seedOf($, cell(index, c)) }]
+        : [],
     );
     const capacity = round === 'Bronze' ? 2 : Number(round.slice(1));
     if (slots.length !== capacity) throw failure(`Tableau ${round} incomplet : positions non vérifiables.`);
+    // Tête de série : celle de la première apparition du tireur (aux tours suivants, FencingTimeLive
+    // affiche le numéro de la position gagnée, pas celui du tireur).
+    if (!bronze) for (const s of slots) if (s.name && !seeds.has(norm(s.name))) seeds.set(norm(s.name), s.seed);
     const names = slots.map((s) => norm(s.name)).filter((s) => s && s !== '- bye -');
     if (new Set(names).size !== names.length) throw failure('Un adversaire apparaît plusieurs fois dans le même tour.');
     let real = 0;
@@ -126,6 +146,8 @@ function parseTable(
         round,
         player1,
         player2,
+        seed1: seeds.get(norm(player1)) ?? null,
+        seed2: seeds.get(norm(player2)) ?? null,
         startsAt,
         strip: strips.length === 1 ? strips[0] : null,
         winner,
