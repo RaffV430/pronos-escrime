@@ -33,3 +33,16 @@ test('engarde : « DNF » à la place du score = qualifié sur abandon', () => {
     [1, true, 'MEDICAL_WITHDRAWAL', null, null],
   );
 });
+
+test('engarde : piste « Podium », exclusion au tableau, heure de publication', () => {
+  assert.equal(E.timeAndStrip('19:50 Podium Arbitre: MIELCAREK Gaspard FRA').strip, 'Podium');
+  assert.equal(E.timeAndStrip('Poule No 1 - 09:00 - Podium - Arbitre : X').strip, 'Podium');
+  const exc = html.replace('<td class="D score">15/10</td>', '<td class="D score">EXC</td>');
+  const m = E.parseTableaus([exc]).matches.find((x) => x.sourceKey === 'T8:1');
+  assert.deepEqual([m.winner, m.resultType], [1, 'MEDICAL_WITHDRAWAL']);
+  const at = E.publishedAt(
+    'Document <a href="//engarde-service.com">engarde-service</a> - 04/10/2026 11:21:04',
+    'Europe/Paris',
+  );
+  assert.equal(at.toISOString(), '2026-10-04T09:21:00.000Z');
+});
