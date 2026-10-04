@@ -28,9 +28,12 @@ function validatePrediction(value, size) {
 // Épreuves en France : la poule se ferme aussi à son heure de début annoncée (engarde ne publie une
 // poule qu'une fois terminée) ; closesAt suit alors l'heure annoncée, y compris quand elle change.
 const START_LOCK = 'START_OR_FIRST_RESULT';
-const followsSource = (pool) => pool?.lockMode === 'FIRST_RESULT' || pool?.lockMode === START_LOCK;
+// Tirage provisoire (engarde, avant l'appel) : poule visible mais fermée aux pronostics.
+const PROVISIONAL = 'PROVISIONAL';
+const followsSource = (pool) => ['FIRST_RESULT', START_LOCK, PROVISIONAL].includes(pool?.lockMode);
 // Mode et heure de clôture d'une poule suivie, d'après l'heure de début officielle.
-function sourceLock(observedStart, closeAtStart, fallbackClosesAt) {
+function sourceLock(observedStart, closeAtStart, fallbackClosesAt, provisional = false) {
+  if (provisional) return { lockMode: PROVISIONAL, closesAt: new Date(0) };
   return closeAtStart && observedStart
     ? { lockMode: START_LOCK, closesAt: new Date(observedStart) }
     : { lockMode: 'FIRST_RESULT', closesAt: fallbackClosesAt };
@@ -130,6 +133,7 @@ function poolPoints(prediction, result, size = null) {
 }
 module.exports = {
   START_LOCK,
+  PROVISIONAL,
   followsSource,
   sourceLock,
   poolPoints,
