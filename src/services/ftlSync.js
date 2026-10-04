@@ -115,6 +115,10 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
   const $ = verifyPage(await client.get(sourceUrl), config);
   const trees = await client.get(sourceUrl + '/trees');
   if (!Array.isArray(trees)) throw failure('Liste des tableaux officiels indisponible.');
+  if (trees.some((t) => /\brep(?:[êe]chage)?\b/i.test(clean(t.name))))
+    throw failure(
+      'Tableau avec repêchages : import des rencontres suspendu pour éviter un tableau incomplet. Les poules restent suivies.',
+    );
   const main = trees.filter((t) => t.treeNum === 0),
     bronzes = trees.filter((t) => clean(t.name) === 'Bronze Medal');
   if (main.length !== 1 || bronzes.length > 1 || (c.podiumFormat === 'TEAM' && bronzes.length !== 1))
@@ -428,13 +432,43 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
   return summary;
 }
 const recompose = require('./poolRecompose');
+// Chaque URL FTL identifie un tour distinct ; la numérotation des poules repart de 1.
+function poolRoundContext($, url, config) {
+  const eventId = poolPattern.exec(url)?.[1]?.toUpperCase();
+  const sources = [
+    ...new Set(
+      $('a')
+        .toArray()
+        .map((a) => {
+          try {
+            return new URL($(a).attr('href') || '/', ORIGIN).href;
+          } catch {
+            return '';
+          }
+        })
+        .filter((u) => poolPattern.exec(u)?.[1]?.toUpperCase() === eventId),
+    ),
+  ];
+  const ordered = sources.length ? sources : [...new Set(config.poolSources || [url])];
+  const index = ordered.indexOf(url);
+  if (index < 0) throw failure('Tour de poules absent de la navigation officielle.');
+  const round = index + 1;
+  // L'en-tête de l'épreuve donne sa date initiale, pas celle des phases suivantes.
+  // Sans date de phase officielle, ne jamais déduire une clôture horaire (tournoi sur plusieurs jours).
+  return {
+    sources: ordered,
+    round,
+    date: round === 1 ? config.date : null,
+    label: (n) => (round === 1 ? `Poule ${n}` : `Tour ${round} · Poule ${n}`),
+  };
+}
 async function syncPools(db, c, config, actorId, client, leaseToken = null) {
   const pools = await db.pool.findMany({
     where: { competitionId: c.id },
     include: { fencers: { orderBy: { position: 'asc' } } },
     orderBy: { id: 'asc' },
   });
-  const urls = [...new Set([...pools.map((p) => p.sourceUrl), ...(config.poolSources || [])].filter(Boolean))];
+  const urls = [...new Set([...(config.poolSources || []), ...pools.map((p) => p.sourceUrl)].filter(Boolean))];
   const summary = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [] };
   for (const url of urls) {
     try {
@@ -445,7 +479,11 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           `https://www.fencingtimelive.com/events/competitors/${match[1]}`.toUpperCase()
       )
         throw failure('Source de poules différente de la liste des engagés.');
-      const $ = await poolMatrices(verifyPage(await client.get(url), config), url, client),
+      const page = verifyPage(await client.get(url), config);
+      const context = poolRoundContext(page, url, config);
+      // Découvrir les nouveaux tours depuis les liens visibles, même après publication du tableau.
+      for (const source of context.sources) if (!urls.includes(source)) urls.push(source);
+      const $ = await poolMatrices(page, url, client),
         tables = $('table.poolTable').toArray();
       if (!tables.length) throw failure('Matrices de poules non encore publiées.');
       const poolNumbers = tables.map((t) => clean($(t).parent().find('.poolNum').text()));
@@ -460,12 +498,13 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
       if (observedAll) {
         for (const o of observedAll)
           try {
-            o.startsAt = o.time ? localTime(config.date, o.time.hour, o.time.minute, config.timezone) : null;
+            o.startsAt =
+              o.time && context.date ? localTime(context.date, o.time.hour, o.time.minute, config.timezone) : null;
           } catch {
             o.startsAt = null;
           }
         try {
-          const plan = recompose.planRecomposition(pools, url, observedAll, c.podiumRoster);
+          const plan = recompose.planRecomposition(pools, url, observedAll, c.podiumRoster, context.label);
           if (plan) {
             if (leaseToken) await db.$transaction((tx) => require('./ftlScheduler').assertClaim(tx, c.id, leaseToken));
             const result = await recompose.applyRecomposition(db, c, url, plan, config);
@@ -487,13 +526,14 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           const observed = parsePools($.html($(table).parent()))[0];
           // Heure de la poule dans le fuseau du lieu ; une heure douteuse est simplement ignorée.
           try {
-            observed.startsAt = observed.time
-              ? localTime(config.date, observed.time.hour, observed.time.minute, config.timezone)
-              : null;
+            observed.startsAt =
+              observed.time && context.date
+                ? localTime(context.date, observed.time.hour, observed.time.minute, config.timezone)
+                : null;
           } catch {
             observed.startsAt = null;
           }
-          observed.closeAtStart = config.timezone === 'Europe/Paris';
+          observed.closeAtStart = Boolean(context.date) && config.timezone === 'Europe/Paris';
           for (const row of observed.rows)
             if ((c.podiumRoster || []).filter((e) => norm(e.name) === norm(row.name)).length !== 1)
               throw failure('Composition de poule absente ou ambiguë dans les engagés.');
@@ -503,7 +543,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
               (p) =>
                 !p.sourceUrl &&
                 !p.sourcePoolNumber &&
-                p.name === `Poule ${observed.number}` &&
+                p.name === context.label(observed.number) &&
                 p.fencers.length === observed.rows.length &&
                 p.fencers.every(
                   (f, i) => f.position === observed.rows[i].position && norm(f.name) === norm(observed.rows[i].name),
@@ -535,8 +575,14 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           }
           if (!snapshot) {
             // Do not duplicate an existing pool whose source has not been reconciled yet.
-            if (pools.some((p) => p.fencers.some((f) => observed.rows.some((r) => norm(r.name) === norm(f.name)))))
-              throw failure(`Poule ${observed.number} déjà présente sans correspondance de source certaine.`);
+            if (
+              pools.some(
+                (p) =>
+                  (!p.sourceUrl || p.sourceUrl === url) &&
+                  p.fencers.some((f) => observed.rows.some((r) => norm(r.name) === norm(f.name))),
+              )
+            )
+              throw failure(`${context.label(observed.number)} déjà présente sans correspondance de source certaine.`);
             snapshot = await db.$transaction(async (tx) => {
               await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
               const current = await tx.competition.findUnique({ where: { id: c.id } });
@@ -553,7 +599,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
               return tx.pool.create({
                 data: {
                   competitionId: c.id,
-                  name: `Poule ${observed.number}`,
+                  name: context.label(observed.number),
                   closesAt: new Date(config.date + 'T00:00:00Z'),
                   lockMode: 'FIRST_RESULT',
                   sourceUrl: url,
@@ -808,6 +854,8 @@ module.exports = {
   podiumFromResults,
   verifyPage,
   poolMatrices,
+  poolRoundContext,
+  syncPools,
   cancellable,
   drawSignature,
 };
