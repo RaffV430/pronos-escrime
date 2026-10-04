@@ -479,7 +479,35 @@ async function queueSpecial(db, id, context = null) {
 async function deliverSpecial(db, delivery, sub, c, matches, sender) {
   const { id, kind, round } = delivery;
   const cancel = () => db.pushDelivery.updateMany({ where: { id, status: 'SENDING' }, data: { status: 'CANCELLED' } });
-  if (!sub?.enabled || !c || !follows(sub, c)) return cancel();
+  // Alerte personnelle (tireur de son podium hors tableau) : envoyée même sans suivre l'épreuve.
+  if (!sub?.enabled || !c || (kind !== 'PODIUM_OUT' && !follows(sub, c))) return cancel();
+  if (kind === 'PODIUM_OUT') {
+    const m = /^podium-out-([A-Z]+)-(.+)$/.exec(round || '');
+    const { podiumClosed } = require('../lib/matchLock');
+    if (!m || c.podiumResolvedAt || podiumClosed(c, await db.match.findMany({ where: { competitionId: c.id } })))
+      return cancel();
+    const competition = await db.competition.findUnique({ where: { id: c.id }, select: { podiumRoster: true } });
+    const entry = (competition?.podiumRoster || []).find((e) => e.id === m[2]);
+    const { podiumOutNotification, REASONS } = require('./podiumAlerts');
+    try {
+      await sender(sub, { ...podiumOutNotification(c, entry, REASONS[m[1]]), tag: `pronos-${id}` }, 6 * 3600, 'high');
+      await db.pushDelivery.updateMany({
+        where: { id, status: 'SENDING' },
+        data: { status: 'SENT', sentAt: new Date() },
+      });
+    } catch (e) {
+      if ([404, 410].includes(e.statusCode))
+        await db.pushSubscription.update({ where: { id: sub.id }, data: { enabled: false } });
+      await db.pushDelivery.updateMany({
+        where: { id, status: 'SENDING' },
+        data: {
+          status: delivery.attempts < 3 && ![400, 401, 403, 404, 410].includes(e.statusCode) ? 'PENDING' : 'FAILED',
+          nextAttemptAt: new Date(Date.now() + 60000 * 2 ** delivery.attempts),
+        },
+      });
+    }
+    return;
+  }
   const prefs = preferences(sub.preferences || {});
   // Une recomposition annoncée pendant les heures calmes attend leur fin plutôt que d'être perdue.
   // Poules modifiées juste avant leur début (France) : notification prioritaire, sans attendre ni filtre.

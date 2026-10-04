@@ -9,46 +9,41 @@ const { localTime } = require('./localTime');
 const { validateManifest } = require('./roundManifest');
 const { norm } = require('./ftlParser');
 const { failure } = require('./ftlClient');
+const { mergeRoster, entryFor } = require('./engardeRoster');
 
 const linkOf = (config) => ({ org: config.org, event: config.tournamentSlug, compe: config.compe });
 
 // Engagés : pris tels quels à la première publication ; ensuite, tant qu'aucune poule n'a commencé,
 // les nouveaux arrivent et les absents passent inactifs (leurs identifiants restent pour les pronostics).
+// Engagés : nouveaux ajoutés, absents de la liste marqués inactifs (identifiants conservés pour les
+// pronostics), nation et rang mis à jour, noms corrigés suivis sans changer d'identifiant (poules et
+// rencontres prennent le nouveau nom).
 async function refreshRoster(db, c, url, client, html = null) {
   const observed = E.parseRoster(html ?? (await client.get(url)));
   const current = c.podiumRoster || [];
-  const byId = new Map(current.map((e) => [e.id, e]));
-  const seen = new Set(observed.map((e) => e.id));
-  const merged = [
-    ...current.map((e) =>
-      seen.has(e.id) ? { ...e, ...observed.find((o) => o.id === e.id) } : { ...e, active: false },
-    ),
-    ...observed.filter((e) => !byId.has(e.id)),
-  ].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  const { merged, renames } = mergeRoster(current, observed);
   if (c.podiumRoster && JSON.stringify(merged) === JSON.stringify(current) && c.rosterSourceUrl === url) return c;
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
     const fresh = await tx.competition.findUnique({ where: { id: c.id } });
     if (JSON.stringify(fresh.podiumRoster) !== JSON.stringify(c.podiumRoster))
       throw failure('Liste des engagés modifiée pendant le contrôle.', 409);
-    if (fresh.podiumRoster) {
-      const started = await tx.poolFencer.count({
-        where: { pool: { competitionId: c.id }, OR: [{ firstResultAt: { not: null } }, { wins: { not: null } }] },
-      });
-      if (started || (await tx.match.count({ where: { competitionId: c.id } }))) {
-        // Épreuve commencée : la liste ne change plus, sauf engagé ajouté en retard (nouvel identifiant).
-        const known = new Set(fresh.podiumRoster.map((e) => e.id));
-        const late = observed.filter((e) => !known.has(e.id));
-        if (!late.length) return fresh;
-        return tx.competition.update({
-          where: { id: c.id },
-          data: {
-            podiumRoster: [...fresh.podiumRoster, ...late].sort((a, b) => a.name.localeCompare(b.name, 'fr')),
-            rosterCheckedAt: new Date(),
-          },
-        });
-      }
+    for (const r of renames) {
+      await tx.poolFencer.updateMany({ where: { name: r.from, pool: { competitionId: c.id } }, data: { name: r.to } });
+      await tx.match.updateMany({ where: { competitionId: c.id, player1: r.from }, data: { player1: r.to } });
+      await tx.match.updateMany({ where: { competitionId: c.id, player2: r.from }, data: { player2: r.to } });
     }
+    if (renames.length)
+      await tx.auditLog.create({
+        data: {
+          actorId: 0,
+          action: 'Renommage officiel d’engagés',
+          targetType: 'Competition',
+          targetId: c.id,
+          before: { names: renames.map((r) => ({ id: r.id, name: r.from })) },
+          after: { names: renames.map((r) => ({ id: r.id, name: r.to })) },
+        },
+      });
     return tx.competition.update({
       where: { id: c.id },
       data: { podiumRoster: merged, rosterSourceUrl: url, rosterCheckedAt: new Date() },
@@ -131,7 +126,8 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
     summary.warnings.push(e.status ? e.message : 'Poules engarde-service illisibles pour le moment.');
     return summary;
   }
-  const inRoster = (name) => (c.podiumRoster || []).filter((e) => norm(e.name) === norm(name)).length === 1;
+  // Homonymes départagés par la nation ou le club affiché à côté du nom.
+  const inRoster = (name, club) => Boolean(entryFor(c.podiumRoster, name, club));
   // Tireur engagé sur place, présent en poule mais pas (encore) dans la liste publiée : ajouté aux engagés.
   try {
     // Un forfait (DNS) n'est jamais ajouté aux engagés.
@@ -181,7 +177,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
       observed.startsAt = startsAt(config, observed.time, day.offset);
       observed.closeAtStart = config.timezone === 'Europe/Paris';
       observed.provisional = provisional;
-      if (observed.rows.some((r) => !r.absent && !inRoster(r.name)))
+      if (observed.rows.some((r) => !r.absent && !inRoster(r.name, r.club)))
         throw failure(`${label(observed.number)} : tireur absent ou ambigu dans les engagés.`);
       let snapshot = pools.find((p) => p.sourceUrl === url && p.sourcePoolNumber === observed.number);
       if (!snapshot) {
@@ -226,6 +222,11 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
       );
       summary.checked++;
       for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
+      // Tireurs sortis de la compétition (forfait, abandon, exclusion) : alerte podium plus bas.
+      for (const r of observed.rows.filter((x) => x.absent)) {
+        const found = entryFor(c.podiumRoster, r.name, r.club);
+        if (found) summary.outs = [...(summary.outs || []), { id: found.id, status: r.status || 'DNS' }];
+      }
       if (observed.ambiguous)
         summary.warnings.push(
           `${label(observed.number)} : score réciproque manquant ; tireurs concernés verrouillés, bilan incomplet non inventé.`,
@@ -257,10 +258,10 @@ async function observeTableau(c, config, pages, client, prev = null) {
   const htmls = [];
   for (const url of pages.tableaus) htmls.push(await client.get(url));
   const parsed = E.parseTableaus(htmls);
-  const entry = (name) => {
-    const hits = (c.podiumRoster || []).filter((e) => norm(e.name) === norm(name));
-    if (hits.length !== 1) throw failure(`Nom officiel ambigu ou absent des engagés : ${name}.`);
-    return hits[0];
+  const entry = (name, club = '') => {
+    const found = entryFor(c.podiumRoster, name, club);
+    if (!found) throw failure(`Nom officiel ambigu ou absent des engagés : ${name}.`);
+    return found;
   };
   // Jour de chaque tour : à la suite des poules, lendemain quand un tour commence plus tôt que le précédent.
   const offsets = new Map();
@@ -270,8 +271,8 @@ async function observeTableau(c, config, pages, client, prev = null) {
     offsets.set(r.round, day.offset);
   }
   const matches = parsed.matches.map((m) => {
-    entry(m.player1);
-    entry(m.player2);
+    entry(m.player1, m.club1);
+    entry(m.player2, m.club2);
     return {
       sourceKey: m.sourceKey,
       round: m.round,
@@ -292,7 +293,10 @@ async function observeTableau(c, config, pages, client, prev = null) {
     resultsSourceUrl = null;
   if (matches.some((m) => m.round === 'T2' && m.isFinished) && pages.final) {
     try {
-      const rows = E.parseFinalRanking(await client.get(pages.final)).map((r) => ({ ...r, id: entry(r.name).id }));
+      const rows = E.parseFinalRanking(await client.get(pages.final)).map((r) => ({
+        ...r,
+        id: entry(r.name, r.club).id,
+      }));
       officialPodium = podiumFromResults(rows, c, matches);
       resultsSourceUrl = pages.final;
     } catch (e) {
@@ -361,8 +365,10 @@ async function control(db, c, config, actorId, claim, client) {
       poolSummary.warnings.push(...s.warnings);
       if (s.notes) poolSummary.notes = [...(poolSummary.notes || []), ...s.notes];
       if (s.recomposed) poolSummary.recomposed = [...(poolSummary.recomposed || []), ...s.recomposed];
+      if (s.outs) poolSummary.outs = [...(poolSummary.outs || []), ...s.outs];
     }
   }
+  if (poolSummary.outs?.length) await require('./podiumAlerts').alertPodiumOut(db, c, poolSummary.outs);
   const existing = await db.match.findMany({ where: { competitionId: c.id } });
   if (pages.tableaus.length) {
     try {
