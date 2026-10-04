@@ -409,6 +409,9 @@ function tableauGrid(html) {
     );
 }
 
+// Qualifié sans score : « DNF » (abandon), forfait.
+const WITHDRAWAL = /^(DNF|ABD|ABANDON|F|FORFAIT)$/i;
+
 // Matchs d'une grille. Chaque tour occupe une colonne de noms ; un match est une paire de noms
 // consécutifs de cette colonne ; son vainqueur, son score et son horaire se trouvent entre les deux lignes.
 function tableauMatches(grid) {
@@ -462,6 +465,7 @@ function tableauMatches(grid) {
       let winner = null,
         score1 = null,
         score2 = null,
+        withdrawal = false,
         isFinished = false;
       if (winnerCell?.text) {
         winner =
@@ -470,6 +474,9 @@ function tableauMatches(grid) {
         if (s) {
           const [w, l] = [Number(s[1]), Number(s[2])];
           [score1, score2] = winner === 1 ? [w, l] : [l, w];
+          isFinished = true;
+        } else if (WITHDRAWAL.test(scoreCell?.text || '')) {
+          withdrawal = true; // abandon ou forfait de l'adversaire : qualifié sans score
           isFinished = true;
         }
       }
@@ -485,7 +492,7 @@ function tableauMatches(grid) {
         winner: isFinished ? winner : null,
         score1,
         score2,
-        resultType: isFinished ? 'NORMAL' : null,
+        resultType: isFinished ? (withdrawal ? 'MEDICAL_WITHDRAWAL' : 'NORMAL') : null,
         isFinished,
       });
     }
