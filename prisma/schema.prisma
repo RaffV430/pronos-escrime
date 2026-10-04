@@ -51,6 +51,9 @@ model Match {
   resultType    String?
   resultRegisteredAt DateTime?
   syncIssue String?
+  pointsPending Boolean @default(false)
+  manualResultConfirmed Boolean @default(false)
+  progressionConfirmedAt DateTime?
   reactions     MatchReaction[]
   comments      MatchComment[]
 

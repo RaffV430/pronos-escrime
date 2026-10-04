@@ -30,7 +30,7 @@ async function competitionPredictions(competition, userId) {
   const rows = [];
   for (const m of contextual) {
     const p = m.predictions[0],
-      finished = m.isFinished,
+      finished = m.isFinished && !m.pointsPending,
       closed = matchClosed(m);
     let details = [];
     if (m.resultType === 'CANCELLED') {
@@ -80,13 +80,23 @@ async function competitionPredictions(competition, userId) {
       type: 'Match',
       name: `${m.player1} / ${m.player2}`,
       round: m.round,
-      status: finished ? 'Terminé' : closed ? 'Clos' : p ? 'Enregistré' : 'À compléter',
+      status: m.pointsPending
+        ? 'Vérification'
+        : finished
+          ? 'Terminé'
+          : closed
+            ? 'Clos'
+            : p
+              ? 'Enregistré'
+              : 'À compléter',
       prediction: p ? `${p.predictedScore1} – ${p.predictedScore2}` : null,
-      result: finished
-        ? m.resultType === 'MEDICAL_WITHDRAWAL'
-          ? `Retrait médical · ${m.winner === 1 ? m.player1 : m.player2} qualifié(e)`
-          : `${m.score1} – ${m.score2}`
-        : null,
+      result: m.pointsPending
+        ? 'Points en attente de validation'
+        : finished
+          ? m.resultType === 'MEDICAL_WITHDRAWAL'
+            ? `Retrait médical · ${m.winner === 1 ? m.player1 : m.player2} qualifié(e)`
+            : `${m.score1} – ${m.score2}`
+          : null,
       points: p && finished ? p.pointsEarned + (p.bonusPoints || 0) : null,
       details,
       startsAt: m.startsAt,

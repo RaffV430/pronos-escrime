@@ -12,7 +12,7 @@ function closesAt(match) {
   return Number.isFinite(deadline) ? new Date(deadline).toISOString() : null;
 }
 function matchClosed(match, now = Date.now()) {
-  if (match.isFinished || match.syncIssue) return true;
+  if (match.isFinished || match.syncIssue || match.progressionConfirmedAt) return true;
   // An expired override closes the round even if its original deadline is later.
   if (match.manualUnlockUntil) return now >= time(match.manualUnlockUntil);
   if (match.timingUnverified) return true;
@@ -33,7 +33,11 @@ function roundContext(matches, rounds) {
     const complete =
       previous &&
       results.length === previous.expectedMatchCount &&
-      results.every((m) => !m.syncIssue && m.isFinished && Number.isFinite(time(m.resultRegisteredAt)));
+      results.every(
+        (m) =>
+          Number.isFinite(time(m.progressionConfirmedAt)) ||
+          (!m.syncIssue && m.isFinished && Number.isFinite(time(m.progressionConfirmedAt || m.resultRegisteredAt))),
+      );
     return {
       ...match,
       manualUnlockUntil: config?.manualUnlockUntil || null,
@@ -41,7 +45,9 @@ function roundContext(matches, rounds) {
       awaitingPreviousRound: Boolean(config?.previousRound && !complete),
       previousRoundCompletedAt:
         complete && results.length
-          ? new Date(Math.max(...results.map((m) => time(m.resultRegisteredAt)))).toISOString()
+          ? new Date(
+              Math.max(...results.map((m) => time(m.progressionConfirmedAt || m.resultRegisteredAt))),
+            ).toISOString()
           : null,
     };
   });

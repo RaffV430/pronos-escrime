@@ -258,9 +258,17 @@ function manifest(rounds) {
 
 async function observeTableau(c, config, pages, client, prev = null) {
   const { podiumFromResults } = require('./ftlSync');
-  const htmls = [];
-  for (const url of pages.tableaus) htmls.push(await client.get(url));
-  const parsed = E.parseTableaus(htmls);
+  const htmls = [],
+    pageIssues = [];
+  for (const url of pages.tableaus) {
+    try {
+      htmls.push(await client.get(url));
+    } catch (error) {
+      if (!error.status) throw error;
+      pageIssues.push({ message: `${url} : ${error.message}` });
+    }
+  }
+  const parsed = E.parseTableaus(htmls, { allowPartial: true });
   const entry = (name, club = '') => {
     const found = entryFor(c.podiumRoster, name, club);
     if (!found) throw failure(`Nom officiel ambigu ou absent des engagés : ${name}.`);
@@ -273,29 +281,43 @@ async function observeTableau(c, config, pages, client, prev = null) {
     day = nextDay(day, minutes(parsed.matches.filter((m) => m.round === r.round).map((m) => m.time)));
     offsets.set(r.round, day.offset);
   }
-  const matches = parsed.matches.map((m) => {
-    // Forfait (DNS) au tableau : le perdant peut ne plus figurer dans la liste des présents.
-    const walkoverLoser = m.isFinished && m.resultType === 'MEDICAL_WITHDRAWAL' ? 3 - m.winner : null;
-    if (walkoverLoser !== 1) entry(m.player1, m.club1);
-    if (walkoverLoser !== 2) entry(m.player2, m.club2);
-    return {
-      sourceKey: m.sourceKey,
-      round: m.round,
-      player1: m.player1,
-      player2: m.player2,
-      seed1: m.seed1,
-      seed2: m.seed2,
-      startsAt: startsAt(config, m.time, offsets.get(m.round) || 0),
-      strip: m.strip,
-      winner: m.winner,
-      score1: m.score1,
-      score2: m.score2,
-      resultType: m.resultType,
-      isFinished: m.isFinished,
-    };
+  const identityIssues = [];
+  const matches = parsed.matches.flatMap((m) => {
+    try {
+      // Forfait (DNS) au tableau : le perdant peut ne plus figurer dans la liste des présents.
+      const walkoverLoser = m.isFinished && m.resultType === 'MEDICAL_WITHDRAWAL' ? 3 - m.winner : null;
+      if (walkoverLoser !== 1) entry(m.player1, m.club1);
+      if (walkoverLoser !== 2) entry(m.player2, m.club2);
+      return {
+        pointsPending: Boolean(m.pointsPending),
+        syncIssue: m.syncIssue || null,
+        sourceKey: m.sourceKey,
+        round: m.round,
+        player1: m.player1,
+        player2: m.player2,
+        seed1: m.seed1,
+        seed2: m.seed2,
+        startsAt: startsAt(config, m.time, offsets.get(m.round) || 0),
+        strip: m.strip,
+        winner: m.winner,
+        score1: m.score1,
+        score2: m.score2,
+        resultType: m.resultType,
+        isFinished: m.isFinished,
+      };
+    } catch (error) {
+      if (!error.status) throw error;
+      identityIssues.push({
+        sourceKey: m.sourceKey,
+        round: m.round,
+        message: `${m.round} · ${m.sourceKey} : ${error.message}`,
+      });
+      return [];
+    }
   });
   const rounds = manifest(parsed.rounds);
-  const warnings = [];
+  const issues = [...pageIssues, ...(parsed.issues || []), ...identityIssues];
+  const warnings = issues.map((i) => i.message);
   let officialPodium = null,
     resultsSourceUrl = null;
   if (matches.some((m) => m.round === 'T2' && m.isFinished) && pages.final) {
@@ -314,6 +336,7 @@ async function observeTableau(c, config, pages, client, prev = null) {
     sourceUrl: `${config.eventSourceUrl}/tableau`,
     matches,
     rounds,
+    issues,
     officialPodium,
     resultsSourceUrl,
     warnings,
@@ -336,21 +359,27 @@ async function control(db, c, config, actorId, claim, client) {
     },
   };
   const { planMatches, applyObservation, cancellable, drawSignature } = require('./ftlSync');
-  const notes = [];
+  const notes = [],
+    rosterWarnings = [];
   const pages = E.competitionPages(await client.get(config.eventSourceUrl), linkOf(config));
   // Tirage publié la veille, avant l'appel : poules provisoires, fermées aux pronostics jusqu'à l'appel
   // (liste « présents ») ou, faute d'appel sur engarde, jusqu'au jour de l'épreuve.
   let provisional = false;
   if (pages.roster) {
-    const rosterHtml = await client.get(pages.roster);
-    c = await refreshRoster(db, c, pages.roster, client, rosterHtml);
-    let dayStart = null;
     try {
-      dayStart = localTime(config.date, 0, 0, config.timezone).getTime();
-    } catch {
-      dayStart = null;
+      const rosterHtml = await client.get(pages.roster);
+      c = await refreshRoster(db, c, pages.roster, client, rosterHtml);
+      let dayStart = null;
+      try {
+        dayStart = localTime(config.date, 0, 0, config.timezone).getTime();
+      } catch {
+        dayStart = null;
+      }
+      provisional = !E.rosterCheckedIn(rosterHtml) && dayStart !== null && Date.now() < dayStart;
+    } catch (error) {
+      if (!error.status) throw error;
+      rosterWarnings.push(`Liste des engagés : ${error.message} Identités déjà vérifiées conservées.`);
     }
-    provisional = !E.rosterCheckedIn(rosterHtml) && dayStart !== null && Date.now() < dayStart;
   }
   const empty = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [] };
   let summary = {
@@ -377,46 +406,276 @@ async function control(db, c, config, actorId, claim, client) {
   if (poolPages.length) {
     poolSummary = { ...empty, warnings: [] };
     for (const [i, url] of poolPages.entries()) {
-      const s = await syncPools(db, c, config, url, client, claim.token, { provisional, round: i + 1, prev: day });
-      day = s.day;
-      for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated']) poolSummary[k] += s[k];
-      poolSummary.warnings.push(...s.warnings);
-      if (s.notes) poolSummary.notes = [...(poolSummary.notes || []), ...s.notes];
-      if (s.recomposed) poolSummary.recomposed = [...(poolSummary.recomposed || []), ...s.recomposed];
-      if (s.outs) poolSummary.outs = [...(poolSummary.outs || []), ...s.outs];
-    }
-  }
-  if (poolSummary.outs?.length) await require('./podiumAlerts').alertPodiumOut(db, c, poolSummary.outs);
-  const existing = await db.match.findMany({ where: { competitionId: c.id } });
-  if (pages.tableaus.length) {
-    try {
-      let observation = await observeTableau(c, config, pages, client, day);
-      const conflicts = planMatches(existing, observation, { allowPartial: true }).conflicts;
-      if (
-        conflicts.some((i) =>
-          cancellable(
-            existing.find((m) => m.id === i.id),
-            observation,
-          ),
-        )
-      ) {
-        const confirmation = await observeTableau(c, config, pages, client, day);
-        if (drawSignature(observation) !== drawSignature(confirmation))
-          throw failure('Le tableau officiel change pendant le contrôle. Nouvelle vérification nécessaire.');
-        observation = { ...confirmation, drawConfirmed: true };
-      }
-      summary = await db.$transaction((tx) => applyObservation(tx, c, observation, actorId, claim.token), {
-        timeout: 30000,
-        maxWait: 5000,
-      });
-    } catch (e) {
-      if (!poolSummary.checked) throw e;
-      summary.warnings.push(e.status ? e.message : 'Tableau non vérifiable pour le moment.');
-    }
-  } else notes.push('Tableau pas encore publié. Il sera recherché au prochain contrôle.');
-  if (notes.length) summary.notes = [...(summary.notes || []), ...notes];
-  if (publishedAt) summary.publishedAt = publishedAt.toISOString();
-  return { c, poolSummary, summary };
+      try {
+        const s = await syncPools(db, c, config, url, client, claim.token, { provisional, round: i + 1, prev: day });
+        day = s.day;
+        for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated']) poolSummary[k] += s[k];
+        poolSummary.warnings.push(...s.warnings);
+        if (s.notes) poolSummary.notes = [...(poolSummary.notes || []), ...s.notes];
+        if (s.recomposed) poolSummary.recomposed = [...(poolSummary.recomposed || []), ...s.recomposed];
+        if (s.outs) poolSummary.outs = [.…5201 tokens truncated…9quipes : pas de prénom, nom de l'équipe en première ligne de la case.
+        name:
+          first < 0
+            ? teamCell($, cells[last]).team
+            : `${clean($(cells[last]).text()).toUpperCase()} ${clean($(cells[first]).text())}`.trim(),
+        club: club >= 0 ? clubOf($, cells[club]) : '',
+      };
+    })
+    .filter((r) => r.place && r.name);
 }
 
-module.exports = { nextDay, dayOf, startsAt, control, refreshRoster, observeTableau, manifest, syncPools };
+// ---- Tableau : grille HTML → matchs par tour (géométrie des lignes, comme la page officielle) ----
+function roundOf(title) {
+  const t = norm(title);
+  const n = /tableau de (\d+)/.exec(t)?.[1];
+  if (n) return `T${n}`;
+  if (/demi/.test(t)) return 'T4';
+  if (/^finale?$/.test(t) || t === 'finales') return 'T2';
+  if (/quart/.test(t)) return 'T8';
+  return null;
+}
+
+// Grille : pour chaque ligne, les cellules avec leur colonne, leur rôle et leur texte.
+function tableauGrid(html) {
+  const $ = load(String(html || ''));
+  const table = $('table.tableau').first();
+  if (!table.length) fail('Tableau non publié sur engarde-service.');
+  return table
+    .find('tr')
+    .toArray()
+    .map((tr) =>
+      $(tr)
+        .children('td')
+        .toArray()
+        .map((td, col) => {
+          const cls = $(td).attr('class') || '';
+          return {
+            col,
+            role: /\btableTitle\b/.test(cls)
+              ? 'title'
+              : /\bfencer\b/.test(cls)
+                ? 'fencer'
+                : /\bnation\b/.test(cls)
+                  ? 'club'
+                  : /\bscore\b/.test(cls)
+                    ? 'score'
+                    : /\btimePiste\b/.test(cls)
+                      ? 'time'
+                      : /\bplaceNumber\b/.test(cls)
+                        ? 'place'
+                        : null,
+            text: clean($(td).find('.club').length ? $(td).find('.club').text() : $(td).text()),
+          };
+        }),
+    );
+}
+
+// Qualifié sans score : « DNF » (abandon), forfait.
+// Qualifié sans score : abandon, forfait ou exclusion de l'adversaire (« vainqueur seul » au barème).
+const WITHDRAWAL = /^(DNF|DNS|ABD|ABANDON|F|FORFAIT|EXC|EXCL|EXCLU|EXCLUSION)$/i;
+
+// Tableau principal et match pour la 3e place (épreuves par équipes). Les tableaux de classement
+// (9e, 13e place…) partagent la même grille, à gauche : ils sont ignorés.
+const BRONZE = /^(troisi[eè]me place|3e place|match pour la 3e place)$/i;
+function bracketOf(title) {
+  if (BRONZE.test(clean(title))) return 'Bronze';
+  return roundOf(title);
+}
+
+// Matchs d'une grille. Chaque tour occupe une colonne de noms, sous son titre et jusqu'au titre suivant
+// de la même colonne ; un match est une paire de noms consécutifs de cette zone ; son vainqueur, son
+// score et son horaire se trouvent entre les deux lignes, le vainqueur dans la colonne de noms suivante.
+function tableauMatches(grid, { allowPartial = false } = {}) {
+  const cells = grid.flatMap((row, r) => row.map((c) => ({ ...c, row: r })));
+  const titles = cells.filter((c) => c.role === 'title');
+  const kept = titles
+    .map((t) => ({ ...t, round: bracketOf(t.text) }))
+    .filter((t) => t.round)
+    .map((t) => {
+      const below = titles.filter((x) => x.col === t.col && x.row > t.row).map((x) => x.row);
+      return { ...t, until: below.length ? Math.min(...below) : Infinity };
+    });
+  if (!kept.length) return { matches: [], rounds: [], places: new Map() }; // page de tableaux de classement seulement
+  const inZone = (z) => (c) => c.row > z.row && c.row < z.until;
+  const fencersIn = (z, col) => cells.filter((c) => c.role === 'fencer' && c.col === col && inZone(z)(c));
+  // Épreuves internationales : aux tours suivants, engarde ajoute la nation au nom (« MONTI Lucrezia ITA »).
+  // Le nom est ramené à celui de la colonne d'entrée du premier tour quand il n'y a aucune ambiguïté.
+  // Colonne d'entrée des épreuves internationales par équipes : « ITALY ITA » à côté de la nation « ITA ».
+  for (const c of cells)
+    if (c.role === 'fencer' && c.text) {
+      const club = grid[c.row].find((x) => x.col === c.col + 1 && x.role === 'club')?.text;
+      if (club && c.text.endsWith(` ${club}`)) c.text = c.text.slice(0, -club.length - 1);
+    }
+  const main = kept.filter((t) => t.round !== 'Bronze').sort((x, y) => y.round.slice(1) - x.round.slice(1));
+  const entry = main[0] || kept[0];
+  const firstColumn = new Set(
+    fencersIn(entry, entry.col)
+      .map((c) => c.text)
+      .filter(Boolean),
+  );
+  for (const c of cells)
+    if (c.role === 'fencer' && c.text && !firstColumn.has(c.text)) {
+      const bare = c.text.replace(/\s+[A-Z]{3}$/, '');
+      if (bare !== c.text && firstColumn.has(bare)) c.text = bare;
+    }
+  const clubs = new Map(); // nom → club (colonne d'entrée)
+  for (const c of cells.filter((c) => c.role === 'fencer')) {
+    const club = grid[c.row].find((x) => x.col === c.col + 1 && x.role === 'club');
+    if (club && c.text) clubs.set(c.text, club.text);
+  }
+  // Têtes de série de la colonne d'entrée du tableau principal, après normalisation des nations.
+  // Les positions des tableaux de classement et de la petite finale ne sont pas des classements d'entrée.
+  const places = new Map();
+  if (main.length)
+    for (const c of fencersIn(entry, entry.col).filter((c) => c.text)) {
+      const place = Number(grid[c.row].find((x) => x.col === c.col - 1 && x.role === 'place')?.text);
+      if (Number.isSafeInteger(place) && place > 0) places.set(c.text, place);
+    }
+  const matches = [];
+  const rounds = [];
+  const issues = [];
+  for (const zone of kept) {
+    const { round, col } = zone;
+    const entrants = fencersIn(zone, col);
+    if (entrants.length % 2) fail(`Tour ${round} incomplet.`);
+    const next = cells
+      .filter((c) => c.role === 'fencer' && c.col > col && inZone(zone)(c))
+      .reduce((m, c) => Math.min(m, c.col), Infinity);
+    let real = 0;
+    for (let i = 0; i < entrants.length; i += 2) {
+      const [a, b] = [entrants[i], entrants[i + 1]];
+      const between = (c) => c.row >= a.row && c.row <= b.row;
+      const position = i / 2 + 1;
+      if (!a.text || !b.text) continue; // exemption : pas de match
+      real++;
+      const winnerCell = cells.find((c) => c.col === next && c.role === 'fencer' && between(c));
+      const scoreCell = cells.find((c) => c.col === next && c.role === 'score' && between(c));
+      const timeCell = cells.find((c) => c.role === 'time' && c.col === col && c.row > a.row && c.row < b.row);
+      const { time, strip } = timeAndStrip(timeCell?.text || '');
+      // « 45/20 >> » : lien vers la feuille de match des épreuves par équipes.
+      const scoreText = (scoreCell?.text || '').replace(/\s*>>\s*$/, '');
+      let winner = null,
+        score1 = null,
+        score2 = null,
+        withdrawal = false,
+        isFinished = false;
+      try {
+        if (winnerCell?.text) {
+          winner =
+            winnerCell.text === a.text ? 1 : winnerCell.text === b.text ? 2 : fail(`Vainqueur incohérent au ${round}.`);
+          const s = /^(\d{1,2})\s*\/\s*(\d{1,2})$/.exec(scoreText);
+          if (s) {
+            const [w, l] = [Number(s[1]), Number(s[2])];
+            [score1, score2] = winner === 1 ? [w, l] : [l, w];
+            isFinished = true;
+          } else if (WITHDRAWAL.test(scoreText)) {
+            withdrawal = true; // abandon, forfait ou exclusion de l'adversaire : qualifié sans score
+            isFinished = true;
+          } else if (allowPartial) fail('Avancement officiel sans score final exploitable.');
+        } else if (scoreText && allowPartial) fail('Score publié sans vainqueur confirmé.');
+        if (allowPartial && isFinished && !withdrawal && Math.max(score1, score2) !== (winner === 1 ? score1 : score2))
+          fail('Score final incohérent.');
+        matches.push({
+          sourceKey: `${round}:${position}`,
+          round,
+          player1: a.text,
+          player2: b.text,
+          club1: clubs.get(a.text) || null,
+          club2: clubs.get(b.text) || null,
+          time,
+          strip,
+          winner: isFinished ? winner : null,
+          score1,
+          score2,
+          resultType: isFinished ? (withdrawal ? 'MEDICAL_WITHDRAWAL' : 'NORMAL') : null,
+          isFinished,
+        });
+      } catch (error) {
+        if (!allowPartial || !(error instanceof EngardeError)) throw error;
+        const sourceKey = `${round}:${position}`;
+        const message = `${round} · match ${position} : ${error.message}`;
+        issues.push({ sourceKey, round, message });
+        const confirmedWinner = winnerCell?.text === a.text ? 1 : winnerCell?.text === b.text ? 2 : null;
+        matches.push({
+          sourceKey,
+          round,
+          player1: a.text,
+          player2: b.text,
+          club1: clubs.get(a.text),
+          club2: clubs.get(b.text),
+          time,
+          strip,
+          winner: confirmedWinner,
+          score1: null,
+          score2: null,
+          isFinished: false,
+          pointsPending: true,
+          syncIssue: message,
+        });
+      }
+    }
+    rounds.push({
+      round,
+      size: round === 'Bronze' ? 0 : Number(round.slice(1)),
+      expectedMatchCount: real,
+      previousRound: null,
+    });
+  }
+  return { matches, rounds, places, issues };
+}
+
+// Plusieurs pages de tableau (T128-32, T16…) : réunies par tour, sans doublon.
+function parseTableaus(pages, options = {}) {
+  const byKey = new Map(),
+    rounds = new Map(),
+    pageSeeds = [];
+  const issues = [];
+  for (const [pageIndex, html] of pages.entries()) {
+    try {
+      const { matches, rounds: found, places, issues: pageIssues = [] } = tableauMatches(tableauGrid(html), options);
+      issues.push(...pageIssues);
+      for (const m of matches) byKey.set(m.sourceKey, m);
+      for (const r of found) rounds.set(r.round, r);
+      pageSeeds.push({ size: Math.max(0, ...found.map((r) => r.size)), places });
+    } catch (error) {
+      if (!options.allowPartial || !(error instanceof EngardeError)) throw error;
+      issues.push({ message: `Page de tableau ${pageIndex + 1} : ${error.message}` });
+    }
+  }
+  // Le plus grand tableau publié fait référence ; les pages suivantes peuvent renuméroter les qualifiés.
+  const seeds = new Map();
+  for (const { places } of pageSeeds.sort((a, b) => b.size - a.size))
+    for (const [name, place] of places) if (!seeds.has(name)) seeds.set(name, place);
+  // Tours principaux du plus grand à la finale ; le match pour la 3e place suit les demi-finales.
+  const ordered = [...rounds.values()].filter((r) => r.round !== 'Bronze').sort((a, b) => b.size - a.size);
+  ordered.forEach((r, i) => (r.previousRound = i ? ordered[i - 1].round : null));
+  const bronze = rounds.get('Bronze');
+  if (bronze) ordered.push({ ...bronze, previousRound: 'T4' });
+  const matches = [...byKey.values()].map((m) => ({
+    ...m,
+    seed1: seeds.get(m.player1) ?? null,
+    seed2: seeds.get(m.player2) ?? null,
+  }));
+  return { matches, rounds: ordered, ...(issues.length ? { issues } : {}) };
+}
+
+module.exports = {
+  clean,
+  ORIGIN,
+  EngardeError,
+  parseLink,
+  competitionsRequest,
+  parseCompetitions,
+  parseTournamentTitle,
+  competitionPages,
+  parseRoster,
+  rosterCheckedIn,
+  parsePools,
+  parseFinalRanking,
+  tableauGrid,
+  tableauMatches,
+  parseTableaus,
+  timeAndStrip,
+  publishedAt,
+  entryId,
+};

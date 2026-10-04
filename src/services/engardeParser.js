@@ -510,7 +510,7 @@ function bracketOf(title) {
 // Matchs d'une grille. Chaque tour occupe une colonne de noms, sous son titre et jusqu'au titre suivant
 // de la même colonne ; un match est une paire de noms consécutifs de cette zone ; son vainqueur, son
 // score et son horaire se trouvent entre les deux lignes, le vainqueur dans la colonne de noms suivante.
-function tableauMatches(grid) {
+function tableauMatches(grid, { allowPartial = false } = {}) {
   const cells = grid.flatMap((row, r) => row.map((c) => ({ ...c, row: r })));
   const titles = cells.filter((c) => c.role === 'title');
   const kept = titles
@@ -558,6 +558,7 @@ function tableauMatches(grid) {
     }
   const matches = [];
   const rounds = [];
+  const issues = [];
   for (const zone of kept) {
     const { round, col } = zone;
     const entrants = fencersIn(zone, col);
@@ -583,34 +584,60 @@ function tableauMatches(grid) {
         score2 = null,
         withdrawal = false,
         isFinished = false;
-      if (winnerCell?.text) {
-        winner =
-          winnerCell.text === a.text ? 1 : winnerCell.text === b.text ? 2 : fail(`Vainqueur incohérent au ${round}.`);
-        const s = /^(\d{1,2})\s*\/\s*(\d{1,2})$/.exec(scoreText);
-        if (s) {
-          const [w, l] = [Number(s[1]), Number(s[2])];
-          [score1, score2] = winner === 1 ? [w, l] : [l, w];
-          isFinished = true;
-        } else if (WITHDRAWAL.test(scoreText)) {
-          withdrawal = true; // abandon, forfait ou exclusion de l'adversaire : qualifié sans score
-          isFinished = true;
-        }
+      try {
+        if (winnerCell?.text) {
+          winner =
+            winnerCell.text === a.text ? 1 : winnerCell.text === b.text ? 2 : fail(`Vainqueur incohérent au ${round}.`);
+          const s = /^(\d{1,2})\s*\/\s*(\d{1,2})$/.exec(scoreText);
+          if (s) {
+            const [w, l] = [Number(s[1]), Number(s[2])];
+            [score1, score2] = winner === 1 ? [w, l] : [l, w];
+            isFinished = true;
+          } else if (WITHDRAWAL.test(scoreText)) {
+            withdrawal = true; // abandon, forfait ou exclusion de l'adversaire : qualifié sans score
+            isFinished = true;
+          } else if (allowPartial) fail('Avancement officiel sans score final exploitable.');
+        } else if (scoreText && allowPartial) fail('Score publié sans vainqueur confirmé.');
+        if (allowPartial && isFinished && !withdrawal && Math.max(score1, score2) !== (winner === 1 ? score1 : score2))
+          fail('Score final incohérent.');
+        matches.push({
+          sourceKey: `${round}:${position}`,
+          round,
+          player1: a.text,
+          player2: b.text,
+          club1: clubs.get(a.text) || null,
+          club2: clubs.get(b.text) || null,
+          time,
+          strip,
+          winner: isFinished ? winner : null,
+          score1,
+          score2,
+          resultType: isFinished ? (withdrawal ? 'MEDICAL_WITHDRAWAL' : 'NORMAL') : null,
+          isFinished,
+        });
+      } catch (error) {
+        if (!allowPartial || !(error instanceof EngardeError)) throw error;
+        const sourceKey = `${round}:${position}`;
+        const message = `${round} · match ${position} : ${error.message}`;
+        issues.push({ sourceKey, round, message });
+        const confirmedWinner = winnerCell?.text === a.text ? 1 : winnerCell?.text === b.text ? 2 : null;
+        matches.push({
+          sourceKey,
+          round,
+          player1: a.text,
+          player2: b.text,
+          club1: clubs.get(a.text),
+          club2: clubs.get(b.text),
+          time,
+          strip,
+          winner: confirmedWinner,
+          score1: null,
+          score2: null,
+          isFinished: false,
+          pointsPending: true,
+          syncIssue: message,
+        });
       }
-      matches.push({
-        sourceKey: `${round}:${position}`,
-        round,
-        player1: a.text,
-        player2: b.text,
-        club1: clubs.get(a.text) || null,
-        club2: clubs.get(b.text) || null,
-        time,
-        strip,
-        winner: isFinished ? winner : null,
-        score1,
-        score2,
-        resultType: isFinished ? (withdrawal ? 'MEDICAL_WITHDRAWAL' : 'NORMAL') : null,
-        isFinished,
-      });
     }
     rounds.push({
       round,
@@ -619,19 +646,26 @@ function tableauMatches(grid) {
       previousRound: null,
     });
   }
-  return { matches, rounds, places };
+  return { matches, rounds, places, issues };
 }
 
 // Plusieurs pages de tableau (T128-32, T16…) : réunies par tour, sans doublon.
-function parseTableaus(pages) {
+function parseTableaus(pages, options = {}) {
   const byKey = new Map(),
     rounds = new Map(),
     pageSeeds = [];
-  for (const html of pages) {
-    const { matches, rounds: found, places } = tableauMatches(tableauGrid(html));
-    for (const m of matches) byKey.set(m.sourceKey, m);
-    for (const r of found) rounds.set(r.round, r);
-    pageSeeds.push({ size: Math.max(0, ...found.map((r) => r.size)), places });
+  const issues = [];
+  for (const [pageIndex, html] of pages.entries()) {
+    try {
+      const { matches, rounds: found, places, issues: pageIssues = [] } = tableauMatches(tableauGrid(html), options);
+      issues.push(...pageIssues);
+      for (const m of matches) byKey.set(m.sourceKey, m);
+      for (const r of found) rounds.set(r.round, r);
+      pageSeeds.push({ size: Math.max(0, ...found.map((r) => r.size)), places });
+    } catch (error) {
+      if (!options.allowPartial || !(error instanceof EngardeError)) throw error;
+      issues.push({ message: `Page de tableau ${pageIndex + 1} : ${error.message}` });
+    }
   }
   // Le plus grand tableau publié fait référence ; les pages suivantes peuvent renuméroter les qualifiés.
   const seeds = new Map();
@@ -647,7 +681,7 @@ function parseTableaus(pages) {
     seed1: seeds.get(m.player1) ?? null,
     seed2: seeds.get(m.player2) ?? null,
   }));
-  return { matches, rounds: ordered };
+  return { matches, rounds: ordered, ...(issues.length ? { issues } : {}) };
 }
 
 module.exports = {

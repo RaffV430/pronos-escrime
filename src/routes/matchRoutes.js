@@ -364,6 +364,10 @@ router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (re
           where: { id },
           data: {
             winner,
+            pointsPending: false,
+            manualResultConfirmed: true,
+            syncIssue: null,
+            progressionConfirmedAt: current.progressionConfirmedAt || current.resultRegisteredAt || new Date(),
             resultType: 'MEDICAL_WITHDRAWAL',
             score1: null,
             score2: null,
@@ -430,7 +434,19 @@ router.put('/:id/result', authMiddleware, adminMiddleware, async (req, res) => {
         const winner = score1 > score2 ? 1 : 2;
         const match = await tx.match.update({
           where: { id },
-          data: { score1, score2, winner, resultType: 'NORMAL', isFinished: true, isLocked: true, manualUnlock: false },
+          data: {
+            score1,
+            score2,
+            winner,
+            resultType: 'NORMAL',
+            pointsPending: false,
+            manualResultConfirmed: true,
+            syncIssue: null,
+            progressionConfirmedAt: current.progressionConfirmedAt || current.resultRegisteredAt || new Date(),
+            isFinished: true,
+            isLocked: true,
+            manualUnlock: false,
+          },
         });
         const predictions = await tx.prediction.findMany({ where: { matchId: id } });
         await rescore(tx.prediction, { matchId: id }, predictions, ['predictedScore1', 'predictedScore2'], (p) =>

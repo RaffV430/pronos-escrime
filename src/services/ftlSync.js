@@ -44,16 +44,25 @@ async function poolMatrices($, url, client) {
   )
     throw failure('Matrices de poules non encore publiées.');
   const fragments = new Array(ids.length);
+  const fragmentIssues = [];
   let next = 0;
   await Promise.all(
     Array.from({ length: Math.min(4, ids.length) }, async () => {
       while (next < ids.length) {
         const i = next++;
-        fragments[i] = await client.get(`${url}/${ids[i]}?dbut=true`);
+        try {
+          fragments[i] = await client.get(`${url}/${ids[i]}?dbut=true`);
+        } catch (error) {
+          if (!error.status) throw error;
+          fragments[i] = '';
+          fragmentIssues.push('Une matrice de poule est indisponible ; les autres poules restent suivies.');
+        }
       }
     }),
   );
-  return load(fragments.map((html, i) => `<div id="pool_${ids[i]}">${html}</div>`).join(''));
+  const matrices = load(fragments.map((html, i) => `<div id="pool_${ids[i]}">${html}</div>`).join(''));
+  matrices.fragmentIssues = fragmentIssues;
+  return matrices;
 }
 function podiumFromResults(rows, c, matches) {
   if (!Array.isArray(rows)) throw failure('Classement officiel non reconnu.');
@@ -124,7 +133,8 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
   if (main.length !== 1 || bronzes.length > 1 || (c.podiumFormat === 'TEAM' && bronzes.length !== 1))
     throw failure('Tableau principal ou petite finale non identifiable.');
   let matches = [],
-    rounds = [];
+    rounds = [],
+    issues = [];
   // La petite finale renumérote ses deux équipes 1 et 2 : garder les têtes de série du tableau principal.
   const entrySeeds = new Map();
   for (const t of [...main, ...(c.podiumFormat === 'TEAM' ? bronzes : [])]) {
@@ -137,15 +147,17 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
       maxScore: c.podiumFormat === 'TEAM' ? 45 : 15,
       bronze: t !== main[0],
       entrySeeds,
+      allowPartial: true,
     });
     matches.push(...parsed.matches);
     rounds.push(...parsed.rounds);
+    issues.push(...(parsed.issues || []));
   }
   validateManifest(rounds);
   if (new Set(matches.map((m) => m.sourceKey)).size !== matches.length) throw failure('Clés de rencontres dupliquées.');
   let officialPodium = null,
     resultsSourceUrl = null;
-  const warnings = [];
+  const warnings = issues.map((i) => i.message);
   if (
     matches.some((m) => m.round === 'T2' && m.isFinished) &&
     (c.podiumFormat !== 'TEAM' || matches.some((m) => m.round === 'Bronze' && m.isFinished))
@@ -173,7 +185,7 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
       warnings.push(e.status ? e.message : 'Podium non vérifiable pour le moment.');
     }
   }
-  return { sourceUrl, matches, rounds, officialPodium, resultsSourceUrl, warnings, checkedAt: new Date() };
+  return { sourceUrl, matches, rounds, officialPodium, resultsSourceUrl, warnings, issues, checkedAt: new Date() };
 }
 function planMatches(existing, observation, { allowPartial = false } = {}) {
   existing = existing.filter((m) => m.resultType !== 'CANCELLED');
@@ -210,7 +222,7 @@ function planMatches(existing, observation, { allowPartial = false } = {}) {
             `Match #${current.id} : adversaires ou source du tableau officiel modifiés. Pronostics conservés en attente de vérification.`,
             m,
           );
-        if (current.isFinished && !m.isFinished)
+        if (current.isFinished && !m.isFinished && !m.pointsPending)
           return conflict(
             current,
             `Le résultat du match #${current.id} a été retiré de la source. Vérification requise.`,
@@ -227,6 +239,7 @@ function planMatches(existing, observation, { allowPartial = false } = {}) {
 }
 function cancellable(m, observation) {
   return (
+    !observation.issues?.length &&
     !m.isFinished &&
     m.sourceUrl === observation.sourceUrl &&
     !observation.matches.some((o) => o.round === m.round && pairKey(o) === pairKey(m))
@@ -299,8 +312,7 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
     }
   }
   const oldRounds = await tx.matchRound.findMany({ where: { competitionId: c.id } });
-  if (oldRounds.some((r) => !observation.rounds.some((n) => n.round === r.round)))
-    throw failure('Un tour enregistré a disparu du tableau.', 409);
+  const missingRounds = oldRounds.filter((r) => !observation.rounds.some((n) => n.round === r.round));
   const summary = {
     cancelledIds: cancelled,
     cancelled: cancelled.length,
@@ -312,20 +324,39 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
     podium: false,
     checked: plan.length,
     checkedAt: observation.checkedAt.toISOString(),
-    warnings: [...observation.warnings],
+    warnings: [
+      ...observation.warnings,
+      ...missingRounds.map((r) => `${r.round} : tour absent de la lecture officielle, conservé pour vérification.`),
+    ],
     conflicts: plan.conflicts,
   };
   for (const issue of plan.conflicts) {
     // No score, opponent, prediction, key or freshness changes on an ambiguous match.
-    await tx.match.update({ where: { id: issue.id }, data: { syncIssue: issue.message } });
+    await tx.match.update({ where: { id: issue.id }, data: { syncIssue: issue.message, pointsPending: true } });
+    const predictions = await tx.prediction.findMany({ where: { matchId: issue.id } });
+    for (const field of ['pointsEarned', 'bonusPoints'])
+      summary.pointsUpdated += await rescore(
+        tx.prediction,
+        { matchId: issue.id },
+        predictions,
+        ['predictedScore1', 'predictedScore2'],
+        () => 0,
+        field,
+      );
     summary.warnings.push(issue.message);
   }
-  for (const r of observation.rounds)
+  for (const observedRound of observation.rounds) {
+    const old = oldRounds.find((r) => r.round === observedRound.round);
+    const r =
+      missingRounds.length && old
+        ? { ...observedRound, previousRound: old.previousRound, expectedMatchCount: old.expectedMatchCount }
+        : observedRound;
     await tx.matchRound.upsert({
       where: { competitionId_round: { competitionId: c.id, round: r.round } },
       create: { competitionId: c.id, ...r, sourceUrl: observation.sourceUrl, verifiedAt: observation.checkedAt },
       update: { ...r, sourceUrl: observation.sourceUrl, verifiedAt: observation.checkedAt },
     });
+  }
   // Match clos faute d'horaire (10 min après le tour précédent) dont FTL publie maintenant une heure
   // encore à venir : la saisie se rouvre d'elle-même jusqu'à cette heure ; on le note pour prévenir
   // les joueurs (une fois par match, seulement s'il reste plus de 5 minutes).
@@ -333,7 +364,20 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
   const reopened = late.length
     ? reopenedByPublishedTime(late, await require('./roundTiming').timedMatches(tx, existing))
     : [];
-  for (const { current: m, observed: o } of plan) {
+  for (const { current: m, observed: raw } of plan) {
+    const o =
+      raw.pointsPending && m?.manualResultConfirmed && (!raw.winner || raw.winner === m.winner)
+        ? {
+            ...raw,
+            pointsPending: false,
+            syncIssue: null,
+            isFinished: true,
+            score1: m.score1,
+            score2: m.score2,
+            winner: m.winner,
+            resultType: m.resultType,
+          }
+        : raw;
     const wasFinished = m?.isFinished;
     // Legacy scored finals may lack an explicit winner/type; filling those is not a score correction.
     const previousWinner =
@@ -353,13 +397,23 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       sourceUrl: observation.sourceUrl,
       sourceKey: o.sourceKey,
       round: o.round,
-      syncIssue: null,
-      sourceCheckedAt: observation.checkedAt,
+      syncIssue: o.syncIssue || null,
+      pointsPending: Boolean(o.pointsPending),
+      manualResultConfirmed: Boolean(raw.pointsPending && m?.manualResultConfirmed && !o.pointsPending),
+      ...(o.isFinished || (o.pointsPending && [1, 2].includes(o.winner))
+        ? { progressionConfirmedAt: m?.progressionConfirmedAt || m?.resultRegisteredAt || observation.checkedAt }
+        : {}),
+      ...(!raw.pointsPending ? { sourceCheckedAt: observation.checkedAt } : {}),
       ...(o.startsAt ? { startsAt: o.startsAt } : {}),
       ...(o.strip ? { strip: o.strip } : {}),
       ...(o.seed1 ? { seed1: o.seed1 } : {}),
       ...(o.seed2 ? { seed2: o.seed2 } : {}),
     };
+    if (o.pointsPending) {
+      Object.assign(data, { isLocked: true, manualUnlock: false });
+      if ([1, 2].includes(o.winner)) data.winner = o.winner;
+      summary.warnings.push(o.syncIssue);
+    }
     if (o.isFinished)
       Object.assign(data, {
         score1: o.score1,
@@ -379,7 +433,19 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184725)`;
       await tx.pushEvent.create({ data: { matchId: saved.id, competitionId: c.id } });
     }
-    if (o.isFinished) {
+    if (o.pointsPending) {
+      const predictions = await tx.prediction.findMany({ where: { matchId: saved.id } });
+      for (const field of ['pointsEarned', 'bonusPoints'])
+        summary.pointsUpdated += await rescore(
+          tx.prediction,
+          { matchId: saved.id },
+          predictions,
+          ['predictedScore1', 'predictedScore2'],
+          () => 0,
+          field,
+        );
+    }
+    if (o.isFinished && !o.pointsPending) {
       if (!wasFinished) summary.results++;
       else if (corrected) summary.corrections++;
       const predictions = await tx.prediction.findMany({ where: { matchId: saved.id } });
@@ -485,6 +551,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
       for (const source of context.sources) if (!urls.includes(source)) urls.push(source);
       const $ = await poolMatrices(page, url, client),
         tables = $('table.poolTable').toArray();
+      summary.warnings.push(...($.fragmentIssues || []));
       if (!tables.length) throw failure('Matrices de poules non encore publiées.');
       const poolNumbers = tables.map((t) => clean($(t).parent().find('.poolNum').text()));
       if (new Set(poolNumbers).size !== poolNumbers.length) throw failure('Numéros de poules ambigus.');
@@ -495,7 +562,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
       } catch {
         observedAll = null; // l'import poule par poule ci-dessous signalera la poule illisible.
       }
-      if (observedAll) {
+      if (observedAll && !$.fragmentIssues?.length) {
         for (const o of observedAll)
           try {
             o.startsAt =
