@@ -81,3 +81,21 @@ test('forfait d’une équipe au tableau (« DNS ») : qualifiée sans score', (
   const m = E.parseTableaus([dns]).matches.find((x) => x.sourceKey === 'T16:1');
   assert.deepEqual([m.winner, m.isFinished, m.resultType], [1, true, 'MEDICAL_WITHDRAWAL']);
 });
+
+test('épreuve internationale par équipes : nation accolée au nom dans la colonne d’entrée', () => {
+  const { matches } = E.parseTableaus([fixture('equipes-fheq-tableau16.html')]);
+  const pick = (k) => matches.find((m) => m.sourceKey === k || m.round === k);
+  const t = (m) => [m.player1, m.player2, m.score1, m.score2, m.winner];
+  assert.deepEqual(t(pick('T16:1')), ['ITALY', 'SPAIN', 45, 15, 1]);
+  const final = pick('T2');
+  assert.deepEqual(
+    [final.winner === 1 ? final.player1 : final.player2, [final.score1, final.score2].sort().join('-')],
+    ['ITALY', '44-45'],
+  );
+  const bronze = pick('Bronze');
+  assert.deepEqual(
+    [bronze.winner === 1 ? bronze.player1 : bronze.player2, [bronze.score1, bronze.score2].sort().join('-')],
+    ['USA', '33-45'],
+  );
+  assert.ok(matches.every((m) => !/ [A-Z]{3}$/.test(m.player1 || '') || m.player1 === 'USA'));
+});

@@ -525,6 +525,12 @@ function tableauMatches(grid) {
   const fencersIn = (z, col) => cells.filter((c) => c.role === 'fencer' && c.col === col && inZone(z)(c));
   // Épreuves internationales : aux tours suivants, engarde ajoute la nation au nom (« MONTI Lucrezia ITA »).
   // Le nom est ramené à celui de la colonne d'entrée du premier tour quand il n'y a aucune ambiguïté.
+  // Colonne d'entrée des épreuves internationales par équipes : « ITALY ITA » à côté de la nation « ITA ».
+  for (const c of cells)
+    if (c.role === 'fencer' && c.text) {
+      const club = grid[c.row].find((x) => x.col === c.col + 1 && x.role === 'club')?.text;
+      if (club && c.text.endsWith(` ${club}`)) c.text = c.text.slice(0, -club.length - 1);
+    }
   const main = kept.filter((t) => t.round !== 'Bronze').sort((x, y) => y.round.slice(1) - x.round.slice(1));
   const entry = main[0] || kept[0];
   const firstColumn = new Set(
