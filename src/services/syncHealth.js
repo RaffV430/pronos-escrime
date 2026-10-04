@@ -169,6 +169,76 @@ async function alertClosedWithoutTime(db, competition, deps = {}) {
   }
 }
 
+// Import bloqué sans panne (poule ou tableau refusés, avertissements) pendant l'épreuve : alerte des
+// administrateurs dès le 2e contrôle d'affilée avec les mêmes avertissements, une fois par série ;
+// puis « rétabli » quand plus rien n'est signalé.
+const ATTENTION_ACTION = 'Alerte suivi à vérifier';
+const RECOVERED_ACTION = 'Alerte suivi à vérifier rétabli';
+const signatureOf = (warnings) => [...new Set(warnings || [])].sort().join(' | ').slice(0, 1500);
+async function alertAttention(db, { competitionId, previousStatus, warnings, duringEvent }, deps = {}) {
+  try {
+    const last = await db.auditLog.findFirst({
+      where: {
+        targetType: 'Competition',
+        targetId: competitionId,
+        action: { in: [ATTENTION_ACTION, RECOVERED_ACTION] },
+      },
+      orderBy: { id: 'desc' },
+    });
+    const open = last?.action === ATTENTION_ACTION;
+    const competition = await db.competition.findUnique({
+      where: { id: competitionId },
+      select: { name: true, tournamentId: true },
+    });
+    const name = competition?.name || `épreuve ${competitionId}`;
+    if (!warnings?.length) {
+      if (!open) return null;
+      const entry = await db.auditLog.create({
+        data: { actorId: 0, action: RECOVERED_ACTION, targetType: 'Competition', targetId: competitionId },
+      });
+      const sent = await notifyAdmins(
+        db,
+        {
+          title: `Suivi rétabli · ${name}`,
+          body: 'Plus aucun avertissement : l’import reprend normalement.',
+          tag: `attention-${competitionId}`,
+          url: '/?admin=sync',
+        },
+        deps,
+      );
+      await logResult(db, entry, sent);
+      return { kind: 'recovered', ...sent };
+    }
+    const signature = signatureOf(warnings);
+    if (!duringEvent || previousStatus !== 'ATTENTION' || (open && last.after?.signature === signature)) return null;
+    const entry = await db.auditLog.create({
+      data: {
+        actorId: 0,
+        action: ATTENTION_ACTION,
+        targetType: 'Competition',
+        targetId: competitionId,
+        after: { signature },
+      },
+    });
+    const list = [...new Set(warnings)].slice(0, 4).join(' · ');
+    const sent = await notifyAdmins(
+      db,
+      {
+        title: `Import à vérifier · ${name}`,
+        body: `Deux contrôles d'affilée signalent : ${list}. Voir Administration → Suivi.`,
+        tag: `attention-${competitionId}`,
+        url: competition ? `/?tournament=${competition.tournamentId}&event=${competitionId}` : '/?admin=sync',
+      },
+      deps,
+    );
+    await logResult(db, entry, { signature, ...sent });
+    return { kind: 'attention', ...sent };
+  } catch (e) {
+    reportError(e, 'alerte import à vérifier');
+    return null;
+  }
+}
+
 // Appelé après chaque contrôle. N'alerte qu'au passage du seuil (pas à chaque échec) et au rétablissement.
 async function alertAdmins(db, { competitionId, failures, previousFailures, error }, deps = {}) {
   const crossed = failures === ALERT_AFTER;
@@ -211,4 +281,6 @@ module.exports = {
   alertClosedWithoutTime,
   ALERT_AFTER,
   NO_TIME_ACTION,
+  alertAttention,
+  ATTENTION_ACTION,
 };
