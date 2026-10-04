@@ -34,10 +34,11 @@ function planRecomposition(pools, url, observed, roster = []) {
     else plan.changed.push({ pool: p, observed: o });
   }
   if (!plan.reordered.length && !plan.changed.length && !plan.added.length && !plan.removed.length) return null;
-  // Une poule commencée n'est jamais réécrite automatiquement.
+  // Une poule commencée dans l'application (résultats déjà importés) n'est jamais réécrite automatiquement.
+  // Une poule enregistrée sans aucun résultat peut l'être, même si la poule officielle a commencé : elle
+  // n'a jamais eu lieu dans cette composition (tirage refait après forfaits), ses pronostics sont à refaire.
   const touched = [...plan.changed.map((x) => x.pool), ...plan.reordered.map((x) => x.pool), ...plan.removed];
-  const incoming = [...plan.changed.map((x) => x.observed), ...plan.added, ...plan.reordered.map((x) => x.observed)];
-  if (touched.some(started) || incoming.some((o) => o.rows.some((r) => r.firstResult || r.hasResult)))
+  if (touched.some(started))
     throw failure('Composition des poules modifiée après leur début : vérification manuelle nécessaire.', 409);
   for (const o of [...plan.changed.map((x) => x.observed), ...plan.added])
     for (const r of o.rows)

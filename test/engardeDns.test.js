@@ -44,3 +44,9 @@ test('engarde : une poule illisible est signalée seule, les autres sont import�
   assert.equal(pools[0].error, undefined);
   assert.match(pools[1].error, /poule 4/);
 });
+
+test('engarde : apostrophe doublée ramenée à une seule', () => {
+  const renamed = grid.map((r, i) => (i === 1 ? ["ROSSI Nicolo''", 'ITA', r[2], r[3]] : r));
+  const [p] = E.parsePools(pool(33, renamed));
+  assert.equal(p.rows[1].name, "ROSSI Nicolo'");
+});
