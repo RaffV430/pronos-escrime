@@ -23,3 +23,13 @@ test('engarde : nation accolée au nom des qualifiés, vainqueurs et tours suiva
   );
   assert.equal(intl.matches.find((m) => m.round === 'T2').player1, 'BOLORE Mélisande');
 });
+
+test('engarde : « DNF » à la place du score = qualifié sur abandon', () => {
+  const dnf = html.replace('<td class="D score">15/10</td>', '<td class="D score">DNF</td>');
+  assert.notEqual(dnf, html);
+  const m = E.parseTableaus([dnf]).matches.find((x) => x.round === 'T8' && x.sourceKey === 'T8:1');
+  assert.deepEqual(
+    [m.winner, m.isFinished, m.resultType, m.score1, m.score2],
+    [1, true, 'MEDICAL_WITHDRAWAL', null, null],
+  );
+});
