@@ -569,6 +569,15 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           );
           summary.checked++;
           for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
+          // Forfait ou abandon médical en poule : alerte aux joueurs qui ont ce tireur sur leur podium.
+          for (const r of observed.rows.filter((x) => x.absent)) {
+            const hits = (c.podiumRoster || []).filter((e) => norm(e.name) === norm(r.name));
+            if (hits.length === 1)
+              summary.outs = [
+                ...(summary.outs || []),
+                { id: hits[0].id, status: r.status === 'Medical Withdrawal' ? 'ABANDON' : 'DNS' },
+              ];
+          }
           if (observed.ambiguous)
             summary.warnings.push(
               `Poule ${observed.number} : score réciproque manquant ; tireurs concernés verrouillés, bilan incomplet non inventé.`,
@@ -581,6 +590,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
       summary.warnings.push(e.status ? e.message : 'Source de poules temporairement indisponible.');
     }
   }
+  if (summary.outs?.length) await require('./podiumAlerts').alertPodiumOut(db, c, summary.outs);
   return summary;
 }
 async function syncCompetition(db, competitionId, actorId, client = createClient(), { automatic = false } = {}) {

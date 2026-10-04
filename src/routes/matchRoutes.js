@@ -18,8 +18,17 @@ router.get('/freshness/:competitionId', authMiddleware, async (req, res) => {
     return res.status(400).json({ error: 'Épreuve invalide.' });
   try {
     const state = await prisma.ftlSyncState.findUnique({ where: { competitionId } });
+    // Dernière publication lue sur le site officiel (pied de page engarde), quand elle est connue.
+    const last = await prisma.auditLog
+      .findFirst({
+        where: { action: 'Contrôle FTL terminé', targetType: 'Competition', targetId: competitionId },
+        orderBy: { id: 'desc' },
+        select: { after: true },
+      })
+      .catch(() => null);
     res.json({
       ...require('../services/playerExperience').freshness(state),
+      publishedAt: last?.after?.publishedAt || null,
       automatic: require('../services/ftlScheduler').enabled(),
     });
   } catch {

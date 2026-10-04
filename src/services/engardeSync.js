@@ -316,7 +316,18 @@ async function observeTableau(c, config, pages, client, prev = null) {
 
 // Partie propre à engarde-service d'un contrôle ; la suite (résumé, classements, rythme) est commune.
 async function control(db, c, config, actorId, claim, client) {
-  client ||= createEngardeClient();
+  const source = client || createEngardeClient();
+  // Heure de publication la plus récente lue en pied des pages consultées (affichée aux joueurs).
+  let publishedAt = null;
+  client = {
+    ...source,
+    get: async (url) => {
+      const html = await source.get(url);
+      const at = E.publishedAt(html, config.timezone);
+      if (at && (!publishedAt || at > publishedAt)) publishedAt = at;
+      return html;
+    },
+  };
   const { planMatches, applyObservation, cancellable, drawSignature } = require('./ftlSync');
   const notes = [];
   const pages = E.competitionPages(await client.get(config.eventSourceUrl), linkOf(config));
@@ -397,6 +408,7 @@ async function control(db, c, config, actorId, claim, client) {
     }
   } else notes.push('Tableau pas encore publié. Il sera recherché au prochain contrôle.');
   if (notes.length) summary.notes = [...(summary.notes || []), ...notes];
+  if (publishedAt) summary.publishedAt = publishedAt.toISOString();
   return { c, poolSummary, summary };
 }
 
