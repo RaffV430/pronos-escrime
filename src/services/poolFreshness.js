@@ -60,7 +60,7 @@ function observe(sourceUrl, { client, now = Date.now(), read = readSource } = {}
 // true : le tireur a commencé sur FTL (saisie à refuser) ; false : rien de publié ;
 // null : contrôle inutile ou impossible (on applique alors la règle habituelle).
 async function startedOnSource(pool, fencer, { now = new Date(), start = null, ...deps } = {}) {
-  if (pool.lockMode !== 'FIRST_RESULT' || !pool.sourceUrl || !pool.sourcePoolNumber) return null;
+  if (!require('./poolRules').followsSource(pool) || !pool.sourceUrl || !pool.sourcePoolNumber) return null;
   if (start && now.getTime() < start) return null;
   if (pool.sourceCheckedAt && now - new Date(pool.sourceCheckedAt) < FRESH) return null;
   let timer;

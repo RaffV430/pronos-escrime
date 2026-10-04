@@ -453,6 +453,12 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
         observedAll = null; // l'import poule par poule ci-dessous signalera la poule illisible.
       }
       if (observedAll) {
+        for (const o of observedAll)
+          try {
+            o.startsAt = o.time ? localTime(config.date, o.time.hour, o.time.minute, config.timezone) : null;
+          } catch {
+            o.startsAt = null;
+          }
         try {
           const plan = recompose.planRecomposition(pools, url, observedAll, c.podiumRoster);
           if (plan) {
@@ -482,6 +488,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           } catch {
             observed.startsAt = null;
           }
+          observed.closeAtStart = config.timezone === 'Europe/Paris';
           for (const row of observed.rows)
             if ((c.podiumRoster || []).filter((e) => norm(e.name) === norm(row.name)).length !== 1)
               throw failure('Composition de poule absente ou ambiguë dans les engagés.');
@@ -692,7 +699,12 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     // Poules encore ouvertes au « premier résultat » : le suivi doit rester frais (2 min) pendant l'épreuve.
     try {
       summary.openFirstResultPools = await db.pool.count({
-        where: { competitionId: c.id, lockMode: 'FIRST_RESULT', isLocked: false, isFinal: false },
+        where: {
+          competitionId: c.id,
+          lockMode: { in: ['FIRST_RESULT', 'START_OR_FIRST_RESULT'] },
+          isLocked: false,
+          isFinal: false,
+        },
       });
     } catch {
       summary.openFirstResultPools = 0;

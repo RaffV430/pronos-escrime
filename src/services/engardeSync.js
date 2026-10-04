@@ -130,6 +130,7 @@ async function syncPools(db, c, config, url, client, leaseToken) {
     orderBy: { id: 'asc' },
   });
   try {
+    for (const o of observedAll) if (!o.error) o.startsAt = startsAt(config, o.time);
     // Une poule illisible ce contrôle-ci n'est ni comparée ni supprimée.
     const unreadable = new Set(observedAll.filter((o) => o.error).map((o) => o.number));
     const plan = recompose.planRecomposition(
@@ -156,6 +157,7 @@ async function syncPools(db, c, config, url, client, leaseToken) {
     try {
       if (observed.error) throw failure(observed.error);
       observed.startsAt = startsAt(config, observed.time);
+      observed.closeAtStart = config.timezone === 'Europe/Paris';
       if (observed.rows.some((r) => !inRoster(r.name)))
         throw failure(`Poule ${observed.number} : tireur absent ou ambigu dans les engagés.`);
       let snapshot = pools.find((p) => p.sourceUrl === url && p.sourcePoolNumber === observed.number);
