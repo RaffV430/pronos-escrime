@@ -488,12 +488,13 @@ test('tirage publié la veille puis appel fait : poules confirmées, joueurs pr�
   };
   await ev.run();
   const p = await ev.player();
-  await sub(p.id);
+  const mine = await sub(p.id);
   assert.equal(await prisma.pool.count({ where: { competitionId: ev.id, lockMode: 'PROVISIONAL' } }), 2);
   ev.site.files['tireurs.htm'] = S.rosterHtml(entries(), { checkedIn: true });
   const s = await ev.run();
   assert.equal(await prisma.pool.count({ where: { competitionId: ev.id, lockMode: 'PROVISIONAL' } }), 0);
-  const confirmed = () => prisma.pushDelivery.count({ where: { competitionId: ev.id, round: 'pools-confirmed' } });
+  const confirmed = () =>
+    prisma.pushDelivery.count({ where: { competitionId: ev.id, round: 'pools-confirmed', subscriptionId: mine.id } });
   assert.equal(await confirmed(), 1, JSON.stringify(s.notes));
   await ev.run();
   assert.equal(await confirmed(), 1, 'une seule fois');
