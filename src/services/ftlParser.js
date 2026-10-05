@@ -23,7 +23,7 @@ function seedOf($, cell) {
 function roundName(label) {
   return /^Table of (\d+)$/.test(label)
     ? `T${label.slice(9)}`
-    : { 'Semi-Finals': 'T4', Finals: 'T2', 'Bronze Medal': 'Bronze' }[label];
+    : { Quarterfinals: 'T8', 'Semi-Finals': 'T4', Finals: 'T2', 'Bronze Medal': 'Bronze' }[label];
 }
 function parseTable(
   html,

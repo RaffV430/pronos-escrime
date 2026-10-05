@@ -124,11 +124,13 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
   const $ = verifyPage(await client.get(sourceUrl), config);
   const trees = await client.get(sourceUrl + '/trees');
   if (!Array.isArray(trees)) throw failure('Liste des tableaux officiels indisponible.');
-  if (trees.some((t) => /\brep(?:[êe]chage)?\b/i.test(clean(t.name))))
-    throw failure(
-      'Tableau avec repêchages : import des rencontres suspendu pour éviter un tableau incomplet. Les poules restent suivies.',
-    );
-  const main = trees.filter((t) => t.treeNum === 0),
+  // Formule avec repêchages : seul le tableau final (« Final 8 » : quarts, demies, finale) forme un arbre
+  // continu ; les tours précédents reçoivent des repêchés en cours de route et ne sont pas importés.
+  const repechage = trees.some((t) => /\brep(?:[êe]chage)?\b/i.test(clean(t.name)));
+  const finals = trees.filter((t) => /^final\s*\d+$/i.test(clean(t.name)));
+  if (repechage && finals.length !== 1)
+    throw failure('Épreuve avec repêchages : tableau final non identifiable. Les poules restent suivies.');
+  const main = repechage ? finals : trees.filter((t) => t.treeNum === 0),
     bronzes = trees.filter((t) => clean(t.name) === 'Bronze Medal');
   if (main.length !== 1 || bronzes.length > 1 || (c.podiumFormat === 'TEAM' && bronzes.length !== 1))
     throw failure('Tableau principal ou petite finale non identifiable.');
