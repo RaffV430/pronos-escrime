@@ -90,11 +90,14 @@ async function remind(db, competitionId, actorId, deps = {}) {
     (m) => m.player1?.trim() && m.player2?.trim() && m.resultType !== 'CANCELLED' && !matchClosed(m, now),
   );
   if (!open.length) throw failure('Aucun match ouvert à pronostiquer dans cette épreuve.', 409);
-  const subs = await db.pushSubscription.findMany({
-    where: {
-      enabled: true,
-      OR: [{ tournamentIds: { has: competition.tournamentId } }, { competitionIds: { has: competition.id } }],
-    },
+  const { followers } = require('./pushNotifications');
+  const subs = await followers(db, competition, {
+    id: true,
+    userId: true,
+    endpoint: true,
+    p256dh: true,
+    auth: true,
+    enabled: true,
   });
   const saved = await db.prediction.findMany({
     where: { matchId: { in: open.map((m) => m.id) } },
