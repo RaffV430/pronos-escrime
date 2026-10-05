@@ -199,9 +199,10 @@ async function tableauEvent(results, extra = {}) {
     'tableau16.htm': S.tableauHtml(tableauEntrants(), results),
     ...extra,
   };
-  await ev.run();
+  ev.first = await ev.run();
   return ev;
 }
+const why = (ev) => JSON.stringify({ warnings: ev.first?.warnings, notes: ev.first?.notes });
 const match = (id, key) => prisma.match.findFirst({ where: { competitionId: id, sourceKey: key } });
 
 test('score de tableau corrigé : points recalculés, aucune correction en double', opts, async () => {
@@ -266,6 +267,7 @@ test(
 test('abandon au tableau : qualifiée sans score, le tableau continue', opts, async () => {
   const ev = await tableauEvent([[{ w: 2, score: 'DNF' }]]);
   const m = await match(ev.id, 'T16:1');
+  assert.ok(m, why(ev));
   assert.deepEqual([m.isFinished, m.resultType, m.winner], [true, 'MEDICAL_WITHDRAWAL', 2]);
 });
 
@@ -307,6 +309,7 @@ test('score illisible sur un match : points en attente, le reste du tableau cont
     ],
   ]);
   const pending = await match(ev.id, 'T16:2');
+  assert.ok(pending, why(ev));
   assert.deepEqual([pending.pointsPending, pending.winner], [true, 2]);
   assert.ok(pending.progressionConfirmedAt, 'qualifiée confirmée');
   const ok = await match(ev.id, 'T16:3');

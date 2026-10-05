@@ -41,5 +41,5 @@ jobs:
           node --test test/integration/*.test.js > integration.log 2>&1 || true
           echo "::notice title=Tests base réelle::$(grep -E '^# (tests|pass|fail|skipped)' integration.log | tr '\n' ' ')"
           # Échecs lisibles sans accès aux journaux : nom du test et premières lignes de l'erreur.
-          fails=$(grep -E "^\s*not ok|^\s+(error|expected|actual|message|code):|failureType" integration.log | grep -v "failureType: 'subtestsFailed'" | head -60 | tr '\n' ' ' | cut -c1-4000)
+          fails=$(awk '/^ *not ok/{n=16} n-- > 0' integration.log | grep -vE "duration_ms|type: 'test'|location:|^ *---|^ *\.\.\.|failureType|ERR_TEST_FAILURE|stack: |^ +at " | head -120 | tr '\n' ' ' | tr -s ' ' | cut -c1-6000)
           if [ -n "$fails" ]; then echo "::warning title=Échecs base réelle::$fails"; fi

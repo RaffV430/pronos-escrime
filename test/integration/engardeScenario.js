@@ -38,7 +38,8 @@ function tableauHtml(entrants, results = [], { times = [], start = '15:30' } = {
       const res = results[r]?.[k];
       const winner = res ? names[2 * k + res.w - 1] : '';
       nextNames.push(winner);
-      if (winner) grid[mid][col(r + 1)] = `<td class="HBD fencer"> ${winner} </td>`;
+      // Case du tour suivant toujours présente (vide tant que le match n'est pas joué), comme sur le site.
+      grid[mid][col(r + 1)] = `<td class="HBD fencer"> ${winner} </td>`;
       if (res) grid[mid + 1][col(r + 1)] = `<td class="D score">${res.score}</td>`;
     }
     row = nextRow;
