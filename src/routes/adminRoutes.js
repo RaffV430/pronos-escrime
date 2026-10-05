@@ -65,6 +65,13 @@ router.put(
     res.json(await require('../services/circuits').saveCircuits(prisma, req.body?.circuits, req.user.userId)),
   ),
 );
+// Matrices complètes des poules d'une épreuve déjà importée (même archivée) : lecture seule de la source.
+router.post(
+  '/pool-bouts/:competitionId',
+  wrap(async (req, res) =>
+    res.json(await require('../services/poolBoutsBackfill').backfillBouts(prisma, id(req.params.competitionId))),
+  ),
+);
 // Club : nom et liste des tireurs mis en avant ; enregistrer crée aussi les ligues du club manquantes.
 router.get(
   '/club',
