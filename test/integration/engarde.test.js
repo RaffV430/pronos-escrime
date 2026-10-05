@@ -147,6 +147,10 @@ test('engarde-service : tournoi créé vide, puis engagés, poules, tableau et p
   assert.deepEqual([done.wins, done.losses, done.indicator], [6, 0, 21]);
   const pp = await prisma.poolPrediction.findFirst({ where: { userId: player.id } });
   assert.ok(pp.pointsEarned > 0, 'pronostic exact récompensé');
+  // Matrice complète des assauts enregistrée pour l'onglet « Résultats ».
+  const matrix = await prisma.pool.findFirst({ where: { competitionId: id, fencers: { some: { id: bolore.id } } } });
+  const row = matrix.bouts?.[done.position - 1];
+  assert.equal(row?.filter((c) => c?.startsWith('V')).length, 6, `matrice : ${JSON.stringify(matrix.bouts)}`);
 
   // 3 bis. Second tour de poules publié (mêmes tireuses, plus tard dans la journée) : poules distinctes.
   stage.published.push('poules2.htm');

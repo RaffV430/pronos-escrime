@@ -43,3 +43,5 @@ jobs:
           # Échecs lisibles sans accès aux journaux : nom du test et premières lignes de l'erreur.
           fails=$(awk '/^ *not ok/{n=16} n-- > 0' integration.log | grep -vE "duration_ms|type: 'test'|location:|^ *---|^ *\.\.\.|failureType|ERR_TEST_FAILURE|stack: |^ +at " | head -120 | tr '\n' ' ' | tr -s ' ' | cut -c1-6000)
           if [ -n "$fails" ]; then echo "::warning title=Échecs base réelle::$fails"; fi
+          errs=$(grep -nE "AssertionError|Error:|error:|expected:|actual:|Unhandled|rejection|Invalid" integration.log | grep -v "error: 'test failed'" | head -40 | tr '\n' ' ' | tr -s ' ' | cut -c1-6000)
+          if [ -n "$errs" ]; then echo "::warning title=Erreurs base réelle::$errs"; fi
