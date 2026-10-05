@@ -528,6 +528,44 @@ function poolRoundContext($, url, config) {
     label: (n) => (round === 1 ? `Poule ${n}` : `Tour ${round} · Poule ${n}`),
   };
 }
+// Date et heure locales (fuseau du lieu) d'un instant : { date: 'AAAA-MM-JJ', min: minutes depuis minuit }.
+function localParts(at, timezone) {
+  const s = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(at);
+  const [date, time] = s.split(' ');
+  const [h, m] = time.split(':').map(Number);
+  return { date, min: h * 60 + m };
+}
+const addDays = (date, n) => new Date(Date.parse(`${date}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+// Date d'un tour de poules après le premier : FencingTimeLive n'affiche que l'heure (« at 1:00 PM »).
+// Même jour que le tour précédent s'il commence plus tard, sinon le lendemain ; un tour vu pour la première
+// fois plus de 3 h après son heure (publié la veille au soir pour le lendemain) passe aussi au lendemain.
+// Une date déjà retenue pour ce tour est conservée. Sans repère fiable : null (clôture au premier résultat).
+function phaseDate({ round, date, timezone, previousStarts = [], currentStarts = [], times = [], now = Date.now() }) {
+  if (round === 1) return date;
+  const known = currentStarts.filter(Boolean).map((t) => new Date(t).getTime());
+  if (known.length) return localParts(new Date(Math.min(...known)), timezone).date;
+  const before = previousStarts.filter(Boolean).map((t) => new Date(t).getTime());
+  const mins = times.filter(Boolean).map((t) => t.hour * 60 + t.minute);
+  if (!before.length || !mins.length) return null;
+  const prev = localParts(new Date(Math.min(...before)), timezone),
+    earliest = Math.min(...mins);
+  let day = earliest <= prev.min ? addDays(prev.date, 1) : prev.date;
+  try {
+    const start = localTime(day, Math.floor(earliest / 60), earliest % 60, timezone).getTime();
+    if (start < now - 3 * 3600000) day = addDays(day, 1);
+  } catch {
+    return null;
+  }
+  return day;
+}
 async function syncPools(db, c, config, actorId, client, leaseToken = null) {
   const pools = await db.pool.findMany({
     where: { competitionId: c.id },
@@ -555,6 +593,23 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
       if (!tables.length) throw failure('Matrices de poules non encore publiées.');
       const poolNumbers = tables.map((t) => clean($(t).parent().find('.poolNum').text()));
       if (new Set(poolNumbers).size !== poolNumbers.length) throw failure('Numéros de poules ambigus.');
+      if (context.round > 1)
+        context.date = phaseDate({
+          round: context.round,
+          date: config.date,
+          timezone: config.timezone,
+          previousStarts: pools
+            .filter((p) => p.sourceUrl === context.sources[context.round - 2])
+            .map((p) => p.startsAt),
+          currentStarts: pools.filter((p) => p.sourceUrl === url).map((p) => p.startsAt),
+          times: tables.map((t) => {
+            try {
+              return parsePools($.html($(t).parent()))[0].time;
+            } catch {
+              return null;
+            }
+          }),
+        });
       // Poules modifiées sur FencingTimeLive avant leur début : remplacer uniquement celles qui ont changé.
       let observedAll = null;
       try {
@@ -685,6 +740,8 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
             },
             { timeout: 15000 },
           );
+          // Heure retenue visible du tour suivant dans ce même contrôle (date des tours de poules).
+          if (observed.startsAt) snapshot.startsAt = observed.startsAt;
           summary.checked++;
           for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
           // Forfait ou abandon médical en poule : alerte aux joueurs qui ont ce tireur sur leur podium.
@@ -838,6 +895,8 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
       summary.openFirstResultPools = 0;
     }
     summary.pools = poolSummary;
+    const newRoundAlerts = await require('./poolRoundAlerts').alertNewPoolRounds(db, c);
+    if (newRoundAlerts) summary.notes = [...(summary.notes || []), 'Nouveau tour de poules annoncé aux joueurs.'];
     summary.pointsUpdated += poolSummary.pointsUpdated;
     summary.warnings.push(...poolSummary.warnings);
     if (poolSummary.notes?.length) summary.notes = [...(summary.notes || []), ...poolSummary.notes];
@@ -922,6 +981,7 @@ module.exports = {
   verifyPage,
   poolMatrices,
   poolRoundContext,
+  phaseDate,
   syncPools,
   cancellable,
   drawSignature,

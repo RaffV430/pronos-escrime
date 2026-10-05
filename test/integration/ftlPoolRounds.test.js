@@ -72,9 +72,12 @@ test(
     );
     assert.equal(pools[1].isFinal, false);
     assert.equal(pools[1].isLocked, false);
-    assert.equal(pools[1].startsAt, null);
-    assert.equal(pools[1].lockMode, 'FIRST_RESULT');
-    assert.equal(pools[2].startsAt, null);
+    // FTL n'affiche que l'heure (8:00) : tour suivant au lendemain puisqu'il ne commence pas plus tard ;
+    // relu bien après coup, chaque tour glisse encore d'un jour (publication supposée la veille au soir).
+    assert.equal(pools[0].startsAt.toISOString(), '2026-01-31T07:00:00.000Z');
+    assert.equal(pools[1].startsAt.toISOString(), '2026-02-02T07:00:00.000Z');
+    assert.equal(pools[1].lockMode, 'START_OR_FIRST_RESULT');
+    assert.equal(pools[2].startsAt.toISOString(), '2026-02-04T07:00:00.000Z');
     const repeated = pools[1].fencers.find((f) => f.name === 'KOESTERS Florentine');
     assert.notEqual(repeated.id, florentine.id);
     assert.equal(repeated.wins, 2);
