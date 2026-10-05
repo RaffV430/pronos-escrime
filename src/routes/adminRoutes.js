@@ -193,6 +193,47 @@ router.get(
     res.json(await require('../services/ftlConfiguration').configuration(prisma, id(req.params.competitionId))),
   ),
 );
+// Lieu, date et jour de chaque phase d'une épreuve (correction manuelle, prise en compte au prochain contrôle).
+router.get(
+  '/competitions/:competitionId/schedule',
+  wrap(async (req, res) => {
+    const competitionId = id(req.params.competitionId);
+    const schedule = require('../services/schedule');
+    const config = await require('../services/ftlConfiguration').configuration(prisma, competitionId);
+    const correction = await schedule.correctionOf(prisma, competitionId);
+    const merged = config || correction || {};
+    res.json({
+      configured: Boolean(config),
+      city: merged.city || null,
+      timezone: merged.timezone || null,
+      country: merged.country || null,
+      date: merged.date || null,
+      phases: await schedule.phases(prisma, competitionId, merged),
+    });
+  }),
+);
+router.put(
+  '/competitions/:competitionId/schedule',
+  wrap(async (req, res) => {
+    const competitionId = id(req.params.competitionId);
+    const schedule = require('../services/schedule');
+    if (!(await prisma.competition.findUnique({ where: { id: competitionId }, select: { id: true } })))
+      fail('Épreuve introuvable.', 404);
+    const previous = (await schedule.correctionOf(prisma, competitionId)) || {};
+    const after = schedule.validateCorrection(req.body || {}, previous);
+    await prisma.auditLog.create({
+      data: {
+        actorId: req.user.userId,
+        action: schedule.CORRECTION,
+        targetType: 'Competition',
+        targetId: competitionId,
+        before: previous,
+        after,
+      },
+    });
+    res.json({ saved: true, ...after });
+  }),
+);
 router.post(
   '/ftl/tournament/preview',
   wrap(async (req, res) =>

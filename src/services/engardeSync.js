@@ -2,6 +2,7 @@
 // FencingTimeLive (mêmes verrous, mêmes calculs de points, mêmes notifications). Une épreuve encore vide
 // est simplement notée « en attente » : le suivi automatique reviendra jusqu'à la publication.
 const E = require('./engardeParser');
+const schedule = require('./schedule');
 const { createEngardeClient } = require('./engardeTournament');
 const { applyPool } = require('./ftlPools');
 const recompose = require('./poolRecompose');
@@ -144,7 +145,10 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
     include: { fencers: { orderBy: { position: 'asc' } } },
     orderBy: { id: 'asc' },
   });
-  const day = nextDay(prev, minutes(observedAll.filter((o) => !o.error).map((o) => o.time)));
+  let day = nextDay(prev, minutes(observedAll.filter((o) => !o.error).map((o) => o.time)));
+  // Jour du tour corrigé par un administrateur : il fait foi (et sert de repère aux phases suivantes).
+  const forced = schedule.phaseDay(config, `pools-${round}`);
+  if (forced && config.date) day = { ...day, offset: schedule.daysBetween(config.date, forced) };
   summary.day = day;
   try {
     for (const o of observedAll) if (!o.error) o.startsAt = startsAt(config, o.time, day.offset);
@@ -279,6 +283,8 @@ async function observeTableau(c, config, pages, client, prev = null) {
   let day = prev;
   for (const r of [...parsed.rounds].sort((a, b) => b.size - a.size)) {
     day = nextDay(day, minutes(parsed.matches.filter((m) => m.round === r.round).map((m) => m.time)));
+    const forced = schedule.phaseDay(config, r.round);
+    if (forced && config.date) day = { ...day, offset: schedule.daysBetween(config.date, forced) };
     offsets.set(r.round, day.offset);
   }
   const identityIssues = [];

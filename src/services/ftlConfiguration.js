@@ -5,14 +5,14 @@ const { cleanCity, utcOffset, offsetLabel } = require('./venue');
 const SOURCE = /^https:\/\/www\.fencingtimelive\.com\/(tableaus|pools)\/scores\/([a-f0-9]{32})\/[a-f0-9]{32}$/i;
 const CONFIG = 'Configuration FTL validée';
 async function configuration(db, competitionId) {
-  return (
-    (
-      await db.auditLog.findFirst({
-        where: { action: CONFIG, targetType: 'Competition', targetId: competitionId },
-        orderBy: { id: 'desc' },
-      })
-    )?.after || null
-  );
+  const row = await db.auditLog.findFirst({
+    where: { action: CONFIG, targetType: 'Competition', targetId: competitionId },
+    orderBy: { id: 'desc' },
+  });
+  if (!row?.after) return null;
+  // Lieu, date ou jour d'une phase corrigés par un administrateur après cette configuration.
+  const schedule = require('./schedule');
+  return schedule.merge(row.after, await schedule.correctionOf(db, competitionId, row.id));
 }
 function parseRoster(rows) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 2048)

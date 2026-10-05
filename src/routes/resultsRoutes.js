@@ -7,6 +7,7 @@ const { buildResults } = require('../services/eventResults');
 
 const router = express.Router();
 const CONFIG = 'Configuration FTL validée';
+const { CORRECTION } = require('../services/schedule');
 
 router.get('/', authMiddleware, async (req, res) => {
   try {
@@ -33,9 +34,9 @@ router.get('/', authMiddleware, async (req, res) => {
     const [audits, firstMatches] = ids.length
       ? await Promise.all([
           db.auditLog.findMany({
-            where: { action: CONFIG, targetType: 'Competition', targetId: { in: ids } },
+            where: { action: { in: [CONFIG, CORRECTION] }, targetType: 'Competition', targetId: { in: ids } },
             orderBy: { id: 'asc' },
-            select: { targetId: true, after: true },
+            select: { targetId: true, after: true, action: true },
           }),
           db.match.groupBy({
             by: ['competitionId'],
@@ -44,7 +45,10 @@ router.get('/', authMiddleware, async (req, res) => {
           }),
         ])
       : [[], []];
-    const configs = new Map(audits.map((a) => [a.targetId, a.after])); // la plus récente l'emporte
+    // Configuration la plus récente, puis lieu et dates corrigés par un administrateur (même sans configuration).
+    const configs = new Map();
+    for (const a of audits)
+      configs.set(a.targetId, a.action === CONFIG ? a.after : { ...(configs.get(a.targetId) || {}), ...a.after });
     const firstDates = new Map(firstMatches.map((r) => [r.competitionId, r._min.startsAt]));
     res.json(buildResults(tournaments, { configs, firstDates }));
   } catch (error) {
