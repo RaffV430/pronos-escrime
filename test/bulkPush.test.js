@@ -221,3 +221,15 @@ test('réinscription sur la nouvelle adresse : l’ancienne inscription du même
     /Choisissez/,
   );
 });
+
+test('récap de fin d’épreuve : activé par défaut, texte avec classement et vainqueurs trouvés', () => {
+  const { preferences } = require('../src/services/playerExperience');
+  assert.equal(preferences({}).recap, true);
+  assert.equal(
+    push.recapText({ points: 23, rank: 4, players: 18, winners: 6, played: 9 }),
+    'Épreuve terminée · 23 points · 4e sur 18 · 6 vainqueurs trouvés sur 9 · votre récap est prêt',
+  );
+  const { confirmedNotification } = require('../src/services/poolRoundAlerts');
+  const n = confirmedNotification({ id: 2, tournamentId: 1, name: 'Fleuret Dames' }, [{ lockMode: 'FIRST_RESULT' }]);
+  assert.match(n.body, /définitif.*premier résultat/);
+});

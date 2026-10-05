@@ -6,6 +6,8 @@ const defaults = {
   newMatches: true,
   reminders: true,
   roundResults: false,
+  // Récap de fin d'épreuve (points, classement), pour tous par défaut.
+  recap: true,
   poolResults: false,
   quietEnabled: false,
   quietStart: '22:00',
@@ -14,7 +16,7 @@ const defaults = {
 };
 function preferences(input = {}) {
   const p = { ...defaults, ...input };
-  for (const k of ['followAll', 'newMatches', 'reminders', 'roundResults', 'poolResults', 'quietEnabled'])
+  for (const k of ['followAll', 'newMatches', 'reminders', 'roundResults', 'poolResults', 'recap', 'quietEnabled'])
     if (typeof p[k] !== 'boolean') throw failure('Préférence de notification invalide.', 400);
   for (const k of ['quietStart', 'quietEnd'])
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(p[k])) throw failure('Horaire silencieux invalide.', 400);

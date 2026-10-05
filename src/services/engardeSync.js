@@ -409,6 +409,7 @@ async function control(db, c, config, actorId, claim, client) {
   );
   let poolSummary = { ...empty, notes: ['Poules pas encore publiées.'] },
     day = null;
+  const wasProvisional = await db.pool.count({ where: { competitionId: c.id, lockMode: 'PROVISIONAL' } });
   if (poolPages.length) {
     poolSummary = { ...empty, warnings: [] };
     for (const [i, url] of poolPages.entries()) {
@@ -427,6 +428,22 @@ async function control(db, c, config, actorId, claim, client) {
     }
   }
   if (poolSummary.outs?.length) await require('./podiumAlerts').alertPodiumOut(db, c, poolSummary.outs);
+  // Tirage provisoire devenu définitif : les joueurs sont prévenus que les pronostics de poules sont ouverts.
+  if (wasProvisional && !provisional) {
+    const confirmed = await db.pool.findMany({
+      where: { competitionId: c.id, isFinal: false, lockMode: { not: 'PROVISIONAL' } },
+      select: { id: true },
+    });
+    if (confirmed.length && !(await db.pool.count({ where: { competitionId: c.id, lockMode: 'PROVISIONAL' } })))
+      if (
+        await require('./poolRoundAlerts').alertPoolsConfirmed(
+          db,
+          c,
+          confirmed.map((p) => p.id),
+        )
+      )
+        poolSummary.notes = [...(poolSummary.notes || []), 'Poules confirmées : joueurs prévenus.'];
+  }
   const existing = await db.match.findMany({ where: { competitionId: c.id } });
   if (pages.tableaus.length) {
     try {
