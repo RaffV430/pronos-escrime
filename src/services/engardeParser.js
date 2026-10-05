@@ -571,7 +571,12 @@ function tableauMatches(grid, { allowPartial = false } = {}) {
   for (const zone of kept) {
     const { round, col } = zone;
     const entrants = fencersIn(zone, col);
-    if (entrants.length % 2) fail(`Tour ${round} incomplet.`);
+    if (entrants.length % 2) {
+      // Tour en cours de saisie mal formé : on l'ignore (signalé) sans perdre les autres tours de la page.
+      if (!allowPartial) fail(`Tour ${round} incomplet.`);
+      issues.push({ round, message: `Tour ${round} incomplet : il sera relu au prochain contrôle.` });
+      continue;
+    }
     const next = cells
       .filter((c) => c.role === 'fencer' && c.col > col && inZone(zone)(c))
       .reduce((m, c) => Math.min(m, c.col), Infinity);

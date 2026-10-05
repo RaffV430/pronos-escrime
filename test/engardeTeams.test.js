@@ -99,3 +99,15 @@ test('épreuve internationale par équipes : nation accolée au nom dans la colo
   );
   assert.ok(matches.every((m) => !/ [A-Z]{3}$/.test(m.player1 || '') || m.player1 === 'USA'));
 });
+
+test('tour en cours sans cases vides publiées : tour ignoré et signalé, les autres tours restent lus', () => {
+  const S = require('./integration/engardeScenario');
+  const html = S.tableauHtml(S.mennecyEntries().slice(0, 16), [[{ w: 1, score: '15/10' }]]).replace(
+    /<td class="HBD fencer">  <\/td>/g,
+    '<td></td>',
+  );
+  assert.throws(() => E.parseTableaus([html]), /incomplet/);
+  const r = E.parseTableaus([html], { allowPartial: true });
+  assert.equal(r.matches.filter((m) => m.round === 'T16').length, 8);
+  assert.match(r.issues[0].message, /T8 incomplet/);
+});
