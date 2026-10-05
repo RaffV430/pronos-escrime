@@ -68,6 +68,7 @@ app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/community', require('./routes/communityRoutes'));
 app.use('/api/me', require('./routes/personalRoutes'));
+app.use('/api/results', require('./routes/resultsRoutes'));
 
 app.get('/api/tournaments', authMiddleware, async (req, res) => {
   try {
