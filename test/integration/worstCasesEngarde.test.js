@@ -380,3 +380,76 @@ test('deux contrôles lancés en même temps : pas de doublon', opts, async () =
   assert.equal(await prisma.pool.count({ where: { competitionId: ev.id } }), 2);
   assert.equal(await prisma.match.count({ where: { competitionId: ev.id } }), 15);
 });
+
+test(
+  'tableau avec exemptés (moins de tireuses que de places) : exemptées qualifiées, rien de bloqué',
+  opts,
+  async () => {
+    const ev = await S.engardeEvent(prisma);
+    const list = tableauEntrants();
+    // 13 tireuses dans un tableau de 16 : les têtes de série 1, 2 et 3 sont exemptées au premier tour.
+    for (const i of [1, 13, 9]) list[i] = { name: '', club: '', seed: '' };
+    ev.site.files = {
+      'tireurs.htm': S.rosterHtml(entries()),
+      'poules1.htm': POOLS(),
+      'tableau16.htm': S.tableauHtml(list, [
+        Array.from({ length: 8 }, (_, k) => ([0, 6, 4].includes(k) ? { w: 1, score: '' } : { w: 1, score: '15/8' })),
+      ]),
+    };
+    const s = await ev.run();
+    const t16 = await prisma.match.findMany({ where: { competitionId: ev.id, round: 'T16' } });
+    assert.equal(t16.length, 5, `5 vrais matchs (${JSON.stringify(s.warnings)})`);
+    assert.ok(t16.every((m) => m.player1 && m.player2));
+    const rounds = await prisma.matchRound.findMany({ where: { competitionId: ev.id } });
+    assert.equal(rounds.find((r) => r.round === 'T16')?.expectedMatchCount, 5);
+  },
+);
+
+test('poule supprimée puis rétablie par le directoire technique : pas de poule fantôme', opts, async () => {
+  const ev = await S.engardeEvent(prisma);
+  const pools = S.emptyPools();
+  ev.site.files = { 'tireurs.htm': S.rosterHtml(entries()), 'poules1.htm': pools };
+  await ev.run();
+  // Publication intermédiaire : seule la poule 1 figure sur la page.
+  ev.site.files['poules1.htm'] = pools.slice(0, pools.indexOf('<p>Poule No 2'));
+  await ev.attempt();
+  ev.site.files['poules1.htm'] = pools;
+  await ev.run();
+  const names = (await prisma.pool.findMany({ where: { competitionId: ev.id } })).map((p) => p.name).sort();
+  assert.deepEqual(names, ['Poule 1', 'Poule 2']);
+});
+
+test('tireuse déplacée après le premier assaut : poule commencée jamais réécrite en silence', opts, async () => {
+  const ev = await S.engardeEvent(prisma);
+  // Poule 1 commencée : un seul assaut saisi (MARCEL VU bat BOLORE 5-2 ... ici V contre 2).
+  const started = S.emptyPools().replace(
+    '<td class="HGBD"></td><td class="HBD"></td>',
+    '<td class="HGBD"></td><td class="HBD">2</td>',
+  );
+  ev.site.files = { 'tireurs.htm': S.rosterHtml(entries()), 'poules1.htm': started };
+  await ev.run();
+  const before = await prisma.poolFencer.findMany({
+    where: { pool: { competitionId: ev.id, name: 'Poule 1' } },
+    orderBy: { position: 'asc' },
+  });
+  ev.site.files['poules1.htm'] = started.replace('CHEVREAU Clementine', 'GIMARD Ninon').replace('PARIS RCF', 'ANTONY');
+  const s = await ev.run();
+  const after = await prisma.poolFencer.findMany({
+    where: { pool: { competitionId: ev.id, name: 'Poule 1' } },
+    orderBy: { position: 'asc' },
+  });
+  const changed = JSON.stringify(after.map((f) => f.name)) !== JSON.stringify(before.map((f) => f.name));
+  assert.ok(!changed || s.warnings.length || s.pools?.recomposed?.length, 'changement signalé, jamais silencieux');
+});
+
+test('tableau publié alors que des poules ne sont pas finies : les deux sont suivis', opts, async () => {
+  const ev = await S.engardeEvent(prisma);
+  ev.site.files = {
+    'tireurs.htm': S.rosterHtml(entries()),
+    'poules1.htm': S.emptyPools(),
+    'tableau16.htm': S.tableauHtml(tableauEntrants(), []),
+  };
+  const s = await ev.run();
+  assert.equal(await prisma.pool.count({ where: { competitionId: ev.id } }), 2, JSON.stringify(s.warnings));
+  assert.equal(await prisma.match.count({ where: { competitionId: ev.id, round: 'T16' } }), 8);
+});
