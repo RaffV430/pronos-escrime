@@ -642,16 +642,26 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
   } else if (kind === 'POOLS') {
     // Poules recomposées sur FencingTimeLive : prévenir tant que les poules concernées restent ouvertes.
     if (Date.now() - delivery.createdAt.getTime() > 86400000) return cancel();
-    const pools = await db.pool.findMany({
-      where: { id: { in: delivery.matchIds }, competitionId: c.id, isLocked: false, isFinal: false },
-      select: { name: true, startsAt: true },
-    });
-    if (delivery.matchIds.length && !pools.length) return cancel();
-    ttl = 3600;
-    content = {
-      ...require('./poolRecompose').poolsNotification(c, pools, { urgent: urgentPools }),
-      tag: `pronos-${id}`,
-    };
+    const alerts = require('./poolRoundAlerts');
+    const newRound = alerts.roundOfDelivery(round);
+    if (newRound) {
+      // Nouveau tour de poules : rien à annoncer s'il est déjà clos.
+      const open = await alerts.poolsOfRound(db, c, newRound);
+      if (!open.length) return cancel();
+      ttl = 3600;
+      content = { ...alerts.newRoundNotification(c, newRound, open), tag: `pronos-${id}` };
+    } else {
+      const pools = await db.pool.findMany({
+        where: { id: { in: delivery.matchIds }, competitionId: c.id, isLocked: false, isFinal: false },
+        select: { name: true, startsAt: true },
+      });
+      if (delivery.matchIds.length && !pools.length) return cancel();
+      ttl = 3600;
+      content = {
+        ...require('./poolRecompose').poolsNotification(c, pools, { urgent: urgentPools }),
+        tag: `pronos-${id}`,
+      };
+    }
   } else return cancel();
   try {
     await sender(sub, content, ttl, URGENT.has(kind) ? 'high' : 'normal');
