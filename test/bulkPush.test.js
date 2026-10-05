@@ -59,7 +59,8 @@ test('push endpoints reject SSRF, credentials, wrong keys and invalid scopes', (
   ])
     assert.throws(() => push.validateSubscription({ ...good, endpoint }), /reconnu/);
   assert.throws(() => push.validateSubscription({ ...good, keys: { p256dh: 'abc', auth } }), /invalide/);
-  assert.throws(() => push.validateScopes({}), /Choisissez/);
+  // Sans sélection : autorisé, l'appareil suit alors tous les tournois (préférence followAll).
+  assert.deepEqual(push.validateScopes({}), { tournamentIds: [], competitionIds: [] });
   assert.throws(() => push.validateScopes({ tournamentIds: ['1'] }), /invalide/);
   assert.deepEqual(push.validateScopes({ tournamentIds: [1, 1], competitionIds: [3] }), {
     tournamentIds: [1],
@@ -67,8 +68,11 @@ test('push endpoints reject SSRF, credentials, wrong keys and invalid scopes', (
   });
 });
 test('following a tournament includes future events but unrelated events stay excluded', () => {
-  assert.ok(push.follows({ tournamentIds: [1], competitionIds: [] }, { id: 999, tournamentId: 1 }));
-  assert.ok(!push.follows({ tournamentIds: [1], competitionIds: [] }, { id: 999, tournamentId: 2 }));
+  const own = { tournamentIds: [1], competitionIds: [], preferences: { followAll: false } };
+  assert.ok(push.follows(own, { id: 999, tournamentId: 1 }));
+  assert.ok(!push.follows(own, { id: 999, tournamentId: 2 }));
+  // Par défaut, un appareil suit tous les tournois, y compris ceux créés après son activation.
+  assert.ok(push.follows({ tournamentIds: [1], competitionIds: [] }, { id: 999, tournamentId: 2 }));
   const data = push.payload({ id: 5, tournamentId: 1, name: 'Junior Team Women' }, [{ id: 4 }, { id: 9 }], 'batch');
   assert.match(data.url, /event=5&new=1&matches=4,9/);
   assert.equal(data.tag, 'pronos-batch');
@@ -158,4 +162,62 @@ test('delivery rechecks closure, disables expired endpoints and sends only once 
   });
   assert.equal(sub.enabled, false);
   assert.equal(row.status, 'FAILED');
+});
+test('réinscription sur la nouvelle adresse : l’ancienne inscription du même navigateur est remplacée', async () => {
+  const key = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString('base64url'),
+    auth = Buffer.alloc(16, 2).toString('base64url');
+  const before = new Date(push.DOMAIN_SWITCH - 86400000);
+  const rows = [
+    { id: 'old-fcm', userId: 7, enabled: true, endpoint: 'https://fcm.googleapis.com/fcm/send/old', createdAt: before },
+    { id: 'old-apple', userId: 7, enabled: true, endpoint: 'https://web.push.apple.com/old', createdAt: before },
+  ];
+  const cancelled = [];
+  const tx = {
+    $queryRaw: async () => [],
+    pushEvent: { findFirst: async () => ({ id: 3 }) },
+    pushDelivery: { updateMany: async ({ where }) => cancelled.push(where.subscriptionId) },
+    pushSubscription: {
+      findUnique: async () => null,
+      count: async () => rows.filter((r) => r.enabled).length,
+      upsert: async ({ create }) => {
+        const row = { id: 'new', enabled: true, createdAt: new Date(), ...create };
+        rows.push(row);
+        return row;
+      },
+      findMany: async ({ where }) =>
+        rows.filter(
+          (r) => r.userId === where.userId && r.enabled && r.id !== where.id.not && r.createdAt < where.createdAt.lt,
+        ),
+      updateMany: async ({ where, data }) =>
+        rows.filter((r) => where.id.in.includes(r.id)).forEach((r) => Object.assign(r, data)),
+    },
+  };
+  const db = {
+    tournament: { count: async () => 0 },
+    competition: { count: async () => 0 },
+    $transaction: (fn) => fn(tx),
+  };
+  const out = await push.subscribe(db, 7, {
+    subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/new', keys: { p256dh: key, auth } },
+    replaceLegacy: true,
+  });
+  assert.equal(out.replaced, 1);
+  assert.equal(out.preferences.followAll, true);
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.enabled]),
+    [
+      ['old-fcm', false],
+      ['old-apple', true],
+      ['new', true],
+    ],
+  );
+  // Sans « suivre tous les tournois », une sélection reste obligatoire.
+  await assert.rejects(
+    () =>
+      push.subscribe(db, 7, {
+        subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys: { p256dh: key, auth } },
+        preferences: { followAll: false },
+      }),
+    /Choisissez/,
+  );
 });

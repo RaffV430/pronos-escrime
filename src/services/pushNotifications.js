@@ -53,14 +53,14 @@ function validateScopes(input) {
       throw failure('Sélection de notifications invalide.', 400);
     result[key] = [...new Set(values)];
   }
-  if (!result.tournamentIds.length && !result.competitionIds.length)
-    throw failure('Choisissez au moins un tournoi ou une épreuve.', 400);
   return result;
 }
 async function subscribe(db, userId, input) {
   const subscription = validateSubscription(input.subscription),
     scopes = validateScopes(input),
     prefs = preferences(input.preferences);
+  if (!prefs.followAll && !scopes.tournamentIds.length && !scopes.competitionIds.length)
+    throw failure('Choisissez au moins un tournoi ou une épreuve, ou suivez tous les tournois.', 400);
   const [t, c] = await Promise.all([
     db.tournament.count({ where: { id: { in: scopes.tournamentIds } } }),
     db.competition.count({ where: { id: { in: scopes.competitionIds } } }),
@@ -97,12 +97,47 @@ async function subscribe(db, userId, input) {
         ...(changed ? { lastEventId: latest?.id || 0, preferencesSince: new Date() } : {}),
       },
     });
-    return { id: row.id, enabled: row.enabled, preferences: prefs, ...scopes };
+    // Même navigateur inscrit sur l'ancienne adresse : son ancienne inscription est remplacée (pas de doublon).
+    let replaced = 0;
+    if (input.replaceLegacy === true) {
+      const host = new URL(subscription.endpoint).host;
+      const legacy = await tx.pushSubscription.findMany({
+        where: { userId, enabled: true, id: { not: row.id }, createdAt: { lt: new Date(DOMAIN_SWITCH) } },
+        select: { id: true, endpoint: true },
+      });
+      const ids = legacy.filter((l) => new URL(l.endpoint).host === host).map((l) => l.id);
+      if (ids.length) {
+        await tx.pushSubscription.updateMany({ where: { id: { in: ids } }, data: { enabled: false } });
+        await tx.pushDelivery.updateMany({
+          where: { subscriptionId: { in: ids }, status: { in: ['PENDING', 'SENDING'] } },
+          data: { status: 'CANCELLED' },
+        });
+        replaced = ids.length;
+      }
+    }
+    return { id: row.id, enabled: row.enabled, preferences: prefs, ...scopes, replaced };
   });
 }
 function follows(sub, c) {
-  return sub.tournamentIds.includes(c.tournamentId) || sub.competitionIds.includes(c.id);
+  if (!sub || !c) return false;
+  let all = true;
+  try {
+    all = preferences(sub.preferences || {}).followAll;
+  } catch {
+    all = false;
+  }
+  return all || sub.tournamentIds.includes(c.tournamentId) || sub.competitionIds.includes(c.id);
 }
+// Appareils actifs qui suivent l'épreuve (tous les tournois, ou ce tournoi, ou cette épreuve).
+async function followers(db, c, select = { id: true }) {
+  const subs = await db.pushSubscription.findMany({
+    where: { enabled: true },
+    select: { ...select, tournamentIds: true, competitionIds: true, preferences: true },
+  });
+  return subs.filter((s) => follows(s, c));
+}
+// Inscriptions faites sur l'ancienne adresse (pronos-escrime.vercel.app), avant le passage au domaine.
+const DOMAIN_SWITCH = Date.parse('2026-10-05T10:15:00Z');
 async function queueForSubscription(db, id) {
   return db.$transaction(
     async (tx) => {
@@ -764,6 +799,8 @@ function startWorker(db) {
   };
 }
 module.exports = {
+  followers,
+  DOMAIN_SWITCH,
   notificationContext,
   poolsFinishedAt,
   poolResultsText,

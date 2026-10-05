@@ -148,13 +148,7 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
       });
       // Une notification par abonnement qui suit l'épreuve, seulement si des poules sont à refaire.
       if (notified.length || plan.removed.length) {
-        const subs = await tx.pushSubscription.findMany({
-          where: {
-            enabled: true,
-            OR: [{ tournamentIds: { has: c.tournamentId } }, { competitionIds: { has: c.id } }],
-          },
-          select: { id: true },
-        });
+        const subs = await require('./pushNotifications').followers(tx, c);
         for (const s of subs)
           await tx.pushDelivery.create({
             data: {

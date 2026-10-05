@@ -96,13 +96,17 @@ router.get(
   wrap(async (req, res) => {
     const rows = await db.pushSubscription.findMany({
       where: { userId: req.user.userId, enabled: true },
-      select: { id: true, endpoint: true, updatedAt: true },
+      select: { id: true, endpoint: true, updatedAt: true, createdAt: true },
     });
+    const { DOMAIN_SWITCH } = require('../services/pushNotifications');
     res.json(
       rows.map((r) => ({
         id: r.id,
         label: r.endpoint.startsWith('https://web.push.apple.com/') ? 'Appareil Apple' : 'Navigateur',
         updatedAt: r.updatedAt,
+        // Inscrit sur l'ancienne adresse : toujours actif, remplacé si ce navigateur se réinscrit ici.
+        legacy: r.createdAt.getTime() < DOMAIN_SWITCH,
+        host: new URL(r.endpoint).host,
       })),
     );
   }),

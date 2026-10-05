@@ -18,10 +18,7 @@ async function alertNewPoolRounds(db, c) {
       if (r >= 2) rounds.set(r, [...(rounds.get(r) || []), p.id]);
     }
     if (!rounds.size) return 0;
-    const subs = await db.pushSubscription.findMany({
-      where: { enabled: true, OR: [{ tournamentIds: { has: c.tournamentId } }, { competitionIds: { has: c.id } }] },
-      select: { id: true },
-    });
+    const subs = await require('./pushNotifications').followers(db, c);
     if (!subs.length) return 0;
     let queued = 0;
     for (const [round, ids] of rounds) {
