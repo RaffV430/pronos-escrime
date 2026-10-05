@@ -28,7 +28,7 @@ function createEngardeClient({ http = axios } = {}) {
         headers: {
           Accept: 'text/html,application/xml',
           'Accept-Language': 'fr-FR',
-          'User-Agent': 'PronosEscrime/1.0 (+https://pronos-escrime.vercel.app)',
+          'User-Agent': 'PronosEscrime/1.0 (+https://www.pronos-escrime.fr)',
           ...headers,
         },
       });
