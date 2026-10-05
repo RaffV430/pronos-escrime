@@ -338,6 +338,10 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
     }
   }
   const oldRounds = await tx.matchRound.findMany({ where: { competitionId: c.id } });
+  const imported = new Set(observation.matches.map((m) => m.sourceKey));
+  const matchIssues = new Set(
+    (observation.issues || []).filter((i) => i.sourceKey && imported.has(i.sourceKey)).map((i) => i.message),
+  );
   const missingRounds = oldRounds.filter((r) => !observation.rounds.some((n) => n.round === r.round));
   const summary = {
     cancelledIds: cancelled,
@@ -351,7 +355,9 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
     checked: plan.length,
     checkedAt: observation.checkedAt.toISOString(),
     warnings: [
-      ...observation.warnings,
+      // Un match importé « en attente » est signalé une seule fois, par la ligne du match lui-même (et plus du
+      // tout une fois validé par l'administration) ; les anomalies sans match importé restent signalées ici.
+      ...observation.warnings.filter((w) => !matchIssues.has(w)),
       ...missingRounds.map((r) => `${r.round} : tour absent de la lecture officielle, conservé pour vérification.`),
     ],
     conflicts: plan.conflicts,
@@ -539,6 +545,7 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
     }
   }
 
+  summary.warnings = [...new Set(summary.warnings)];
   return summary;
 }
 const recompose = require('./poolRecompose');

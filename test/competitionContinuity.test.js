@@ -227,3 +227,50 @@ test('adversaires modifiés sur la source : la validation admin fait foi tant qu
   assert.equal(m.manualResultConfirmed, false);
   assert.equal(p.pointsEarned, 0);
 });
+test('match en attente : une seule ligne d’avertissement, plus rien une fois validé par l’administration', async () => {
+  const c = { id: 1, name: 'Event', podiumRoster: [], rosterSourceUrl: 'roster' };
+  const m = {
+    id: 7,
+    competitionId: 1,
+    sourceKey: 'T32:4',
+    sourceUrl: 'source',
+    round: 'T32',
+    player1: 'A',
+    player2: 'B',
+    isFinished: false,
+    isLocked: true,
+  };
+  const db = {
+    $queryRaw: async () => [],
+    competition: { findUnique: async () => c },
+    match: { findMany: async () => [{ ...m }], update: async ({ data }) => Object.assign(m, data) },
+    matchRound: { findMany: async () => [], upsert: async () => {} },
+    prediction: { findMany: async () => [], updateMany: async () => ({ count: 0 }) },
+    auditLog: { create: async () => {} },
+  };
+  const message = 'T32 · match 4 : Score final incohérent.';
+  const obs = {
+    sourceUrl: 'source',
+    checkedAt: new Date('2026-10-05T11:00:00Z'),
+    rounds: [],
+    issues: [{ sourceKey: 'T32:4', round: 'T32', message }, { message: 'Page de tableau 2 : illisible.' }],
+    warnings: [message, 'Page de tableau 2 : illisible.'],
+    matches: [{ ...m, winner: 1, pointsPending: true, syncIssue: message }],
+  };
+  let s = await applyObservation(db, c, obs, 1);
+  assert.deepEqual([...s.warnings].sort(), [message, 'Page de tableau 2 : illisible.'].sort());
+  assert.equal(s.warnings.filter((w) => w === message).length, 1);
+  // Validation par l'administration (même vainqueur que la source) : la ligne du match disparaît.
+  Object.assign(m, {
+    manualResultConfirmed: true,
+    pointsPending: false,
+    syncIssue: null,
+    isFinished: true,
+    score1: 15,
+    score2: 9,
+    winner: 1,
+    resultType: 'NORMAL',
+  });
+  s = await applyObservation(db, c, obs, 1);
+  assert.deepEqual(s.warnings, ['Page de tableau 2 : illisible.']);
+});
