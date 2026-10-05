@@ -155,8 +155,13 @@ async function engardeEvent(prisma, { date = '2026-09-20', time = '12:00', forma
       return { error };
     }
   };
-  const player = async (name = 'Joueur') =>
-    prisma.user.create({ data: { email: `${name}-${slug}-${Math.random()}@exemple.test`, password: 'x', name } });
+  let players = 0;
+  const player = async (name = 'Joueur') => {
+    const unique = `${name} ${slug}-${++players}`;
+    return prisma.user.create({
+      data: { email: `${unique.replace(/\W+/g, '-')}@exemple.test`, password: 'x', name: unique },
+    });
+  };
   return { id: c.id, tournamentId: tournament.id, admin, site, client, run, attempt, player };
 }
 
