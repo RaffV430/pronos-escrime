@@ -262,6 +262,32 @@ function reopenedByPublishedTime(late, timed, now = Date.now()) {
   }
   return out;
 }
+// Validation administrative (score ou retrait médical) d'un match en écart avec la source : l'écart
+// constaté juste après est enregistré une fois ; tant que la source montre exactement le même écart, la
+// validation est conservée (pas de nouveau signalement, points maintenus). Un écart différent = la source a
+// encore changé : le match repasse en vérification.
+const VALIDATED = ['Retrait médical', 'Correction du résultat officiel'];
+const ACKNOWLEDGED = 'Écart source conservé après validation';
+async function acknowledgedConflict(tx, match, issue, actorId) {
+  if (!match?.manualResultConfirmed) return null;
+  const signature = JSON.stringify([issue.sourceKey, issue.official, issue.message]);
+  const last = await tx.auditLog.findFirst({
+    where: { targetType: 'Match', targetId: match.id, action: { in: [...VALIDATED, ACKNOWLEDGED] } },
+    orderBy: { id: 'desc' },
+  });
+  if (!last) return null;
+  if (last.action === ACKNOWLEDGED) return last.after?.signature === signature ? 'kept' : null;
+  await tx.auditLog.create({
+    data: {
+      actorId: actorId || 0,
+      action: ACKNOWLEDGED,
+      targetType: 'Match',
+      targetId: match.id,
+      after: { signature, official: issue.official, message: issue.message },
+    },
+  });
+  return 'new';
+}
 async function applyObservation(tx, c, observation, actorId, leaseToken = null) {
   await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
   if (leaseToken) await require('./ftlScheduler').assertClaim(tx, c.id, leaseToken);
@@ -331,8 +357,26 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
     conflicts: plan.conflicts,
   };
   for (const issue of plan.conflicts) {
+    // Écart déjà tranché par un administrateur : sa validation fait foi tant que la source ne change plus.
+    const ack = await acknowledgedConflict(
+      tx,
+      existing.find((m) => m.id === issue.id),
+      issue,
+      actorId,
+    );
+    if (ack) {
+      if (ack === 'new')
+        summary.notes = [
+          ...(summary.notes || []),
+          `Match #${issue.id} : résultat validé par l’administration conservé malgré l’écart avec la source officielle.`,
+        ];
+      continue;
+    }
     // No score, opponent, prediction, key or freshness changes on an ambiguous match.
-    await tx.match.update({ where: { id: issue.id }, data: { syncIssue: issue.message, pointsPending: true } });
+    await tx.match.update({
+      where: { id: issue.id },
+      data: { syncIssue: issue.message, pointsPending: true, manualResultConfirmed: false },
+    });
     const predictions = await tx.prediction.findMany({ where: { matchId: issue.id } });
     for (const field of ['pointsEarned', 'bonusPoints'])
       summary.pointsUpdated += await rescore(
