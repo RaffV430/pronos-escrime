@@ -937,6 +937,7 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
       ];
     summary.automatic = automatic;
     summary.eventDate = config.date;
+    summary.timezone = config.timezone || null;
     const start = require('./eventStart').eventStart(config);
     if (start !== null) summary.eventStart = new Date(start).toISOString();
     // Poules encore ouvertes au « premier résultat » : le suivi doit rester frais (2 min) pendant l'épreuve.

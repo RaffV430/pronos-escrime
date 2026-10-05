@@ -80,6 +80,16 @@ async function finish(db, competitionId, token, summary, error = null, now = new
         duringEvent: !beforeEvent,
       })
       .catch(() => {});
+  // Site officiel figé en pleine épreuve (aucun nouveau résultat depuis longtemps) : alerte des administrateurs.
+  if (!error && !beforeEvent)
+    await require('./syncHealth')
+      .alertStale(db, {
+        competitionId,
+        eventStart: summary?.eventStart,
+        complete,
+        timezone: summary?.timezone || 'Europe/Paris',
+      })
+      .catch(() => {});
   // Phase finale close faute d'horaire : alerte des administrateurs (une fois par match).
   if (!error)
     try {
