@@ -453,3 +453,29 @@ test('tableau publié alors que des poules ne sont pas finies : les deux sont su
   assert.equal(await prisma.pool.count({ where: { competitionId: ev.id } }), 2, JSON.stringify(s.warnings));
   assert.equal(await prisma.match.count({ where: { competitionId: ev.id, round: 'T16' } }), 8);
 });
+
+test('jour d’une phase corrigé par l’administration : appliqué au contrôle suivant', opts, async () => {
+  const ev = await S.engardeEvent(prisma);
+  // Second tour de poules à 9 h : sans correction, l'app le place au lendemain (avant le premier tour).
+  ev.site.files = {
+    'tireurs.htm': S.rosterHtml(entries()),
+    'poules1.htm': POOLS(),
+    'poules2.htm': S.emptyPools(POOLS().replace(/12:30/g, '09:00')),
+  };
+  await ev.run();
+  const round2 = async () =>
+    (await prisma.pool.findMany({ where: { competitionId: ev.id, name: { startsWith: 'Tour 2' } } }))[0];
+  assert.equal((await round2()).startsAt.toISOString(), '2026-09-21T07:00:00.000Z');
+  const schedule = require('../../src/services/schedule');
+  await prisma.auditLog.create({
+    data: {
+      actorId: ev.admin.id,
+      action: schedule.CORRECTION,
+      targetType: 'Competition',
+      targetId: ev.id,
+      after: schedule.validateCorrection({ phaseDays: { 'pools-2': '2026-09-22' } }),
+    },
+  });
+  await ev.run();
+  assert.equal((await round2()).startsAt.toISOString(), '2026-09-22T07:00:00.000Z');
+});
