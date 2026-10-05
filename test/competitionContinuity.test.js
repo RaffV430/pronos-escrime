@@ -155,3 +155,75 @@ test('pending import preserves prediction IDs and picks, removes only affected p
   const again = await applyObservation(db, c, obs, 1);
   assert.equal(again.pointsUpdated, 0);
 });
+test('adversaires modifiés sur la source : la validation admin fait foi tant que l’écart ne change pas', async () => {
+  const c = { id: 1, name: 'Event', podiumRoster: [], rosterSourceUrl: 'roster' };
+  const m = {
+    id: 7,
+    competitionId: 1,
+    sourceKey: 'T16:1',
+    sourceUrl: 'source',
+    round: 'T16',
+    player1: 'DUPONT',
+    player2: 'MARTIN',
+    isFinished: true,
+    isLocked: true,
+    score1: 15,
+    score2: 10,
+    winner: 1,
+    resultType: 'NORMAL',
+    resultRegisteredAt: new Date('2026-10-05T10:00:00Z'),
+  };
+  const p = { id: 9, matchId: 7, predictedScore1: 15, predictedScore2: 10, pointsEarned: 4, bonusPoints: 0 };
+  const audit = [];
+  const db = {
+    $queryRaw: async () => [],
+    competition: { findUnique: async () => c },
+    match: { findMany: async () => [{ ...m }], update: async ({ data }) => Object.assign(m, data) },
+    matchRound: { findMany: async () => [], upsert: async () => {} },
+    prediction: {
+      findMany: async () => [{ ...p }],
+      updateMany: async ({ where, data }) => {
+        if (!Object.entries(where).every(([k, v]) => p[k] === v)) return { count: 0 };
+        Object.assign(p, data);
+        return { count: 1 };
+      },
+    },
+    auditLog: {
+      create: async ({ data }) => audit.push({ id: audit.length + 1, ...data }),
+      findFirst: async ({ where }) =>
+        audit.filter((a) => a.targetId === where.targetId && where.action.in.includes(a.action)).at(-1) || null,
+    },
+  };
+  const observe = (player2) => ({
+    sourceUrl: 'source',
+    checkedAt: new Date('2026-10-05T11:00:00Z'),
+    rounds: [],
+    warnings: [],
+    matches: [{ ...m, player2, isFinished: true, score1: 15, score2: 10 }],
+  });
+  // 1. La source montre MARTINEZ au lieu de MARTIN : vérification, points en attente.
+  let s = await applyObservation(db, c, observe('MARTINEZ'), 1);
+  assert.ok(m.syncIssue);
+  assert.equal(m.pointsPending, true);
+  assert.equal(p.pointsEarned, 0);
+  assert.equal(s.warnings.length, 1);
+  // 2. L'administrateur valide le résultat (route admin).
+  Object.assign(m, { syncIssue: null, pointsPending: false, manualResultConfirmed: true });
+  p.pointsEarned = 4;
+  audit.push({ id: audit.length + 1, action: 'Correction du résultat officiel', targetType: 'Match', targetId: 7 });
+  // 3. Contrôles suivants, même écart : validation conservée, plus de signalement.
+  for (let i = 0; i < 3; i++) {
+    s = await applyObservation(db, c, observe('MARTINEZ'), 1);
+    assert.equal(m.syncIssue, null);
+    assert.equal(m.pointsPending, false);
+    assert.equal(p.pointsEarned, 4);
+    assert.deepEqual(s.warnings, []);
+  }
+  assert.equal(audit.filter((a) => a.action === 'Écart source conservé après validation').length, 1);
+  // 4. La source change encore (autre adversaire) : nouvelle vérification.
+  s = await applyObservation(db, c, observe('BERNARD'), 1);
+  assert.ok(m.syncIssue);
+  assert.equal(m.pointsPending, true);
+  assert.equal(m.manualResultConfirmed, false);
+  assert.equal(p.pointsEarned, 0);
+});
