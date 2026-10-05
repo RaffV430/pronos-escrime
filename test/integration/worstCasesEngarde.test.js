@@ -479,3 +479,23 @@ test('jour d’une phase corrigé par l’administration : appliqué au contrôl
   await ev.run();
   assert.equal((await round2()).startsAt.toISOString(), '2026-09-22T07:00:00.000Z');
 });
+
+test('tirage publié la veille puis appel fait : poules confirmées, joueurs prévenus une fois', opts, async () => {
+  const ev = await S.engardeEvent(prisma, { date: '2027-01-10' });
+  ev.site.files = {
+    'tireurs.htm': S.rosterHtml(entries(), { checkedIn: false }),
+    'poules1.htm': S.emptyPools(),
+  };
+  await ev.run();
+  const p = await ev.player();
+  const mine = await sub(p.id);
+  assert.equal(await prisma.pool.count({ where: { competitionId: ev.id, lockMode: 'PROVISIONAL' } }), 2);
+  ev.site.files['tireurs.htm'] = S.rosterHtml(entries(), { checkedIn: true });
+  const s = await ev.run();
+  assert.equal(await prisma.pool.count({ where: { competitionId: ev.id, lockMode: 'PROVISIONAL' } }), 0);
+  const confirmed = () =>
+    prisma.pushDelivery.count({ where: { competitionId: ev.id, round: 'pools-confirmed', subscriptionId: mine.id } });
+  assert.equal(await confirmed(), 1, JSON.stringify(s.notes));
+  await ev.run();
+  assert.equal(await confirmed(), 1, 'une seule fois');
+});

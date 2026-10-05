@@ -317,6 +317,9 @@ const reopenedText = (round, start, timezone = 'Europe/Paris') =>
 const recapText = (r) =>
   `Épreuve terminée · ${r.points} point${r.points > 1 ? 's' : ''}` +
   (r.rank ? ` · ${r.rank === 1 ? '1er' : `${r.rank}e`} sur ${r.players}` : '') +
+  (r.played
+    ? ` · ${r.winners} vainqueur${r.winners > 1 ? 's' : ''} trouvé${r.winners > 1 ? 's' : ''} sur ${r.played}`
+    : '') +
   ' · votre récap est prêt';
 async function queueSpecial(db, id, context = null) {
   const shared = context || (await notificationContext(db));
@@ -362,7 +365,7 @@ async function queueSpecial(db, id, context = null) {
       }
       // Récap de fin d'épreuve : pour les joueurs qui ont demandé leurs bilans (tours ou poules),
       // une fois le podium officiel publié, s'ils ont pronostiqué dans l'épreuve.
-      if (p.roundResults || p.poolResults) {
+      if (p.recap || p.roundResults || p.poolResults) {
         const since = Math.max(Date.now() - 86400000, new Date(sub.preferencesSince || sub.createdAt).getTime());
         for (const x of shared.filter((y) => follows(sub, y.competition))) {
           const ended = x.competition.podiumResolvedAt && new Date(x.competition.podiumResolvedAt).getTime();
@@ -565,7 +568,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     (kind === 'REMINDER' && !prefs.reminders) ||
     (kind === 'ROUND' && !prefs.roundResults) ||
     (kind === 'POOLRESULTS' && !prefs.poolResults) ||
-    (kind === 'RECAP' && !prefs.roundResults && !prefs.poolResults) ||
+    (kind === 'RECAP' && !prefs.recap && !prefs.roundResults && !prefs.poolResults) ||
     (kind === 'REOPENED' && !prefs.newMatches)
   )
     return cancel();
@@ -679,7 +682,16 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     if (Date.now() - delivery.createdAt.getTime() > 86400000) return cancel();
     const alerts = require('./poolRoundAlerts');
     const newRound = alerts.roundOfDelivery(round);
-    if (newRound) {
+    if (round === alerts.CONFIRMED) {
+      // Tirage provisoire devenu définitif : pronostics de poules ouverts.
+      const open = await db.pool.findMany({
+        where: { competitionId: c.id, isLocked: false, isFinal: false, lockMode: { not: 'PROVISIONAL' } },
+        select: { name: true, closesAt: true, lockMode: true },
+      });
+      if (!open.length) return cancel();
+      ttl = 3600;
+      content = { ...alerts.confirmedNotification(c, open), tag: `pronos-${id}` };
+    } else if (newRound) {
       // Nouveau tour de poules : rien à annoncer s'il est déjà clos.
       const open = await alerts.poolsOfRound(db, c, newRound);
       if (!open.length) return cancel();

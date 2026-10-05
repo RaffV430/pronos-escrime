@@ -3,6 +3,7 @@
 const { reportError } = require('../lib/report');
 
 const PREFIX = 'pools-new-';
+const CONFIRMED = 'pools-confirmed';
 const roundOf = (name) => Number(/^Tour (\d+) · /.exec(name || '')?.[1]) || null;
 const openPools = { isLocked: false, isFinal: false, lockMode: { not: 'PROVISIONAL' } };
 
@@ -72,4 +73,55 @@ function newRoundNotification(c, round, pools, now = Date.now()) {
   };
 }
 
-module.exports = { alertNewPoolRounds, roundOfDelivery, poolsOfRound, newRoundNotification, PREFIX };
+// Tirage provisoire confirmé (appel fait, ou jour de l'épreuve) : une notification par appareil, une fois.
+async function alertPoolsConfirmed(db, c, poolIds) {
+  try {
+    if (!poolIds.length) return 0;
+    const subs = await require('./pushNotifications').followers(db, c);
+    if (!subs.length) return 0;
+    const created = await db.pushDelivery.createMany({
+      data: subs.map((s) => ({
+        subscriptionId: s.id,
+        competitionId: c.id,
+        throughEventId: 0,
+        kind: 'POOLS',
+        round: CONFIRMED,
+        matchIds: poolIds,
+      })),
+      skipDuplicates: true,
+    });
+    return created.count;
+  } catch (e) {
+    reportError(e, 'alerte poules confirmées');
+    return 0;
+  }
+}
+function confirmedNotification(c, pools, now = Date.now()) {
+  const times = pools
+    .filter((p) => p.lockMode === 'START_OR_FIRST_RESULT')
+    .map((p) => new Date(p.closesAt).getTime())
+    .filter((t) => t > now);
+  const at = times.length
+    ? new Date(Math.min(...times)).toLocaleTimeString('fr-FR', {
+        timeZone: 'Europe/Paris',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
+  return {
+    title: `Poules confirmées · ${c.name}`,
+    body: `Le tirage est définitif : pronostics de poules ouverts ${at ? `jusqu'à ${at}` : "jusqu'au premier résultat"}.`,
+    url: `/?tournament=${c.tournamentId}&event=${c.id}&view=pools`,
+  };
+}
+
+module.exports = {
+  alertNewPoolRounds,
+  alertPoolsConfirmed,
+  confirmedNotification,
+  roundOfDelivery,
+  poolsOfRound,
+  newRoundNotification,
+  PREFIX,
+  CONFIRMED,
+};
