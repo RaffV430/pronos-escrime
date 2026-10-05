@@ -33,7 +33,7 @@ async function verifyResetToken(db, token) {
 
 function appUrl() {
   const configured = process.env.APP_URL?.trim() || process.env.CORS_ORIGINS?.split(',')[0]?.trim();
-  return (configured || 'https://pronos-escrime.vercel.app').replace(/\/$/, '');
+  return (configured || 'https://www.pronos-escrime.fr').replace(/\/$/, '');
 }
 
 function resetEmail(user, token) {
