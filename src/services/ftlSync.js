@@ -151,6 +151,11 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
       entrySeeds,
       allowPartial: true,
     });
+    const schedule = require('./schedule');
+    for (const m of parsed.matches) {
+      const forced = schedule.phaseDay(config, m.round);
+      if (forced && m.startsAt) m.startsAt = schedule.onDay(m.startsAt, forced, config.timezone);
+    }
     matches.push(...parsed.matches);
     rounds.push(...parsed.rounds);
     issues.push(...(parsed.issues || []));
@@ -577,7 +582,7 @@ function poolRoundContext($, url, config) {
   return {
     sources: ordered,
     round,
-    date: round === 1 ? config.date : null,
+    date: require('./schedule').phaseDay(config, `pools-${round}`) || (round === 1 ? config.date : null),
     label: (n) => (round === 1 ? `Poule ${n}` : `Tour ${round} · Poule ${n}`),
   };
 }
@@ -646,7 +651,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
       if (!tables.length) throw failure('Matrices de poules non encore publiées.');
       const poolNumbers = tables.map((t) => clean($(t).parent().find('.poolNum').text()));
       if (new Set(poolNumbers).size !== poolNumbers.length) throw failure('Numéros de poules ambigus.');
-      if (context.round > 1)
+      if (context.round > 1 && !require('./schedule').phaseDay(config, `pools-${context.round}`))
         context.date = phaseDate({
           round: context.round,
           date: config.date,
