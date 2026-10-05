@@ -164,6 +164,7 @@ model Pool {
   rankingAsOf DateTime?
   isLocked      Boolean      @default(false)
   isFinal       Boolean      @default(false)
+  bouts         Json?
   createdAt     DateTime     @default(now())
   fencers       PoolFencer[]
 

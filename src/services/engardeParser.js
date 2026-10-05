@@ -413,6 +413,9 @@ function parsePool($, table, number, header) {
     ...timeAndStrip(header),
     complete,
     ambiguous,
+    // Matrice complète des assauts, même forme que FencingTimeLive : « V5 », « D3 », « V » (touches
+    // non publiées) ou null (assaut pas encore tiré ou annulé).
+    bouts: rows.map((r) => r.results.map((x) => (!x ? null : x.win ? `V${x.touches ?? ''}` : `D${x.touches}`))),
     rows: rows.map((r, i) => ({
       name: r.name,
       club: r.club,

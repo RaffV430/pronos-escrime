@@ -135,6 +135,10 @@ function parsePools(html) {
       complete,
       ambiguous,
       ...stripTime(container.find('.poolStripTime').text()),
+      // Matrice complète des assauts (ligne = tireur, colonne = adversaire) : « V5 », « D3 » ou null.
+      bouts: rows.map((r, i) =>
+        r.cells.map((c, j) => (i === j || r.absent || rows[j].absent || !/^[VD][0-5]$/.test(c) ? null : c)),
+      ),
       rows: rows.map((r, i) => ({
         name: r.name,
         position: r.position,
@@ -216,9 +220,12 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
           observed.provisional,
         )
       : null;
+  const bouts =
+    Array.isArray(observed.bouts) && observed.bouts.length === current.fencers.length ? observed.bouts : null;
   await tx.pool.update({
     where: { id: current.id },
     data: {
+      ...(bouts && JSON.stringify(bouts) !== JSON.stringify(current.bouts ?? null) ? { bouts } : {}),
       ...(lock && lock.lockMode !== current.lockMode ? { lockMode: lock.lockMode } : {}),
       ...(lock && new Date(lock.closesAt).getTime() !== new Date(current.closesAt).getTime()
         ? { closesAt: lock.closesAt }
