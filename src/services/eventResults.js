@@ -205,4 +205,14 @@ function buildResults(tournaments, { configs = new Map(), firstDates = new Map()
   return out.sort((a, b) => b.start.localeCompare(a.start) || b.id - a.id);
 }
 
-module.exports = { buildResults, countryOf, podiumOf, finished };
+// « Raffaele Venturi » → « Raffaele V. » ; un pseudonyme d'un seul mot reste tel quel.
+const publicName = (name) => {
+  const words = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return 'Joueur';
+  return words.length === 1 ? words[0] : `${words[0]} ${words[1][0].toUpperCase()}.`;
+};
+
+module.exports = { buildResults, countryOf, podiumOf, finished, publicName };

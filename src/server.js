@@ -69,6 +69,8 @@ app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/community', require('./routes/communityRoutes'));
 app.use('/api/me', require('./routes/personalRoutes'));
 app.use('/api/results', require('./routes/resultsRoutes'));
+// Page publique d'un tournoi (sans compte).
+app.use('/api/public', require('./routes/publicRoutes'));
 
 app.get('/api/tournaments', authMiddleware, async (req, res) => {
   try {
