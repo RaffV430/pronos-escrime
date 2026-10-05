@@ -272,7 +272,85 @@ async function alertAdmins(db, { competitionId, failures, previousFailures, erro
   }
 }
 
+// Site officiel figé : en pleine épreuve, plus aucun nouveau résultat (poule ou tableau) depuis longtemps,
+// sans phase annoncée plus tard. Seuils larges : poules longues (jusqu'à 2 h) et premiers tours de tableau
+// lents à remonter (1 h et plus). Alerte des administrateurs, une fois par période de silence.
+const STALE_ACTION = 'Site officiel figé';
+const STALE_POOLS = 150 * 60000; // 2 h 30 sans résultat pendant les poules
+const STALE_TABLEAU = 105 * 60000; // 1 h 45 pendant le tableau
+async function alertStale(db, { competitionId, eventStart, complete, timezone = 'Europe/Paris' }, deps = {}) {
+  try {
+    const now = deps.now || new Date();
+    if (complete || !eventStart) return null;
+    const start = new Date(eventStart).getTime();
+    if (!(now.getTime() > start + 30 * 60000)) return null;
+    // Nuit (épreuve sur plusieurs jours) : pas d'alerte entre 22 h et 7 h, heure du lieu.
+    const hour = Number(
+      new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', hourCycle: 'h23' }).format(now),
+    );
+    if (hour >= 22 || hour < 7) return null;
+    const [lastMatch, lastPool, nextMatch, nextPool, tableauStarted] = await Promise.all([
+      db.match.aggregate({ where: { competitionId }, _max: { resultRegisteredAt: true } }),
+      db.poolFencer.aggregate({ where: { pool: { competitionId } }, _max: { firstResultAt: true } }),
+      db.match.findFirst({
+        where: { competitionId, startsAt: { gt: now }, isFinished: false },
+        select: { startsAt: true },
+        orderBy: { startsAt: 'asc' },
+      }),
+      db.pool.findFirst({
+        where: { competitionId, startsAt: { gt: now }, isFinal: false },
+        select: { startsAt: true },
+        orderBy: { startsAt: 'asc' },
+      }),
+      db.match.count({ where: { competitionId, startsAt: { lte: now } } }),
+    ]);
+    // Une phase annoncée plus tard dans la journée : l'attente est normale.
+    for (const next of [nextMatch, nextPool])
+      if (next && new Date(next.startsAt).getTime() - now.getTime() < 18 * 3600000) return null;
+    const last = Math.max(
+      start,
+      ...[lastMatch._max.resultRegisteredAt, lastPool._max.firstResultAt]
+        .filter(Boolean)
+        .map((d) => new Date(d).getTime()),
+    );
+    const limit = tableauStarted ? STALE_TABLEAU : STALE_POOLS;
+    if (now.getTime() - last < limit) return null;
+    const since = new Date(last).toISOString();
+    const previous = await db.auditLog.findFirst({
+      where: { action: STALE_ACTION, targetType: 'Competition', targetId: competitionId },
+      orderBy: { id: 'desc' },
+    });
+    if (previous?.after?.since === since) return null;
+    const competition = await db.competition.findUnique({
+      where: { id: competitionId },
+      select: { name: true, tournamentId: true },
+    });
+    const minutes = Math.round((now.getTime() - last) / 60000);
+    const duration = `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`;
+    const entry = await db.auditLog.create({
+      data: { actorId: 0, action: STALE_ACTION, targetType: 'Competition', targetId: competitionId, after: { since } },
+    });
+    const sent = await notifyAdmins(
+      db,
+      {
+        title: `Site officiel figé ? · ${competition?.name || `épreuve ${competitionId}`}`,
+        body: `Aucun nouveau résultat depuis ${duration}. Le site officiel n'est peut-être plus mis à jour : vérifiez auprès du directoire technique.`,
+        tag: `stale-${competitionId}`,
+        url: competition ? `/?tournament=${competition.tournamentId}&event=${competitionId}` : '/?admin=sync',
+      },
+      deps,
+    );
+    await logResult(db, entry, { since, ...sent });
+    return { kind: 'stale', since, ...sent };
+  } catch (e) {
+    reportError(e, 'alerte site figé');
+    return null;
+  }
+}
+
 module.exports = {
+  alertStale,
+  STALE_ACTION,
   health,
   syncHealth,
   alertAdmins,
