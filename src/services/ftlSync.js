@@ -740,6 +740,8 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
             },
             { timeout: 15000 },
           );
+          // Heure retenue visible du tour suivant dans ce même contrôle (date des tours de poules).
+          if (observed.startsAt) snapshot.startsAt = observed.startsAt;
           summary.checked++;
           for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
           // Forfait ou abandon médical en poule : alerte aux joueurs qui ont ce tireur sur leur podium.
