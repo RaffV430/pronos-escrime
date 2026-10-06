@@ -202,6 +202,33 @@ router.get('/tournaments', async (req, res) => {
     res.status(500).json({ error: 'Liste indisponible.' });
   }
 });
+// Lien d'invitation (/rejoindre/<code>) : ce que la personne invitée rejoint, avant de se connecter.
+router.get('/invitations/:code', async (req, res) => {
+  try {
+    const code = String(req.params.code || '').toUpperCase();
+    if (!/^[A-F0-9]{24}$/.test(code)) return res.status(400).json({ error: 'Lien d’invitation invalide.' });
+    const league = await db.league.findUnique({
+      where: { code },
+      select: {
+        name: true,
+        kind: true,
+        tournament: { select: { id: true, name: true } },
+        _count: { select: { members: true } },
+      },
+    });
+    if (!league) return res.status(404).json({ error: 'Invitation introuvable ou expirée.' });
+    res.json({
+      code,
+      name: league.name,
+      kind: league.kind,
+      tournament: league.tournament,
+      members: league._count.members,
+    });
+  } catch (error) {
+    reportError(error, 'invitation');
+    res.status(500).json({ error: 'Invitation indisponible.' });
+  }
+});
 router.get('/sitemap.xml', async (req, res) => {
   try {
     const list = await publicList();

@@ -187,6 +187,41 @@ router.post(
     res.json({ success: true });
   }),
 );
+// Duel match par match sur les matchs terminés uniquement : aucun pronostic n'est dévoilé avant la fin d'un match.
+async function duel(userId, opponentId, competition) {
+  const matches = await db.match.findMany({
+    where: {
+      isFinished: true,
+      OR: [{ resultType: null }, { resultType: { not: 'CANCELLED' } }],
+      ...(competition ? { competition } : {}),
+    },
+    include: { competition: { select: { name: true } } },
+    orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+  });
+  const ids = matches.map((m) => m.id);
+  const [mine, theirs, opponent] = await Promise.all([
+    db.prediction.findMany({ where: { userId, matchId: { in: ids } } }),
+    db.prediction.findMany({ where: { userId: opponentId, matchId: { in: ids } } }),
+    db.user.findUnique({ where: { id: opponentId }, select: { id: true, name: true } }),
+  ]);
+  return { opponent, ...buildDuel(matches, mine, theirs) };
+}
+// Duel depuis les Classements, avec n'importe quel joueur classé : épreuve, tournoi ou toute la saison.
+router.get(
+  '/duel/:opponentId',
+  wrap(async (req, res) => {
+    const opponentId = id(req.params.opponentId);
+    if (opponentId === req.user.userId) fail('Choisissez un autre joueur.');
+    if (!(await db.user.findUnique({ where: { id: opponentId }, select: { id: true } })))
+      fail('Joueur introuvable.', 404);
+    const competition = req.query.competitionId
+      ? { id: id(req.query.competitionId) }
+      : req.query.tournamentId
+        ? { tournamentId: id(req.query.tournamentId) }
+        : null;
+    res.json(await duel(req.user.userId, opponentId, competition));
+  }),
+);
 router.get(
   '/leagues/:id/duel/:opponentId',
   wrap(async (req, res) => {
@@ -196,23 +231,10 @@ router.get(
     if (!league || !league.members.some((m) => m.userId === userId)) fail('Cette ligue est privée.', 403);
     if (opponentId === userId || !league.members.some((m) => m.userId === opponentId))
       fail('Choisissez un autre membre de la ligue.', 404);
-    // Uniquement les matchs terminés : aucun pronostic n'est dévoilé avant la fin d'un match.
-    const matches = await db.match.findMany({
-      where: {
-        isFinished: true,
-        OR: [{ resultType: null }, { resultType: { not: 'CANCELLED' } }],
-        competition: { tournamentId: league.tournamentId },
-      },
-      include: { competition: { select: { name: true } } },
-      orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+    res.json({
+      league: { id: league.id, name: league.name },
+      ...(await duel(userId, opponentId, { tournamentId: league.tournamentId })),
     });
-    const ids = matches.map((m) => m.id);
-    const [mine, theirs, opponent] = await Promise.all([
-      db.prediction.findMany({ where: { userId, matchId: { in: ids } } }),
-      db.prediction.findMany({ where: { userId: opponentId, matchId: { in: ids } } }),
-      db.user.findUnique({ where: { id: opponentId }, select: { id: true, name: true } }),
-    ]);
-    res.json({ league: { id: league.id, name: league.name }, opponent, ...buildDuel(matches, mine, theirs) });
   }),
 );
 router.get(
