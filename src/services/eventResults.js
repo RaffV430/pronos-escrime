@@ -215,4 +215,28 @@ const publicName = (name) => {
   return words.length === 1 ? words[0] : `${words[0]} ${words[1][0].toUpperCase()}.`;
 };
 
-module.exports = { buildResults, countryOf, podiumOf, finished, publicName };
+// Texte de l'aperçu d'un lien partagé : lieu, dates et vainqueurs connus.
+const MONTHS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+function shareDates(start, end) {
+  if (!start) return '';
+  const [y1, m1, d1] = start.split('-').map(Number);
+  const [y2, m2, d2] = (end || start).split('-').map(Number);
+  if (start === (end || start)) return `${d1} ${MONTHS[m1 - 1]} ${y1}`;
+  if (y1 === y2 && m1 === m2) return `${d1}–${d2} ${MONTHS[m1 - 1]} ${y1}`;
+  return `${d1} ${MONTHS[m1 - 1]} – ${d2} ${MONTHS[m2 - 1]} ${y2}`;
+}
+function shareText(t, result) {
+  const where = [result?.city, shareDates(result?.start, result?.end)].filter(Boolean).join(' · ');
+  const golds = (result?.competitions || [])
+    .map((c) => {
+      const gold = c.podium.find((p) => p.place === 1);
+      return gold ? `${c.name} : ${gold.name}${gold.country ? ` (${gold.country})` : ''}` : null;
+    })
+    .filter(Boolean);
+  const body = golds.length
+    ? `Vainqueurs — ${golds.slice(0, 3).join(' ; ')}${golds.length > 3 ? '…' : ''}`
+    : 'Podiums, tableaux et classement des pronostiqueurs.';
+  return [where, body].filter(Boolean).join(' · ');
+}
+
+module.exports = { buildResults, countryOf, podiumOf, finished, publicName, shareText, shareDates };
