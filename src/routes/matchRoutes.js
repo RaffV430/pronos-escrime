@@ -171,6 +171,17 @@ router.delete(
   }),
 );
 // Face-à-face des deux tireurs et forme récente (épreuves déjà suivies par l'application).
+// Fiche d'un tireur (parcours dans les épreuves suivies) : déclarée avant /:id pour ne pas être prise pour un match.
+router.get('/fencer', authMiddleware, async (req, res) => {
+  try {
+    res.json(await require('../services/fencerProfile').fencerProfile(prisma, req.query.name));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Erreur fiche tireur:', error);
+    res.status(500).json({ error: 'Fiche indisponible.' });
+  }
+});
+
 router.get('/:id/h2h', authMiddleware, async (req, res) => {
   try {
     res.json(await require('../services/headToHead').headToHead(prisma, Number(req.params.id)));

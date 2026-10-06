@@ -36,7 +36,14 @@ async function headToHead(db, matchId, { limit = 10, formSize = 5 } = {}) {
   const a = match.player1?.trim(),
     b = match.player2?.trim();
   if (!a || !b)
-    return { player1: a || null, player2: b || null, meetings: [], summary: { wins1: 0, wins2: 0 }, form: {} };
+    return {
+      player1: a || null,
+      player2: b || null,
+      meetings: [],
+      poolMeetings: [],
+      summary: { wins1: 0, wins2: 0, poolWins1: 0, poolWins2: 0 },
+      form: {},
+    };
   const others = { id: { not: match.id } };
   const meetings = await db.match.findMany({
     where: {
@@ -64,13 +71,24 @@ async function headToHead(db, matchId, { limit = 10, formSize = 5 } = {}) {
         take: formSize,
       })
     ).map((m) => fromSide(m, name));
-  const [form1, form2] = await Promise.all([recent(a), recent(b)]);
+  const [form1, form2, pools] = await Promise.all([
+    recent(a),
+    recent(b),
+    require('./fencerProfile').poolMeetings(db, a, b),
+  ]);
   const view = meetings.map((m) => fromSide(m, a));
   return {
     player1: a,
     player2: b,
     meetings: view,
-    summary: { wins1: view.filter((m) => m.won).length, wins2: view.filter((m) => !m.won).length },
+    // Assauts de poule entre eux (matrices enregistrées), vus du côté du tireur 1.
+    poolMeetings: pools,
+    summary: {
+      wins1: view.filter((m) => m.won).length,
+      wins2: view.filter((m) => !m.won).length,
+      poolWins1: pools.filter((m) => m.won).length,
+      poolWins2: pools.filter((m) => !m.won).length,
+    },
     form: { player1: form1, player2: form2 },
   };
 }
