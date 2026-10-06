@@ -40,6 +40,7 @@ before(async () => {
   app.use('/api/pools', createPoolRouter(prisma));
   app.use('/api/auth', require('../../src/routes/authRoutes'));
   app.use('/api/public', require('../../src/routes/publicRoutes'));
+  app.use('/api/community', require('../../src/routes/communityRoutes'));
   await new Promise((resolve) => (server = app.listen(0, '127.0.0.1', resolve)));
   base = `http://127.0.0.1:${server.address().port}`;
 });
