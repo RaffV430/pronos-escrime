@@ -99,6 +99,7 @@ function sitemap(tournaments, now = new Date()) {
   const urls = [
     { loc: `${SITE}/`, lastmod: day(now), priority: '1.0' },
     { loc: `${SITE}/resultats`, lastmod: day(now), priority: '0.9' },
+    { loc: `${SITE}/calendrier`, lastmod: day(now), priority: '0.8' },
     ...tournaments.map((t) => ({ loc: `${SITE}/tournoi/${t.id}`, lastmod: day(t.updatedAt), priority: '0.8' })),
     { loc: `${SITE}/confidentialite`, priority: '0.2' },
     { loc: `${SITE}/mentions-legales`, priority: '0.2' },
