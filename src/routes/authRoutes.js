@@ -44,7 +44,7 @@ router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, name: true, email: true, isAdmin: true, totpEnabledAt: true },
+      select: { id: true, name: true, email: true, isAdmin: true, totpEnabledAt: true, publicListing: true },
     });
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
@@ -53,6 +53,22 @@ router.get('/me', authMiddleware, async (req, res) => {
     res.json({ ...rest, username: user.name, twoFactorEnabled: Boolean(totpEnabledAt) });
   } catch (err) {
     console.error('Erreur /me:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Classement de la page publique d'un tournoi : le joueur choisit d'y apparaître (pseudo abrégé) ou non.
+router.put('/me/public-listing', authMiddleware, async (req, res) => {
+  if (typeof req.body?.publicListing !== 'boolean') return res.status(400).json({ error: 'Choix invalide.' });
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.user.userId },
+      data: { publicListing: req.body.publicListing },
+      select: { publicListing: true },
+    });
+    res.json(user);
+  } catch (err) {
+    console.error('Erreur classement public:', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

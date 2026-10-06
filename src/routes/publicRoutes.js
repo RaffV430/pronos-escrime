@@ -54,6 +54,10 @@ router.get('/tournaments/:tournamentId', async (req, res) => {
       orderBy: { id: 'asc' },
     });
     const table = await require('../services/standings').standings(db, { tournamentId });
+    // Joueurs retirés du classement public (Mon compte) : leur rang reste, leur pseudo est masqué.
+    const hidden = new Set(
+      (await db.user.findMany({ where: { publicListing: false }, select: { id: true } })).map((u) => u.id),
+    );
     res.json({
       id: t.id,
       name: t.name,
@@ -96,7 +100,11 @@ router.get('/tournaments/:tournamentId', async (req, res) => {
       leaderboard: table
         .filter((r) => r.totalPoints > 0)
         .slice(0, 10)
-        .map((r) => ({ rank: r.rank, name: publicName(r.name), points: r.totalPoints })),
+        .map((r) => ({
+          rank: r.rank,
+          name: hidden.has(r.id) ? 'Pronostiqueur anonyme' : publicName(r.name),
+          points: r.totalPoints,
+        })),
       players: table.filter((r) => r.totalPoints > 0).length,
     });
   } catch (error) {
