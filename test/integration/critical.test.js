@@ -38,6 +38,8 @@ before(async () => {
   app.use(express.json());
   app.use('/api/matches', require('../../src/routes/matchRoutes'));
   app.use('/api/pools', createPoolRouter(prisma));
+  app.use('/api/auth', require('../../src/routes/authRoutes'));
+  app.use('/api/public', require('../../src/routes/publicRoutes'));
   await new Promise((resolve) => (server = app.listen(0, '127.0.0.1', resolve)));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -342,4 +344,28 @@ test('g) réactions et commentaires sur une vraie base (tables, contraintes, com
   assert.equal((await call('DELETE', `/api/matches/${match.id}/comments/${posted.body.id}`, bob.token)).status, 204);
   const counts = await require('../../src/services/matchSocial').counts(prisma, [match.id]);
   assert.deepEqual(counts.get(match.id), { reactions: 2, comments: 0 });
+});
+
+test('page publique : un joueur retiré du classement public y apparaît anonyme, son rang conservé', opts, async () => {
+  const c = await createCompetition();
+  const match = await createOpenMatch(c.id);
+  const [shown, hidden] = [await createUser(), await createUser()];
+  await prisma.prediction.createMany({
+    data: [
+      { userId: shown.id, matchId: match.id, predictedScore1: 15, predictedScore2: 10, pointsEarned: 3 },
+      { userId: hidden.id, matchId: match.id, predictedScore1: 15, predictedScore2: 11, pointsEarned: 5 },
+    ],
+  });
+  require('../../src/services/standings').invalidateStandings();
+  const bad = await call('PUT', '/api/auth/me/public-listing', hidden.token, { publicListing: 'non' });
+  assert.equal(bad.status, 400);
+  const off = await call('PUT', '/api/auth/me/public-listing', hidden.token, { publicListing: false });
+  assert.deepEqual(off.body, { publicListing: false });
+  const page = await call('GET', `/api/public/tournaments/${c.tournamentId}`, shown.token);
+  assert.equal(page.status, 200);
+  const names = page.body.leaderboard.map((r) => [r.rank, r.name]);
+  assert.deepEqual(names[0], [1, 'Pronostiqueur anonyme']);
+  assert.equal(names[1][0], 2);
+  assert.ok(names[1][1].startsWith('Joueur'));
+  assert.ok(!JSON.stringify(page.body).includes(hidden.name));
 });

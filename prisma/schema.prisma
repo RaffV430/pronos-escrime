@@ -17,6 +17,7 @@ model User {
   totpSecret        String?
   totpEnabledAt     DateTime?
   totpLastStep      Int?
+  publicListing     Boolean            @default(true)
   pushSubscriptions PushSubscription[]
   predictions       Prediction[]
   poolPredictions   PoolPrediction[]
