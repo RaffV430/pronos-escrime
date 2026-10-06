@@ -34,3 +34,10 @@ test('legacy club league consolidation preserves a gap between membership period
   assert.equal(clubMembersAt([member], '2026-09-05').length, 1);
   assert.equal(clubMembersAt([member], '2026-09-15').length, 0);
 });
+
+test('membership migration is accepted by the actual migration loader', () => {
+  const { pending, statements } = require('../src/services/migrations');
+  const migration = pending().find((m) => m.file === '202610071000_club_membership_periods.sql');
+  assert.ok(migration);
+  assert.equal(statements(migration.sql).length, 1);
+});
