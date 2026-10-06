@@ -377,4 +377,15 @@ test('page publique : un joueur retiré du classement public y apparaît anonyme
   assert.ok(list.some((t) => t.id === c.tournamentId));
   const xml = await (await fetch(`${base}/api/public/sitemap.xml`)).text();
   assert.ok(xml.includes(`/tournoi/${c.tournamentId}</loc>`));
+  assert.ok(xml.includes('/resultats</loc>'));
+  // Onglet Résultats sans compte : aucun pronostic dans les réponses.
+  const results = await fetch(`${base}/api/public/results`);
+  assert.equal(results.status, 200);
+  const publicMatches = await (await fetch(`${base}/api/public/competitions/${c.id}/matches`)).json();
+  assert.equal(publicMatches.length, 1);
+  assert.equal(publicMatches[0].predictions, undefined);
+  const pools = await fetch(`${base}/api/public/competitions/${c.id}/pools`);
+  assert.equal(pools.status, 200);
+  const fencer = await (await fetch(`${base}/api/public/fencer?name=${encodeURIComponent(match.player1)}`)).json();
+  assert.equal(fencer.summary.competitions, 0);
 });
