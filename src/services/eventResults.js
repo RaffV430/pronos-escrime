@@ -230,7 +230,9 @@ function shareText(t, result) {
   const golds = (result?.competitions || [])
     .map((c) => {
       const gold = c.podium.find((p) => p.place === 1);
-      return gold ? `${c.name} : ${gold.name}${gold.country ? ` (${gold.country})` : ''}` : null;
+      return gold
+        ? `${c.name.replace(/\s+[—–-]\s+\d{1,2}(er)?\s+\S+\s+\d{4}$/, '')} : ${gold.name}${gold.country ? ` (${gold.country})` : ''}`
+        : null;
     })
     .filter(Boolean);
   const body = golds.length

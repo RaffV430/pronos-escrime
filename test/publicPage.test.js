@@ -20,7 +20,7 @@ test('aperçu de partage : dates et vainqueurs lisibles', () => {
       start: '2026-09-24',
       end: '2026-09-27',
       competitions: [
-        { name: 'Fleuret juniors dames', podium: [{ place: 1, name: 'DOE Jane', country: 'FRA' }] },
+        { name: 'Fleuret juniors dames — 26 septembre 2026', podium: [{ place: 1, name: 'DOE Jane', country: 'FRA' }] },
         { name: 'Fleuret cadets', podium: [] },
       ],
     },
