@@ -52,3 +52,10 @@ test('pending points prevent archiving even if old scores remain final', () => {
   };
   assert.equal(eventComplete(c), false);
 });
+
+test('a unique name is not sufficient when its published nation or club contradicts the roster', () => {
+  const { entryFor } = require('../src/services/engardeRoster');
+  const roster = [{ id: 'old', name: 'MARTIN Alex', country: 'FRA' }];
+  assert.equal(entryFor(roster, 'MARTIN Alex', 'ITA'), null);
+  assert.equal(entryFor(roster, 'MARTIN Alex', 'FRA').id, 'old');
+});

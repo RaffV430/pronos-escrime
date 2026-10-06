@@ -86,7 +86,8 @@ function mergeRoster(current = [], observed = []) {
 // Engagé d'un nom donné ; homonymes départagés par la nation ou le club publié à côté du nom.
 function entryFor(roster, name, club = '') {
   const hits = (roster || []).filter((e) => norm(e.name) === norm(name));
-  if (hits.length <= 1 || !club) return hits.length === 1 ? hits[0] : null;
+  if (hits.length === 1) return club && hits[0].country && norm(hits[0].country) !== norm(club) ? null : hits[0];
+  if (!club) return null;
   const byClub = hits.filter((e) => e.country && norm(e.country) === norm(club));
   if (byClub.length === 1) return byClub[0];
   const active = byClub.filter((e) => e.active !== false);
