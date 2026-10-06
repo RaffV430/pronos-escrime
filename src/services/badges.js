@@ -1,18 +1,55 @@
-// Trophées de la saison, calculés à partir des résultats (rien n'est stocké).
-//  - Sniper : 3 scores exacts ou plus dans un même tournoi
-//  - Série de 10 : 10 bons vainqueurs d'affilée (dans l'ordre des résultats)
-//  - Flair : un bonus outsider obtenu
-//  - Meilleur du tour : le plus de points de tous les joueurs sur un tour terminé
-//  - Assidu : tous les matchs d'un tournoi terminé pronostiqués
-//  - Voyant : un podium pronostiqué parfait (chaque médaille exacte)
+// Trophées de la saison, calculés à partir des résultats (rien n'est stocké), chacun à 4 niveaux :
+//  - Sniper : scores exacts sur la saison (3, 5, 10, 20)
+//  - Série : bons vainqueurs d'affilée, dans l'ordre des résultats (10, 15, 20, 30)
+//  - Flair : outsiders trouvés (bonus outsider) (1, 3, 5, 10)
+//  - Meilleur du tour : tours terminés où l'on a le plus de points de tous les joueurs (1, 3, 5, 10)
+//  - Assidu : tournois terminés dont tous les matchs sont pronostiqués (1, 2, 4, 8)
+//  - Voyant : podiums pronostiqués parfaits (chaque médaille exacte) (1, 2, 3, 5)
+const plural = (n, one, many) => (n > 1 ? many : one);
 const DEFS = {
-  sniper: { label: 'Sniper', icon: '🎯', description: '3 scores exacts dans un même tournoi' },
-  streak: { label: 'Série de 10', icon: '🔥', description: '10 bons vainqueurs d’affilée' },
-  flair: { label: 'Flair', icon: '🦊', description: 'Un outsider trouvé (bonus outsider)' },
-  bestRound: { label: 'Meilleur du tour', icon: '👑', description: 'Le plus de points sur un tour terminé' },
-  assiduous: { label: 'Assidu', icon: '📋', description: 'Tous les matchs d’un tournoi pronostiqués' },
-  seer: { label: 'Voyant', icon: '🔮', description: 'Un podium pronostiqué parfait' },
+  sniper: {
+    label: 'Sniper',
+    icon: '🎯',
+    levels: [3, 5, 10, 20],
+    text: (n) => `${n} ${plural(n, 'score exact', 'scores exacts')} sur la saison`,
+  },
+  streak: {
+    label: 'Série',
+    icon: '🔥',
+    levels: [10, 15, 20, 30],
+    text: (n) => `${n} bons vainqueurs d’affilée`,
+  },
+  flair: {
+    label: 'Flair',
+    icon: '🦊',
+    levels: [1, 3, 5, 10],
+    text: (n) => (n === 1 ? 'Un outsider trouvé (bonus outsider)' : `${n} outsiders trouvés (bonus outsider)`),
+  },
+  bestRound: {
+    label: 'Meilleur du tour',
+    icon: '👑',
+    levels: [1, 3, 5, 10],
+    text: (n) => (n === 1 ? 'Le plus de points sur un tour terminé' : `Le plus de points sur ${n} tours terminés`),
+  },
+  assiduous: {
+    label: 'Assidu',
+    icon: '📋',
+    levels: [1, 2, 4, 8],
+    text: (n) =>
+      n === 1 ? 'Tous les matchs d’un tournoi pronostiqués' : `Tous les matchs de ${n} tournois pronostiqués`,
+  },
+  seer: {
+    label: 'Voyant',
+    icon: '🔮',
+    levels: [1, 2, 3, 5],
+    text: (n) => (n === 1 ? 'Un podium pronostiqué parfait' : `${n} podiums pronostiqués parfaits`),
+  },
 };
+// Niveau atteint (0 à 4) pour une valeur, et le palier suivant.
+function levelOf(levels, value) {
+  const level = levels.filter((t) => value >= t).length;
+  return { level, next: levels[level] ?? null };
+}
 const roundName = (r) => (r === 'T2' ? 'Finale' : r === 'T4' ? 'Demi-finales' : r || 'Tour');
 
 // season : résultat de buildSeason pour le joueur.
@@ -42,7 +79,8 @@ function computeBadges(season, { userId, matches, predictions }) {
   // Sniper et Assidu, par tournoi.
   for (const t of season.tournaments) {
     const rows = matchRows.filter((r) => r.tournament.id === t.id);
-    if (rows.filter((r) => r.outcome === 'exact').length >= 3) award('sniper', t.name);
+    const exact = rows.filter((r) => r.outcome === 'exact').length;
+    for (let i = 0; i < exact; i++) award('sniper', t.name);
     const tMatches = matches.filter(
       (m) => compTournament.get(m.competitionId)?.id === t.id && m.resultType !== 'CANCELLED',
     );
@@ -55,12 +93,14 @@ function computeBadges(season, { userId, matches, predictions }) {
   const decided = matchRows
     .filter((r) => ['exact', 'points', 'miss'].includes(r.outcome))
     .sort((a, b) => new Date(a.resultAt || a.date || 0) - new Date(b.resultAt || b.date || 0));
-  let streak = 0;
+  let streak = 0,
+    longest = 0,
+    longestWhere = null;
   for (const r of decided) {
     streak = r.points > 0 ? streak + 1 : 0;
-    if (streak === 10) {
-      award('streak', r.tournament.name);
-      streak = 0; // une nouvelle série de 10 sera de nouveau récompensée
+    if (streak > longest) {
+      longest = streak;
+      longestWhere = r.tournament.name;
     }
   }
 
@@ -99,8 +139,27 @@ function computeBadges(season, { userId, matches, predictions }) {
       );
   }
 
-  // Tous les trophées, obtenus ou non (count 0), pour afficher ceux qui restent à décrocher.
-  return Object.keys(DEFS).map((id) => earned.get(id) || { id, ...DEFS[id], count: 0, where: [] });
+  // Tous les trophées, obtenus ou non, avec leur niveau et le palier suivant.
+  return Object.entries(DEFS).map(([id, def]) => {
+    const got = earned.get(id) || { where: [], count: 0 };
+    const value = id === 'streak' ? longest : got.count;
+    const where = id === 'streak' ? (longestWhere && longest ? [longestWhere] : []) : got.where;
+    const { level, next } = levelOf(def.levels, value);
+    return {
+      id,
+      label: def.label,
+      icon: def.icon,
+      level,
+      maxLevel: def.levels.length,
+      value,
+      next,
+      // Ce qui est obtenu (niveau atteint) ou, à défaut, l'objectif du premier niveau.
+      description: def.text(level ? def.levels[level - 1] : def.levels[0]),
+      nextText: next ? def.text(next) : null,
+      count: level ? value : 0,
+      where,
+    };
+  });
 }
 
-module.exports = { computeBadges, BADGES: DEFS };
+module.exports = { computeBadges, levelOf, BADGES: DEFS };

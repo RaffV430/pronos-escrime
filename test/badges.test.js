@@ -22,23 +22,28 @@ const season = (t1Rows, t2Rows = []) => ({
 const ids = (badges) => badges.filter((b) => b.count > 0).map((b) => `${b.id}:${b.count}`);
 const empty = { userId: 7, matches: [], predictions: [] };
 
-test('Sniper: 3 exact scores in the same tournament, not spread over two', () => {
+test('Sniper : scores exacts cumulés sur la saison, niveaux 3 / 5 / 10 / 20', () => {
   const s = season([row(1, 'exact'), row(2, 'exact'), row(3, 'exact')], [row(4, 'exact', { competitionId: 20 })]);
   const b = computeBadges(s, empty);
-  assert.deepEqual(ids(b), ['sniper:1']);
-  assert.deepEqual(b.find((x) => x.id === 'sniper').where, ['Challenge de Paris']);
+  assert.deepEqual(ids(b), ['sniper:4']);
+  const sniper = b.find((x) => x.id === 'sniper');
+  assert.deepEqual([sniper.level, sniper.next, sniper.maxLevel], [1, 5, 4]);
+  assert.equal(sniper.description, '3 scores exacts sur la saison');
+  assert.equal(sniper.nextText, '5 scores exacts sur la saison');
+  assert.deepEqual(sniper.where, ['Challenge de Paris', 'Coupe de Lyon']);
   assert.equal(b.length, 6, 'all trophies listed, earned or not');
-  assert.deepEqual(
-    ids(computeBadges(season([row(1, 'exact'), row(2, 'exact')], [row(3, 'exact', { competitionId: 20 })]), empty)),
-    [],
-  );
+  assert.deepEqual(ids(computeBadges(season([row(1, 'exact'), row(2, 'exact')]), empty)), []);
+  const twenty = Array.from({ length: 20 }, (_, i) => row(i + 1, 'exact'));
+  const top = computeBadges(season(twenty), empty).find((x) => x.id === 'sniper');
+  assert.deepEqual([top.level, top.next, top.nextText], [4, null, null]);
 });
 
-test('Série de 10: ten correct winners in a row, in result order; a miss resets; twenty gives two', () => {
+test('Série : plus longue suite de bons vainqueurs, dans l’ordre des résultats ; niveaux 10 / 15 / 20 / 30', () => {
   const run = (pattern) => pattern.split('').map((c, i) => row(i + 1, c === 'x' ? 'miss' : 'points'));
-  assert.deepEqual(ids(computeBadges(season(run('vvvvvvvvvv')), empty)), ['streak:1']);
+  assert.deepEqual(ids(computeBadges(season(run('vvvvvvvvvv')), empty)), ['streak:10']);
   assert.deepEqual(ids(computeBadges(season(run('vvvvvvvvvxvvvvvvvvv')), empty)), []);
-  assert.deepEqual(ids(computeBadges(season(run('v'.repeat(20))), empty)), ['streak:2']);
+  const twenty = computeBadges(season(run('v'.repeat(20))), empty).find((x) => x.id === 'streak');
+  assert.deepEqual([twenty.level, twenty.value, twenty.next], [3, 20, 30]);
   const shuffled = run('vvvvvvvvvv').map((r, i) => ({ ...r, resultAt: at(10 - i) }));
   shuffled.push({ ...row(99, 'miss'), resultAt: at(5) });
   assert.deepEqual(ids(computeBadges(season(shuffled), empty)), [], 'a miss in the middle of the chronology breaks it');

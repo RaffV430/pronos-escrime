@@ -13,7 +13,10 @@ async function cleanup(db, now = new Date()) {
   });
   const events = await db.pushEvent.deleteMany({ where: { createdAt: { lt: before(30) } } });
   const routine = await db.auditLog.deleteMany({
-    where: { action: { in: ['Contrôle FTL démarré', 'Contrôle FTL terminé'] }, createdAt: { lt: before(14) } },
+    where: {
+      action: { in: ['Contrôle FTL démarré', 'Contrôle FTL terminé', 'Calendrier : surveillance'] },
+      createdAt: { lt: before(14) },
+    },
   });
   const snapshots = await db.$executeRaw`
     DELETE FROM "AuditLog" WHERE id IN (

@@ -49,6 +49,10 @@ test('GET duel: members only, another member only, finished non-cancelled matche
     match: { findMany: async (q) => ((matchQuery = q), [m(1, 15, 10)]) },
     prediction: { findMany: async ({ where }) => (where.userId === 1 ? [p(1, 15, 10, 4)] : [p(1, 10, 15, 0)]) },
     user: { findUnique: async () => ({ id: 2, name: 'Bob' }) },
+    pool: { findMany: async () => [] },
+    competition: { findMany: async () => [] },
+    poolPrediction: { findMany: async () => [] },
+    podiumPrediction: { findMany: async () => [] },
   };
   require.cache[require.resolve('../src/lib/prisma')] = { exports: db };
   const express = require('express');
@@ -75,4 +79,31 @@ test('GET duel: members only, another member only, finished non-cancelled matche
   assert.equal(matchQuery.where.isFinished, true);
   assert.equal(matchQuery.where.competition.tournamentId, 9);
   assert.deepEqual(matchQuery.where.OR, [{ resultType: null }, { resultType: { not: 'CANCELLED' } }]);
+});
+
+test('duel : poules terminées et podiums officiels comptés, une ligne chacun', () => {
+  const pools = [
+    { id: 7, name: 'Tour 1 · Poule 1', competition: { name: 'Fleuret' }, fencers: [{ id: 1 }, { id: 2 }] },
+    { id: 8, name: 'Tour 1 · Poule 2', competition: { name: 'Fleuret' }, fencers: [{ id: 3 }] },
+  ];
+  const duel = buildDuel([], [], [], {
+    pools,
+    poolMine: [
+      { fencerId: 1, pointsEarned: 3 },
+      { fencerId: 2, pointsEarned: 2 },
+    ],
+    poolTheirs: [{ fencerId: 1, pointsEarned: 1 }],
+    podiums: [{ id: 4, name: 'Fleuret' }],
+    podiumMine: [],
+    podiumTheirs: [{ competitionId: 4, gold: 'X', pointsEarned: 6 }],
+  });
+  assert.deepEqual(
+    duel.rows.map((r) => [r.kind, r.winner]),
+    [
+      ['pool', 'me'],
+      ['podium', 'them'],
+    ],
+  );
+  assert.equal(duel.rows[0].me.prediction, '2 tireurs pronostiqués');
+  assert.deepEqual(duel.totals, { me: 5, them: 7, won: 1, lost: 1, drawn: 0 });
 });
