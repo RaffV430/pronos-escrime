@@ -212,16 +212,20 @@ router.get('/invitations/:code', async (req, res) => {
       select: {
         name: true,
         kind: true,
-        tournament: { select: { id: true, name: true } },
+        tournamentId: true,
         _count: { select: { members: true } },
       },
     });
     if (!league) return res.status(404).json({ error: 'Invitation introuvable ou expirée.' });
+    const tournament = await db.tournament.findUnique({
+      where: { id: league.tournamentId },
+      select: { id: true, name: true },
+    });
     res.json({
       code,
       name: league.name,
       kind: league.kind,
-      tournament: league.tournament,
+      tournament,
       members: league._count.members,
     });
   } catch (error) {
