@@ -10,6 +10,32 @@ const { withCountries } = require('../services/matchCountries');
 const router = express.Router();
 const CONFIG = 'Configuration FTL validée';
 
+// Match vu sans compte : résultat officiel seulement, jamais de pronostic.
+function publicMatch(m) {
+  const x = withCountries(m);
+  return {
+    id: x.id,
+    competitionId: x.competitionId,
+    round: x.round,
+    sourceKey: x.sourceKey,
+    player1: x.player1,
+    player2: x.player2,
+    player1Country: x.player1Country,
+    player2Country: x.player2Country,
+    seed1: x.seed1,
+    seed2: x.seed2,
+    score1: x.isFinished ? x.score1 : null,
+    score2: x.isFinished ? x.score2 : null,
+    winner: x.isFinished || x.progressionConfirmedAt ? x.winner : null,
+    isFinished: x.isFinished,
+    resultType: x.resultType,
+    pointsPending: x.pointsPending,
+    progressionConfirmedAt: x.progressionConfirmedAt,
+    startsAt: x.startsAt,
+    strip: x.strip,
+  };
+}
+
 // Données publiques d'un tournoi (null s'il n'existe pas) : utilisées par l'API et par les pages
 // rendues pour les robots (moteurs de recherche, aperçus de liens).
 async function publicTournament(tournamentId) {
@@ -71,31 +97,7 @@ async function publicTournament(tournamentId) {
       format: c.podiumFormat,
       podium: finished?.competitions.find((x) => x.id === c.id)?.podium || [],
       sourceUrl: c.resultsSourceUrl || null,
-      matches: matches
-        .filter((m) => m.competitionId === c.id)
-        .map((m) => {
-          const x = withCountries(m);
-          return {
-            id: x.id,
-            round: x.round,
-            sourceKey: x.sourceKey,
-            player1: x.player1,
-            player2: x.player2,
-            player1Country: x.player1Country,
-            player2Country: x.player2Country,
-            seed1: x.seed1,
-            seed2: x.seed2,
-            score1: x.isFinished ? x.score1 : null,
-            score2: x.isFinished ? x.score2 : null,
-            winner: x.isFinished || x.progressionConfirmedAt ? x.winner : null,
-            isFinished: x.isFinished,
-            resultType: x.resultType,
-            pointsPending: x.pointsPending,
-            progressionConfirmedAt: x.progressionConfirmedAt,
-            startsAt: x.startsAt,
-            strip: x.strip,
-          };
-        }),
+      matches: matches.filter((m) => m.competitionId === c.id).map(publicMatch),
     })),
     leaderboard: table
       .filter((r) => r.totalPoints > 0)
@@ -209,6 +211,91 @@ router.get('/sitemap.xml', async (req, res) => {
   } catch (error) {
     reportError(error, 'plan du site');
     res.status(500).type('text/plain').send('Plan du site indisponible.');
+  }
+});
+
+// Onglet Résultats sans compte (/resultats) : tournois terminés, tableaux, poules (tous les assauts)
+// et fiches tireurs. Données sportives officielles uniquement ; aucun pronostic.
+router.get('/results', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(await require('./resultsRoutes').results());
+  } catch (error) {
+    reportError(error, 'résultats publics');
+    res.status(500).json({ error: 'Résultats indisponibles.' });
+  }
+});
+router.get('/competitions/:competitionId/matches', async (req, res) => {
+  try {
+    const competitionId = id(req.params.competitionId);
+    const matches = await db.match.findMany({
+      where: { competitionId, OR: [{ resultType: null }, { resultType: { not: 'CANCELLED' } }] },
+      include: { competition: { select: { podiumRoster: true } } },
+      orderBy: { id: 'asc' },
+    });
+    res.set('Cache-Control', 'public, max-age=120');
+    res.json(matches.map(publicMatch));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    reportError(error, 'tableau public');
+    res.status(500).json({ error: 'Tableau indisponible.' });
+  }
+});
+router.get('/competitions/:competitionId/pools', async (req, res) => {
+  try {
+    const competitionId = id(req.params.competitionId);
+    const { olympicCodeFor } = require('../services/matchCountries');
+    const [competition, pools] = await Promise.all([
+      db.competition.findUnique({ where: { id: competitionId }, select: { podiumRoster: true } }),
+      db.pool.findMany({
+        where: { competitionId },
+        orderBy: { id: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          isFinal: true,
+          bouts: true,
+          fencers: {
+            orderBy: { position: 'asc' },
+            select: {
+              id: true,
+              name: true,
+              position: true,
+              wins: true,
+              losses: true,
+              indicator: true,
+              ranking: true,
+              countryCode: true,
+            },
+          },
+        },
+      }),
+    ]);
+    res.set('Cache-Control', 'public, max-age=120');
+    res.json(
+      pools.map((p) => ({
+        ...p,
+        fencers: p.fencers.map((f) => ({
+          ...f,
+          countryCode: f.countryCode || olympicCodeFor(competition?.podiumRoster, f.name),
+          prediction: null,
+        })),
+      })),
+    );
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    reportError(error, 'poules publiques');
+    res.status(500).json({ error: 'Poules indisponibles.' });
+  }
+});
+router.get('/fencer', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json(await require('../services/fencerProfile').fencerProfile(db, req.query.name));
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    reportError(error, 'fiche tireur publique');
+    res.status(500).json({ error: 'Fiche indisponible.' });
   }
 });
 
