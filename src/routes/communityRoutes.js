@@ -292,7 +292,11 @@ router.get(
 router.get(
   '/challenges',
   wrap(async (req, res) => {
-    const where = req.query.competitionId ? { competitionId: id(req.query.competitionId) } : {};
+    const where = req.query.competitionId
+      ? { competitionId: id(req.query.competitionId) }
+      : req.query.tournamentId
+        ? { competition: { tournamentId: id(req.query.tournamentId) } }
+        : {};
     const matches = await db.match.findMany({ where }),
       challenges = await db.challenge.findMany({
         where: { matchId: { in: matches.map((m) => m.id) } },

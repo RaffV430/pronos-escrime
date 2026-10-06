@@ -336,15 +336,43 @@ async function watch(db, deps = {}) {
 async function upcoming(db, now = Date.now()) {
   const known = await links(db);
   const ids = [...new Set([...known.values()].map((l) => l.tournamentId))];
-  const live = ids.length
-    ? new Set((await db.tournament.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((t) => t.id))
-    : new Set();
+  const tournaments = ids.length
+    ? await db.tournament.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, competitions: { select: { id: true, name: true } } },
+      })
+    : [];
+  // Jour officiel de chaque épreuve (configuration FencingTimeLive / engarde-service).
+  const competitionIds = tournaments.flatMap((t) => t.competitions.map((c) => c.id));
+  const configs = competitionIds.length
+    ? await db.auditLog.findMany({
+        where: { action: 'Configuration FTL validée', targetType: 'Competition', targetId: { in: competitionIds } },
+        orderBy: { id: 'asc' },
+        select: { targetId: true, after: true },
+      })
+    : [];
+  const dates = new Map();
+  for (const c of configs) if (/^\d{4}-\d{2}-\d{2}$/.test(c.after?.date || '')) dates.set(c.targetId, c.after.date);
   return events()
-    .filter((e) => day(e.end) + DAY > now)
     .map((e) => {
       const link = known.get(e.id);
-      return { ...e, tournamentId: link && live.has(link.tournamentId) ? link.tournamentId : null };
-    });
+      const t = link && tournaments.find((x) => x.id === link.tournamentId);
+      if (!t) return { ...e, tournamentId: null, competitionIds: [] };
+      // Seules les épreuves de cette entrée (ex. M17 le samedi, M20 le dimanche dans le même tournoi).
+      const mine = t.competitions.filter((c) => wanted(e, c.name));
+      const days = mine
+        .map((c) => dates.get(c.id))
+        .filter(Boolean)
+        .sort();
+      return {
+        ...e,
+        ...(days.length ? { start: days[0], end: days.at(-1) } : {}),
+        tournamentId: t.id,
+        competitionIds: mine.map((c) => c.id),
+      };
+    })
+    .filter((e) => day(e.end) + DAY > now)
+    .sort((x, y) => x.start.localeCompare(y.start) || x.id.localeCompare(y.id));
 }
 
 function startWorker(db, every = 3 * 3600000) {
