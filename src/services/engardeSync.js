@@ -113,7 +113,7 @@ const minutes = (times) => {
 function nextDay(prev, min) {
   if (!prev) return { min, offset: 0 };
   if (min === null) return prev;
-  return { min, offset: prev.min !== null && min <= prev.min ? prev.offset + 1 : prev.offset };
+  return { min, offset: prev.min !== null && min < prev.min ? prev.offset + 1 : prev.offset };
 }
 
 async function syncPools(db, c, config, url, client, leaseToken, { provisional = false, round = 1, prev = null } = {}) {
