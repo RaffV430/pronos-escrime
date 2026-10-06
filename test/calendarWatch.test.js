@@ -133,3 +133,42 @@ test('surveillance : seules les épreuves voulues sont ajoutées, le lien est no
   assert.equal(link.after.calendarId, '2026-10-17-henin-beaumont-senior-ind');
   assert.ok(logs.some((l) => l.action === 'Calendrier : surveillance'));
 });
+
+test('surveillance : une épreuve illisible n’empêche pas l’ajout des autres', async () => {
+  const logs = [];
+  const db = {
+    user: { findFirst: async () => ({ id: 1 }), findMany: async () => [] },
+    auditLog: { findMany: async () => [], create: async ({ data }) => (logs.push(data), data) },
+    competition: { findUnique: async () => null },
+    pushSubscription: { findMany: async () => [] },
+  };
+  const ftlTournament = {
+    preview: async () => ({
+      previewId: 3,
+      events: [
+        { eventId: 'H', event: 'Senior Men’s Foil', existingCompetitionId: null },
+        { eventId: 'D', event: 'Senior Women’s Foil', existingCompetitionId: null },
+      ],
+    }),
+    save: async (_db, { eventIds }) => {
+      if (eventIds.includes('D'))
+        throw Object.assign(new Error('Identité d’un engagé non vérifiable.'), { status: 409 });
+      return { tournamentId: 5, name: 'EN1', events: [{ name: 'Senior Men’s Foil', created: true }] };
+    },
+  };
+  const result = await C.watch(db, {
+    now: Date.parse('2026-10-07T12:00:00Z'),
+    ftl: {
+      login: async () => {},
+      get: async () => [
+        { id: 'd'.repeat(32), name: 'EN1', location: 'Henin-Beaumont, FRA', start: '2026-10-17T00:00:00.000Z' },
+      ],
+    },
+    engarde: { get: async () => '{"events":[]}' },
+    ftlTournament,
+    mailer: { mailConfigured: () => false },
+    push: { configured: () => false },
+  });
+  assert.deepEqual(result.added[0].events, ['Senior Men’s Foil']);
+  assert.match(result.problems[0], /Senior Women’s Foil : Identité/);
+});

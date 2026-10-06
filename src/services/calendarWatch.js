@@ -255,15 +255,25 @@ async function watch(db, deps = {}) {
         let tournamentId = null,
           names = [];
         if (missing.length) {
-          const saved = await ftlTournament.save(
-            db,
-            { previewId: preview.previewId, eventIds: missing.map((e) => e.eventId) },
-            admin.id,
-            deps.client,
-          );
-          tournamentId = saved.tournamentId;
-          names = saved.events.filter((e) => e.created).map((e) => e.name);
-          if (names.length) added.push({ calendarId: entry.id, tournamentId, name: saved.name, events: names });
+          const saveEvents = (ids) =>
+            ftlTournament.save(db, { previewId: preview.previewId, eventIds: ids }, admin.id, deps.client);
+          let results = [];
+          try {
+            results = [await saveEvents(missing.map((e) => e.eventId))];
+          } catch (e) {
+            // Une épreuve illisible (liste d'engagés incomplète…) ne bloque pas les autres : une par une.
+            if (missing.length < 2) throw e;
+            for (const ev of missing)
+              try {
+                results.push(await saveEvents([ev.eventId]));
+              } catch (one) {
+                problems.push(`${entry.city} (${entry.start}) · ${ev.event} : ${one.message}`);
+              }
+            if (!results.length) throw e;
+          }
+          tournamentId = results[0].tournamentId;
+          names = results.flatMap((r) => r.events.filter((e) => e.created).map((e) => e.name));
+          if (names.length) added.push({ calendarId: entry.id, tournamentId, name: results[0].name, events: names });
         } else {
           const c = await db.competition.findUnique({
             where: { id: matching[0].existingCompetitionId },
