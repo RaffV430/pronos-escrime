@@ -171,7 +171,7 @@ function payload(c, matches, id) {
 }
 // Priorité « high » pour ce qui est urgent (clôture proche, réouverture, alerte administrateur) :
 // en « normal », iOS peut retarder la livraison jusqu'au réveil de l'appareil.
-const URGENT = new Set(['AVAILABLE', 'REMINDER', 'REOPENED', 'POOLS', 'MATCHES']);
+const URGENT = new Set(['AVAILABLE', 'REMINDER', 'POOLREMINDER', 'REOPENED', 'POOLS', 'MATCHES']);
 async function send(subscription, content, ttl, urgency = 'normal') {
   return webpush.sendNotification(
     { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
@@ -275,7 +275,17 @@ async function notificationContext(db) {
     ids.length && db.pool
       ? db.pool.findMany({
           where: { competitionId: { in: ids } },
-          select: { id: true, competitionId: true, isFinal: true, fencers: { select: { firstResultAt: true } } },
+          select: {
+            id: true,
+            competitionId: true,
+            name: true,
+            isFinal: true,
+            isLocked: true,
+            lockMode: true,
+            closesAt: true,
+            startsAt: true,
+            fencers: { select: { firstResultAt: true } },
+          },
         })
       : [],
     // Horaires publiés après une clôture par défaut (2 dernières heures).
@@ -423,6 +433,44 @@ async function queueSpecial(db, id, context = null) {
               },
               update: {},
             });
+      // Rappel des poules : poules sans aucun pronostic du joueur qui ferment dans les 10 minutes.
+      if (p.reminders) {
+        const reminders = require('./poolReminders');
+        for (const x of shared.filter((y) => follows(sub, y.competition) && y.pools?.length)) {
+          const soon = x.pools.filter(
+            (pool) => reminders.isOpen(pool, Date.now()) && reminders.deadline(pool) - Date.now() <= reminders.WINDOW,
+          );
+          if (!soon.length) continue;
+          const saved = await tx.poolPrediction.findMany({
+            where: { userId: sub.userId, fencer: { poolId: { in: soon.map((pool) => pool.id) } } },
+            select: { fencer: { select: { poolId: true } } },
+          });
+          for (const plan of reminders.reminderPlan(
+            soon,
+            saved.map((r) => r.fencer.poolId),
+          ))
+            await tx.pushDelivery.upsert({
+              where: {
+                subscriptionId_competitionId_throughEventId_kind_round: {
+                  subscriptionId: id,
+                  competitionId: x.competition.id,
+                  throughEventId: 0,
+                  kind: 'POOLREMINDER',
+                  round: plan.key,
+                },
+              },
+              create: {
+                subscriptionId: id,
+                competitionId: x.competition.id,
+                throughEventId: 0,
+                kind: 'POOLREMINDER',
+                round: plan.key,
+                matchIds: plan.missing.map((pool) => pool.id),
+              },
+              update: {},
+            });
+        }
+      }
       if (!p.newMatches && !p.reminders && !p.roundResults) return;
       const followed = shared.filter((x) => follows(sub, x.competition) && x.matches.length);
       if (!followed.length) return;
@@ -566,6 +614,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     (!urgentPools && kind === 'POOLS' && !prefs.newMatches) ||
     (kind === 'AVAILABLE' && !prefs.newMatches) ||
     (kind === 'REMINDER' && !prefs.reminders) ||
+    (kind === 'POOLREMINDER' && !prefs.reminders) ||
     (kind === 'ROUND' && !prefs.roundResults) ||
     (kind === 'POOLRESULTS' && !prefs.poolResults) ||
     (kind === 'RECAP' && !prefs.recap && !prefs.roundResults && !prefs.poolResults) ||
@@ -616,6 +665,32 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
         .map((m) => m.id)
         .join(',')}`,
     };
+  } else if (kind === 'POOLREMINDER') {
+    // Revérifié à l'envoi : poules encore ouvertes et toujours sans pronostic du joueur.
+    if (Date.now() - delivery.createdAt.getTime() > 900000) return cancel();
+    const reminders = require('./poolReminders');
+    const pools = await db.pool.findMany({
+      where: { id: { in: delivery.matchIds }, competitionId: c.id },
+      select: {
+        id: true,
+        name: true,
+        isFinal: true,
+        isLocked: true,
+        lockMode: true,
+        closesAt: true,
+        startsAt: true,
+        fencers: { select: { firstResultAt: true } },
+      },
+    });
+    const saved = await db.poolPrediction.findMany({
+      where: { userId: sub.userId, fencer: { poolId: { in: pools.map((p) => p.id) } } },
+      select: { fencer: { select: { poolId: true } } },
+    });
+    const done = new Set(saved.map((r) => r.fencer.poolId));
+    const missing = pools.filter((p) => reminders.isOpen(p, Date.now()) && !done.has(p.id));
+    if (!missing.length) return cancel();
+    ttl = Math.max(1, Math.min(900, Math.floor((Math.min(...missing.map(reminders.deadline)) - Date.now()) / 1000)));
+    content = { ...reminders.reminderText(c, missing, prefs.timezone), tag: `pronos-${id}` };
   } else if (kind === 'ROUND') {
     if (Date.now() - delivery.createdAt.getTime() > 86400000) return cancel();
     const raw = await db.match.findMany({
