@@ -407,6 +407,8 @@ test('invitation par lien et duel depuis les classements', opts, async () => {
   assert.equal(info.members, 1);
   assert.equal(info.tournament.id, c.tournamentId);
   assert.equal((await fetch(`${base}/api/public/invitations/ZZ`)).status, 400);
+  const calendar = await (await fetch(`${base}/api/public/calendar`)).json();
+  assert.ok(Array.isArray(calendar.events));
   assert.equal((await fetch(`${base}/api/public/invitations/${'0'.repeat(24)}`)).status, 404);
   // Duel : rien n'est dévoilé tant que le match n'est pas terminé.
   await prisma.prediction.createMany({

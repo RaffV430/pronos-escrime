@@ -217,7 +217,7 @@ test('F5: cleanup removes only old notification rows, routine sync traces and ol
   assert.equal(calls.deliveries.where.createdAt.lt.toISOString(), '2026-10-01T00:00:00.000Z');
   assert.deepEqual(
     calls.routine.where.action,
-    { in: ['Contrôle FTL démarré', 'Contrôle FTL terminé'] },
+    { in: ['Contrôle FTL démarré', 'Contrôle FTL terminé', 'Calendrier : surveillance'] },
     'admin actions and failures are kept',
   );
   assert.match(calls.snapshots[0], /rang > 2/, 'the two latest snapshots per ranking are kept');

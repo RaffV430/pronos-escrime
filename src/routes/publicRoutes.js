@@ -202,6 +202,16 @@ router.get('/tournaments', async (req, res) => {
     res.status(500).json({ error: 'Liste indisponible.' });
   }
 });
+// Calendrier des prochaines épreuves (sélection FFE), avec le tournoi de l'application quand il existe.
+router.get('/calendar', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ events: await require('../services/calendarWatch').upcoming(db) });
+  } catch (error) {
+    reportError(error, 'calendrier public');
+    res.status(500).json({ error: 'Calendrier indisponible.' });
+  }
+});
 // Lien d'invitation (/rejoindre/<code>) : ce que la personne invitée rejoint, avant de se connecter.
 router.get('/invitations/:code', async (req, res) => {
   try {

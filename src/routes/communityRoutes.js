@@ -199,12 +199,34 @@ async function duel(userId, opponentId, competition) {
     orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
   });
   const ids = matches.map((m) => m.id);
-  const [mine, theirs, opponent] = await Promise.all([
-    db.prediction.findMany({ where: { userId, matchId: { in: ids } } }),
-    db.prediction.findMany({ where: { userId: opponentId, matchId: { in: ids } } }),
+  const finished = competition ? { competition } : {};
+  const [pools, podiums] = await Promise.all([
+    db.pool.findMany({
+      where: { isFinal: true, ...finished },
+      select: { id: true, name: true, competition: { select: { name: true } }, fencers: { select: { id: true } } },
+      orderBy: [{ startsAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
+    }),
+    db.competition
+      .findMany({ where: competition || {}, select: { id: true, name: true, officialPodium: true } })
+      .then((list) => list.filter((c) => c.officialPodium?.gold)),
+  ]);
+  const fencerIds = pools.flatMap((p) => p.fencers.map((f) => f.id));
+  const podiumIds = podiums.map((c) => c.id);
+  const predictions = (who) =>
+    Promise.all([
+      db.prediction.findMany({ where: { userId: who, matchId: { in: ids } } }),
+      db.poolPrediction.findMany({ where: { userId: who, fencerId: { in: fencerIds } } }),
+      db.podiumPrediction.findMany({ where: { userId: who, competitionId: { in: podiumIds } } }),
+    ]);
+  const [[mine, poolMine, podiumMine], [theirs, poolTheirs, podiumTheirs], opponent] = await Promise.all([
+    predictions(userId),
+    predictions(opponentId),
     db.user.findUnique({ where: { id: opponentId }, select: { id: true, name: true } }),
   ]);
-  return { opponent, ...buildDuel(matches, mine, theirs) };
+  return {
+    opponent,
+    ...buildDuel(matches, mine, theirs, { pools, poolMine, poolTheirs, podiums, podiumMine, podiumTheirs }),
+  };
 }
 // Duel depuis les Classements, avec n'importe quel joueur classé : épreuve, tournoi ou toute la saison.
 router.get(

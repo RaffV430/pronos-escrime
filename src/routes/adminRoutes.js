@@ -254,6 +254,23 @@ router.post(
   ),
 );
 
+// Calendrier : passage immédiat de la surveillance FencingTimeLive / engarde-service, et état de chaque épreuve.
+router.post(
+  '/calendar/watch',
+  wrap(async (req, res) => res.json(await require('../services/calendarWatch').watch(prisma))),
+);
+router.get(
+  '/calendar',
+  wrap(async (req, res) => {
+    const last = await prisma.auditLog.findFirst({
+      where: { action: 'Calendrier : surveillance' },
+      orderBy: { id: 'desc' },
+      select: { createdAt: true, after: true },
+    });
+    res.json({ events: await require('../services/calendarWatch').upcoming(prisma), last });
+  }),
+);
+
 // Archivage d'un tournoi entier depuis l'administration.
 router.get(
   '/tournaments/:tournamentId/archive',
