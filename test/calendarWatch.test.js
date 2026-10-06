@@ -172,3 +172,37 @@ test('surveillance : une épreuve illisible n’empêche pas l’ajout des autre
   assert.deepEqual(result.added[0].events, ['Senior Men’s Foil']);
   assert.match(result.problems[0], /Senior Women’s Foil : Identité/);
 });
+
+test('calendrier public : chaque entrée garde ses propres épreuves et leurs vraies dates', async () => {
+  const link = (calendarId) => ({ after: { calendarId, tournamentId: 4 }, createdAt: new Date() });
+  const db = {
+    auditLog: {
+      findMany: async ({ where }) =>
+        where.action === 'Calendrier : tournoi relié'
+          ? [link('2026-10-10-etampes-m17-ind'), link('2026-10-10-etampes-m20-ind')]
+          : [
+              { targetId: 1, after: { date: '2026-10-10' } },
+              { targetId: 2, after: { date: '2026-10-10' } },
+              { targetId: 3, after: { date: '2026-10-11' } },
+            ],
+    },
+    tournament: {
+      findMany: async () => [
+        {
+          id: 4,
+          competitions: [
+            { id: 1, name: "Cadet Women's Foil" },
+            { id: 2, name: "Cadet Men's Foil" },
+            { id: 3, name: "Junior Men's Foil" },
+          ],
+        },
+      ],
+    },
+  };
+  const list = await C.upcoming(db, Date.parse('2026-10-07T00:00:00Z'));
+  const m17 = list.find((e) => e.id === '2026-10-10-etampes-m17-ind');
+  const m20 = list.find((e) => e.id === '2026-10-10-etampes-m20-ind');
+  assert.deepEqual([m17.competitionIds, m17.start, m17.end], [[1, 2], '2026-10-10', '2026-10-10']);
+  assert.deepEqual([m20.competitionIds, m20.start, m20.end], [[3], '2026-10-11', '2026-10-11']);
+  assert.ok(list.indexOf(m17) < list.indexOf(m20));
+});
