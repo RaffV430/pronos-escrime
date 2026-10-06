@@ -40,6 +40,7 @@ before(async () => {
   app.use('/api/pools', createPoolRouter(prisma));
   app.use('/api/auth', require('../../src/routes/authRoutes'));
   app.use('/api/public', require('../../src/routes/publicRoutes'));
+  app.use('/api/community', require('../../src/routes/communityRoutes'));
   await new Promise((resolve) => (server = app.listen(0, '127.0.0.1', resolve)));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -388,4 +389,39 @@ test('page publique : un joueur retiré du classement public y apparaît anonyme
   assert.equal(pools.status, 200);
   const fencer = await (await fetch(`${base}/api/public/fencer?name=${encodeURIComponent(match.player1)}`)).json();
   assert.equal(fencer.summary.competitions, 0);
+});
+
+test('invitation par lien et duel depuis les classements', opts, async () => {
+  const c = await createCompetition();
+  const match = await createOpenMatch(c.id);
+  const [owner, friend] = [await createUser(), await createUser()];
+  const created = await call('POST', '/api/community/leagues', owner.token, {
+    name: 'Les amis',
+    kind: 'PRIVATE',
+    tournamentId: c.tournamentId,
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const { code } = created.body;
+  const info = await (await fetch(`${base}/api/public/invitations/${code.toLowerCase()}`)).json();
+  assert.equal(info.name, 'Les amis');
+  assert.equal(info.members, 1);
+  assert.equal(info.tournament.id, c.tournamentId);
+  assert.equal((await fetch(`${base}/api/public/invitations/ZZ`)).status, 400);
+  assert.equal((await fetch(`${base}/api/public/invitations/${'0'.repeat(24)}`)).status, 404);
+  // Duel : rien n'est dévoilé tant que le match n'est pas terminé.
+  await prisma.prediction.createMany({
+    data: [
+      { userId: owner.id, matchId: match.id, predictedScore1: 15, predictedScore2: 10, pointsEarned: 3 },
+      { userId: friend.id, matchId: match.id, predictedScore1: 12, predictedScore2: 15, pointsEarned: 0 },
+    ],
+  });
+  const before = await call('GET', `/api/community/duel/${friend.id}?tournamentId=${c.tournamentId}`, owner.token);
+  assert.equal(before.status, 200);
+  assert.equal(before.body.rows.length, 0);
+  await prisma.match.update({ where: { id: match.id }, data: { isFinished: true, score1: 15, score2: 9 } });
+  const after = await call('GET', `/api/community/duel/${friend.id}?competitionId=${c.id}`, owner.token);
+  assert.equal(after.body.rows.length, 1);
+  assert.deepEqual([after.body.totals.me, after.body.totals.them], [3, 0]);
+  assert.equal(after.body.opponent.id, friend.id);
+  assert.equal((await call('GET', `/api/community/duel/${owner.id}`, owner.token)).status, 400);
 });
