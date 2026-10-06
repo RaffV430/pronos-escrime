@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const { validPassword, passwordMessage } = require('../services/passwordPolicy');
 const prisma = require('../lib/prisma');
 
 const authMiddleware = require('../middleware/auth');
@@ -92,8 +93,8 @@ router.post('/register', registerPerIp, async (req, res) => {
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       return res.status(400).json({ error: 'Adresse e-mail invalide.' });
     }
-    if (password.length < 10 || password.length > 128) {
-      return res.status(400).json({ error: 'Le mot de passe doit contenir entre 10 et 128 caractères.' });
+    if (!validPassword(password)) {
+      return res.status(400).json({ error: passwordMessage });
     }
 
     const nameToSave = username || email.split('@')[0];
@@ -297,7 +298,6 @@ const account = require('../services/account');
 const forgotPerIp = limiter({ windowMs: 15 * 60 * 1000, limit: 10 });
 const forgotPerEmail = limiter({ windowMs: 60 * 60 * 1000, limit: 3, keyGenerator: identifierKey });
 const resetPerIp = limiter({ windowMs: 15 * 60 * 1000, limit: 20 });
-const validPassword = (password) => typeof password === 'string' && password.length >= 10 && password.length <= 128;
 
 router.get('/config', (req, res) => res.json({ passwordReset: require('../services/mailer').playerMailAvailable() }));
 
@@ -329,8 +329,7 @@ router.post('/forgot-password', forgotPerIp, forgotPerEmail, async (req, res) =>
 
 router.post('/reset-password', resetPerIp, async (req, res) => {
   const { token, password } = req.body;
-  if (!validPassword(password))
-    return res.status(400).json({ error: 'Le mot de passe doit contenir entre 10 et 128 caractères.' });
+  if (!validPassword(password)) return res.status(400).json({ error: passwordMessage });
   try {
     const user = await account.verifyResetToken(prisma, token);
     if (!user) return res.status(400).json({ error: 'Ce lien a expiré ou a déjà servi. Refaites une demande.' });
@@ -381,8 +380,7 @@ router.post('/refresh', authMiddleware, async (req, res) => {
 
 router.post('/change-password', authMiddleware, passwordChecksPerUser, loginPerIp, async (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
-  if (!validPassword(newPassword))
-    return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir entre 10 et 128 caractères.' });
+  if (!validPassword(newPassword)) return res.status(400).json({ error: passwordMessage });
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
     if (!user || !(await bcrypt.compare(String(currentPassword || ''), user.password)))

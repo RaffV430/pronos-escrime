@@ -95,19 +95,15 @@ test('admin login requires the 6-digit code once 2FA is enabled; setup and disab
     'not enforced before activation',
   );
   assert.equal((await call('/2fa/enable', { code: '000000' })).status, 400);
-  assert.equal((await call('/2fa/enable', { code: codeFor(setup.secret) })).status, 200);
+  const activationCode = codeFor(setup.secret);
+  assert.equal((await call('/2fa/enable', { code: activationCode })).status, 200);
 
   const noCode = await call('/login', { email: 'admin@example.fr', password: 'admin-password-1' }, false);
   assert.equal(noCode.status, 401);
   assert.equal((await noCode.json()).twoFactorRequired, true);
   assert.equal(
-    (
-      await call(
-        '/login',
-        { email: 'admin@example.fr', password: 'admin-password-1', code: codeFor(setup.secret) },
-        false,
-      )
-    ).status,
+    (await call('/login', { email: 'admin@example.fr', password: 'admin-password-1', code: activationCode }, false))
+      .status,
     400,
     'code already used for activation',
   );
@@ -131,6 +127,6 @@ test('admin login requires the 6-digit code once 2FA is enabled; setup and disab
 
   assert.equal((await call('/2fa/disable', { password: 'admin-password-1', code: '123456' })).status, 400);
   users[0].totpLastStep = null;
-  assert.equal((await call('/2fa/disable', { password: 'admin-password-1', code: codeFor(setup.secret) })).status, 200);
+  assert.equal((await call('/2fa/disable', { password: 'admin-password-1', code: activationCode })).status, 200);
   assert.equal(users[0].totpEnabledAt, null);
 });
