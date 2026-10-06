@@ -286,7 +286,36 @@ function analyse(rows, tournaments) {
     [...t.competitions.values()].map((c) => ({ name: c.name, tournament: t.name, points: c.points })),
   );
   const best = competitions.sort((a, b) => b.points - a.points)[0];
+  // Meilleur coup : le match qui a rapporté le plus (score exact puis bonus outsider en cas d'égalité).
+  const bestCall = [...played]
+    .filter((r) => r.points > 0)
+    .sort(
+      (a, b) =>
+        b.points - a.points ||
+        (b.outcome === 'exact') - (a.outcome === 'exact') ||
+        (b.bonus || 0) - (a.bonus || 0) ||
+        new Date(b.date || 0) - new Date(a.date || 0),
+    )[0];
+  // Plus longue série de bons vainqueurs, dans l'ordre des matchs.
+  let streak = 0,
+    run = 0;
+  for (const r of [...played].sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0) || a.matchId - b.matchId)) {
+    run = r.points > 0 ? run + 1 : 0;
+    streak = Math.max(streak, run);
+  }
   return {
+    bestCall: bestCall
+      ? {
+          name: bestCall.name,
+          round: bestCall.round,
+          prediction: bestCall.prediction,
+          result: bestCall.result,
+          points: bestCall.points,
+          exact: bestCall.outcome === 'exact',
+          bonus: bestCall.bonus || 0,
+        }
+      : null,
+    longestStreak: streak,
     byRound,
     bestRound: byRound.filter((r) => r.played >= 3).sort((a, b) => b.accuracy - a.accuracy)[0]?.round || null,
     averageScoreGap: average(played.map((r) => r.scoreGap).filter((g) => g !== null && g !== undefined)),

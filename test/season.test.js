@@ -310,4 +310,9 @@ test('personal analysis: success by round, average score gap, pools, outsider hi
   assert.deepEqual(a.pools, { predicted: 1, winsExact: 1, winsAccuracy: 100, averageIndicatorGap: 0 });
   assert.equal(a.bestCompetition.name, 'Fleuret hommes');
   assert.equal(a.bestCompetition.points, 37);
+  // Meilleur coup : le score exact 15-8 ; série de bons vainqueurs dans l'ordre des matchs.
+  assert.equal(a.bestCall.exact, true);
+  assert.equal(a.bestCall.result, '15 – 8');
+  assert.ok(a.bestCall.points >= 3);
+  assert.ok(a.longestStreak >= 1 && a.longestStreak <= 3);
 });
