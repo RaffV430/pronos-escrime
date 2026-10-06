@@ -299,7 +299,7 @@ test('e) face-à-face : rencontres passées dans les deux sens, forme récente, 
   const current = await createOpenMatch((await createCompetition()).id, { player1: a, player2: b });
   const res = await call('GET', `/api/matches/${current.id}/h2h`, user.token);
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body.summary, { wins1: 1, wins2: 1 });
+  assert.deepEqual(res.body.summary, { wins1: 1, wins2: 1, poolWins1: 0, poolWins2: 0 });
   assert.deepEqual(
     res.body.meetings.map((m) => m.score),
     [
