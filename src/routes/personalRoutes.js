@@ -312,14 +312,22 @@ router.get('/summary/:tournamentId', async (req, res) => {
     const league = leagueId
       ? await db.league.findUnique({ where: { id: leagueId }, include: { members: true } })
       : null;
-    if (
-      leagueId &&
-      (!league || league.tournamentId !== tournamentId || !league.members.some((m) => m.userId === userId))
-    )
+    if (leagueId && (!league || league.archivedAt || !league.members.some((m) => m.userId === userId && !m.leftAt)))
       return res.status(403).json({ error: 'Ce groupe est privé.' });
     let rows = await standings(db, general ? {} : { tournamentId });
-    if (league)
-      rows = require('../services/ranking').rankRows(rows.filter((r) => league.members.some((m) => m.userId === r.id)));
+    if (league) {
+      const start = general
+        ? null
+        : await require('../services/club').tournamentStart(db, {
+            id: tournamentId,
+            competitions: await db.competition.findMany({ where: { tournamentId }, select: { id: true } }),
+          });
+      const counted = require('../services/groups').membersFor(league, {
+        start,
+        tournamentId: general ? null : tournamentId,
+      });
+      rows = require('../services/ranking').rankRows(rows.filter((r) => counted.some((m) => m.userId === r.id)));
+    }
     const eventScope = general ? {} : { tournamentId };
     const predictions = await db.prediction.findMany({
       where: {
@@ -380,7 +388,7 @@ router.get('/summary/:tournamentId', async (req, res) => {
       tournamentName: general
         ? 'Classement général'
         : league
-          ? `${league.kind === 'CLUB' ? 'Club' : 'Ligue'} · ${league.name} — ${tournament.name}`
+          ? `${league.kind === 'CLUB' ? 'Club' : 'Groupe d’amis'} · ${league.name} — ${tournament.name}`
           : tournament.name,
       complete,
       bestRound,

@@ -27,12 +27,14 @@ async function cleanup(db, now = new Date()) {
       ) t
       WHERE t.rang > 2 AND t."createdAt" < ${before(30)}
     )`;
-  // Ligue du club des nouveaux tournois (dès que leur horaire est connu).
+  // Club de l'application (permanent) et un seul club actif par joueur.
   let clubLeagues = 0;
   try {
-    clubLeagues = (await require('./club').ensureClubLeagues(db, { now })).length;
+    const groups = require('./groups');
+    await groups.ensureAppClub(db);
+    clubLeagues = await groups.singleClubPerPlayer(db, now);
   } catch (error) {
-    reportError(error, 'ligue du club');
+    reportError(error, 'club de l’application');
   }
   return { deliveries: deliveries.count, events: events.count, routine: routine.count, snapshots, clubLeagues };
 }

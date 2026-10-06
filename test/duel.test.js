@@ -41,7 +41,7 @@ test('match-by-match comparison with totals, bonus included, missing predictions
   assert.equal(buildDuel([m(1, 15, 10)], [], []).rows.length, 0, 'match nobody predicted is skipped');
 });
 
-test('GET duel: members only, another member only, finished non-cancelled matches of the league tournament', async (t) => {
+test('GET duel: members only, another member only, finished non-cancelled matches of the chosen tournament', async (t) => {
   const league = { id: 3, name: 'Amis', tournamentId: 9, members: [{ userId: 1 }, { userId: 2 }] };
   let matchQuery;
   const db = {
@@ -71,7 +71,7 @@ test('GET duel: members only, another member only, finished non-cancelled matche
   assert.equal((await get('/leagues/3/duel/2', 5)).status, 403, 'not a member');
   assert.equal((await get('/leagues/3/duel/7', 1)).status, 404, 'opponent outside the league');
   assert.equal((await get('/leagues/3/duel/1', 1)).status, 404, 'no duel with oneself');
-  const res = await get('/leagues/3/duel/2', 1);
+  const res = await get('/leagues/3/duel/2?tournamentId=9', 1);
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.opponent.name, 'Bob');

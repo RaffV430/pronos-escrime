@@ -13,63 +13,84 @@ test('club fencers: names normalised, duplicates and blanks removed, limits enfo
   assert.throws(() => club.validateClub({ name: 'C', fencers: Array.from({ length: 301 }, (_, i) => `T${i}`) }), /300/);
 });
 
-function fakeDb({ start, previousMembers = [], otherClub = [] }) {
-  const leagues = [
-    { id: 1, kind: 'CLUB', name: 'CEP', tournamentId: 1, members: previousMembers.map((userId) => ({ userId })) },
-  ];
-  const members = [];
-  return {
-    leagues,
-    members,
-    appSetting: { findUnique: async () => ({ value: { name: 'CEP', fencers: [] } }) },
-    tournament: {
-      findMany: async () => [
-        { id: 1, competitions: [] },
-        { id: 2, competitions: [{ id: 20 }] },
-      ],
-    },
-    league: {
-      findFirst: async ({ where }) => {
-        if (where.NOT) return leagues.filter((l) => l.id !== where.NOT.id && l.name === where.name).at(-1) || null;
-        return leagues.find((l) => l.tournamentId === where.tournamentId && l.name === where.name) || null;
-      },
-      create: async ({ data }) => {
-        const l = { id: leagues.length + 1, members: [], ...data };
-        leagues.push(l);
-        return l;
-      },
-    },
-    leagueMember: {
-      findFirst: async ({ where }) => (otherClub.includes(where.userId) ? { id: 99 } : null),
-      create: async ({ data }) => members.push(data),
-    },
-    match: { findFirst: async () => (start ? { startsAt: start } : null) },
-    user: { findFirst: async () => ({ id: 3 }) },
-    competition: { findUnique: async () => null },
-  };
-}
+const groups = require('../src/services/groups');
+const at = (d) => new Date(`2026-10-${d}T10:00:00Z`);
 
-test('club league created for a new tournament with a known start; club members carried over', async () => {
-  const now = new Date('2026-10-01T00:00:00Z');
-  const db = fakeDb({ start: new Date('2026-10-10T08:00:00Z'), previousMembers: [5, 6, 7], otherClub: [7] });
-  const created = await club.ensureClubLeagues(db, { now });
-  assert.deepEqual(created, [{ tournamentId: 2, leagueId: 2, carried: 2 }]);
-  assert.equal(db.leagues[1].name, 'CEP');
-  assert.equal(db.leagues[1].kind, 'CLUB');
-  assert.equal(db.leagues[1].ownerId, 3);
+test('club permanent : membres comptés selon leur présence au début du tournoi', () => {
+  const members = [
+    { userId: 1, joinedAt: at('01'), leftAt: null },
+    { userId: 2, joinedAt: at('12'), leftAt: null }, // arrivé après le début
+    { userId: 3, joinedAt: at('01'), leftAt: at('09') }, // parti avant le début
+    { userId: 4, joinedAt: at('01'), leftAt: at('15') }, // parti après le début : compte encore
+  ];
+  const now = at('20').getTime();
   assert.deepEqual(
-    db.members.map((m) => m.userId),
-    [5, 6],
-    'a player already in another club for this tournament is not moved',
+    groups.clubMembersAt(members, at('10'), now).map((m) => m.userId),
+    [1, 4],
   );
-  assert.deepEqual(await club.ensureClubLeagues(db, { now }), [], 'idempotent');
+  // Tournoi pas encore commencé (ou sans horaire) : les membres actuels.
+  assert.deepEqual(
+    groups.clubMembersAt(members, at('25'), now).map((m) => m.userId),
+    [1, 2],
+  );
+  assert.deepEqual(
+    groups.clubMembersAt(members, null, now).map((m) => m.userId),
+    [1, 2],
+  );
+  // Groupe d'amis : toujours les membres actuels, quel que soit le tournoi.
+  const friends = { kind: 'PRIVATE', members };
+  assert.deepEqual(
+    groups.membersFor(friends, { start: at('10'), tournamentId: 5, now }).map((m) => m.userId),
+    [1, 2],
+  );
 });
 
-test('no club league without a known start, after the start, or without a club name', async () => {
-  const now = new Date('2026-10-01T00:00:00Z');
-  assert.deepEqual(await club.ensureClubLeagues(fakeDb({ start: null }), { now }), []);
-  assert.deepEqual(await club.ensureClubLeagues(fakeDb({ start: new Date('2026-09-30T08:00:00Z') }), { now }), []);
-  const unnamed = fakeDb({ start: new Date('2026-10-10T08:00:00Z') });
-  unnamed.appSetting.findUnique = async () => null;
-  assert.deepEqual(await club.ensureClubLeagues(unnamed, { now }), []);
+test('un seul club à la fois ; retour dans un groupe après un départ', async () => {
+  let upsert;
+  const tx = (other) => ({
+    leagueMember: {
+      findFirst: async () => other,
+      upsert: async (q) => (upsert = q),
+    },
+  });
+  await assert.rejects(
+    groups.enroll(tx({ league: { name: 'Club A' } }), { id: 2, kind: 'CLUB' }, 7),
+    /Un seul club à la fois : quittez d’abord « Club A »/,
+  );
+  await groups.enroll(tx(null), { id: 2, kind: 'CLUB' }, 7);
+  assert.deepEqual(upsert.update, { leftAt: null });
+  await assert.rejects(groups.enroll(tx(null), { id: 3, kind: 'PRIVATE', archivedAt: new Date() }, 7), /n’existe plus/);
+});
+
+test('club de l’application : anciennes ligues par tournoi fusionnées dans la plus récente', async () => {
+  const leagues = [
+    { id: 9, members: [{ id: 91, userId: 1, joinedAt: at('05'), leftAt: null }] },
+    {
+      id: 4,
+      members: [
+        { id: 41, userId: 1, joinedAt: at('01'), leftAt: null },
+        { id: 42, userId: 2, joinedAt: at('02'), leftAt: null },
+      ],
+    },
+  ];
+  const writes = [];
+  const db = {
+    appSetting: { findUnique: async () => ({ value: { name: 'CEP', fencers: [] } }) },
+    league: {
+      findMany: async () => leagues,
+      updateMany: async (q) => writes.push(['archive', q.where.id.in]),
+    },
+    leagueMember: {
+      update: async (q) => writes.push(['update', q.where.id, q.data.joinedAt.toISOString().slice(0, 10)]),
+      create: async (q) => writes.push(['create', q.data.leagueId, q.data.userId]),
+    },
+  };
+  db.$transaction = (fn) => fn(db);
+  const kept = await groups.ensureAppClub(db);
+  assert.equal(kept.id, 9);
+  assert.deepEqual(writes, [
+    ['update', 91, '2026-10-01'],
+    ['create', 9, 2],
+    ['archive', [4]],
+  ]);
 });
