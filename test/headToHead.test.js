@@ -42,9 +42,34 @@ test('head-to-head: past meetings in both orders, summary and recent form; the c
         return pair ? history.slice(0, 2) : where.includes('SAVIN') ? history : history.slice(0, 2);
       },
     },
+    // Poule commune : SAVIN (position 1) bat KOROM (position 2) 5–3.
+    pool: {
+      findMany: async () => [
+        {
+          id: 7,
+          name: 'Poule 2',
+          startsAt: null,
+          bouts: [
+            [null, 'V5', 'D1'],
+            ['D3', null, 'V5'],
+            ['V5', 'D2', null],
+          ],
+          fencers: [
+            { name: 'KOROM Erik', position: 2 },
+            { name: 'SAVIN Rafael', position: 1 },
+            { name: 'BEM Maciej', position: 3 },
+          ],
+          competition: { name: 'Épreuve', tournament: { name: 'Tournoi 1' } },
+        },
+      ],
+    },
   };
   const out = await headToHead(db, 99);
-  assert.deepEqual(out.summary, { wins1: 1, wins2: 1 });
+  assert.deepEqual(out.summary, { wins1: 1, wins2: 1, poolWins1: 1, poolWins2: 0 });
+  assert.deepEqual(
+    out.poolMeetings.map((x) => [x.pool, x.won, x.given, x.received]),
+    [['Poule 2', true, 5, 3]],
+  );
   assert.deepEqual(
     out.meetings.map((x) => [x.tournament, x.score]),
     [
