@@ -368,4 +368,13 @@ test('page publique : un joueur retiré du classement public y apparaît anonyme
   assert.equal(names[1][0], 2);
   assert.ok(names[1][1].startsWith('Joueur'));
   assert.ok(!JSON.stringify(page.body).includes(hidden.name));
+  // Robots : page HTML rendue côté serveur, liste publique et plan du site.
+  const html = await (await fetch(`${base}/api/public/tournaments/${c.tournamentId}/share`)).text();
+  assert.match(html, /<h1>Tournoi /);
+  assert.match(html, /application\/ld\+json/);
+  assert.ok(html.includes('Pronostiqueur anonyme') && !html.includes(hidden.name));
+  const list = await (await fetch(`${base}/api/public/tournaments`)).json();
+  assert.ok(list.some((t) => t.id === c.tournamentId));
+  const xml = await (await fetch(`${base}/api/public/sitemap.xml`)).text();
+  assert.ok(xml.includes(`/tournoi/${c.tournamentId}</loc>`));
 });
