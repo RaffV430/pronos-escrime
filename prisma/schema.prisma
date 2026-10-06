@@ -225,11 +225,14 @@ model League {
   name String
   kind String @default("PRIVATE")
   ownerId Int
-  tournamentId Int
+  // Tournoi de création (historique) : les groupes et clubs sont permanents, d'un tournoi à l'autre.
+  tournamentId Int?
   startsAt DateTime
   code String @unique
   members LeagueMember[]
   createdAt DateTime @default(now())
+  // Ancienne ligue du club fusionnée dans la ligue permanente.
+  archivedAt DateTime?
   @@index([tournamentId])
 }
 model LeagueMember {
@@ -238,6 +241,8 @@ model LeagueMember {
   league League @relation(fields:[leagueId],references:[id])
   userId Int
   joinedAt DateTime @default(now())
+  // Départ : la ligne est gardée pour les classements des clubs des tournois déjà commencés.
+  leftAt DateTime?
   @@unique([leagueId,userId])
   @@index([userId])
 }

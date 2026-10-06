@@ -81,9 +81,16 @@ router.put(
   '/club',
   wrap(async (req, res) => {
     const club = require('../services/club');
+    const before = (await club.getClub(prisma)).name;
     const saved = await club.saveClub(prisma, req.body, req.user.userId);
-    const created = await club.ensureClubLeagues(prisma, { actorId: req.user.userId });
-    res.json({ ...saved, leaguesCreated: created.length });
+    // Nouveau nom : le club permanent est renommé (membres conservés).
+    if (before && saved.name && before !== saved.name)
+      await prisma.league.updateMany({
+        where: { kind: 'CLUB', name: before, archivedAt: null },
+        data: { name: saved.name },
+      });
+    const league = await require('../services/groups').ensureAppClub(prisma, { actorId: req.user.userId });
+    res.json({ ...saved, leaguesCreated: league ? 1 : 0 });
   }),
 );
 // État du suivi automatique de chaque épreuve (erreurs, retards, dernier contrôle).

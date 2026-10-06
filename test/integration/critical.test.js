@@ -395,17 +395,13 @@ test('invitation par lien et duel depuis les classements', opts, async () => {
   const c = await createCompetition();
   const match = await createOpenMatch(c.id);
   const [owner, friend] = [await createUser(), await createUser()];
-  const created = await call('POST', '/api/community/leagues', owner.token, {
-    name: 'Les amis',
-    kind: 'PRIVATE',
-    tournamentId: c.tournamentId,
-  });
+  const created = await call('POST', '/api/community/leagues', owner.token, { name: 'Les amis', kind: 'PRIVATE' });
   assert.equal(created.status, 201, JSON.stringify(created.body));
   const { code } = created.body;
   const info = await (await fetch(`${base}/api/public/invitations/${code.toLowerCase()}`)).json();
   assert.equal(info.name, 'Les amis');
   assert.equal(info.members, 1);
-  assert.equal(info.tournament.id, c.tournamentId);
+  assert.equal(info.tournament, null, 'groupe permanent : aucun tournoi attaché');
   assert.equal((await fetch(`${base}/api/public/invitations/ZZ`)).status, 400);
   const calendar = await (await fetch(`${base}/api/public/calendar`)).json();
   assert.ok(Array.isArray(calendar.events));
@@ -426,4 +422,31 @@ test('invitation par lien et duel depuis les classements', opts, async () => {
   assert.deepEqual([after.body.totals.me, after.body.totals.them], [3, 0]);
   assert.equal(after.body.opponent.id, friend.id);
   assert.equal((await call('GET', `/api/community/duel/${owner.id}`, owner.token)).status, 400);
+  // Groupe permanent : classement par tournoi ou sur la saison ; départ puis retour.
+  assert.equal((await call('POST', '/api/community/join', friend.token, { code })).status, 200);
+  const league = created.body.id;
+  const onTournament = await call(
+    'GET',
+    `/api/community/leagues/${league}?tournamentId=${c.tournamentId}`,
+    owner.token,
+  );
+  assert.deepEqual(
+    onTournament.body.ranking.map((r) => r.id),
+    [owner.id, friend.id],
+  );
+  const season = await call('GET', `/api/community/leagues/${league}`, friend.token);
+  assert.equal(season.body.tournamentId, null);
+  assert.equal(season.body.league.memberCount, 2);
+  assert.equal((await call('POST', `/api/community/leagues/${league}/leave`, friend.token)).status, 200);
+  assert.equal((await call('GET', `/api/community/leagues/${league}`, friend.token)).status, 403);
+  assert.equal((await call('POST', '/api/community/join', friend.token, { code })).status, 200);
+  const mine = await call('GET', '/api/community/leagues', friend.token);
+  assert.equal(mine.body.find((l) => l.id === league)._count.members, 2);
+  // Un seul club à la fois.
+  const clubA = await call('POST', '/api/community/leagues', owner.token, { name: 'Club A', kind: 'CLUB' });
+  assert.equal(clubA.status, 201);
+  const clubB = await call('POST', '/api/community/leagues', owner.token, { name: 'Club B', kind: 'CLUB' });
+  assert.equal(clubB.status, 409);
+  const clubs = await call('GET', `/api/community/clubs/${c.tournamentId}`, owner.token);
+  assert.equal(clubs.status, 200);
 });
