@@ -134,7 +134,7 @@ router.get('/tournaments/:tournamentId/share', async (req, res) => {
   try {
     const data = await publicTournament(tournamentId);
     if (!data) return res.status(404).type('html').send('<!doctype html><title>Tournoi introuvable</title>');
-    res.set('Cache-Control', 'public, max-age=600');
+    res.set('Cache-Control', 'public, max-age=600, s-maxage=3600, stale-while-revalidate=86400');
     res.type('html').send(tournamentPage(data));
   } catch (error) {
     reportError(error, 'page publique (robots)');
@@ -203,7 +203,8 @@ router.get('/tournaments', async (req, res) => {
 router.get('/sitemap.xml', async (req, res) => {
   try {
     const list = await publicList();
-    res.set('Cache-Control', 'public, max-age=3600');
+    // s-maxage : le CDN du site garde le plan, servi instantanément même si le serveur se réveille.
+    res.set('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800');
     res.type('application/xml').send(sitemap(list.map((t) => ({ id: t.id, updatedAt: t.end || t.updatedAt }))));
   } catch (error) {
     reportError(error, 'plan du site');
