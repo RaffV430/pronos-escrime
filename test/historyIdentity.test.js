@@ -68,3 +68,27 @@ test('homonyms inside the same roster never produce a combined head-to-head', as
   };
   await assert.rejects(headToHead(db, 1), (e) => e.status === 409);
 });
+
+test('un sigle de club à 3 lettres (liste nationale) n’est pas une nationalité', async () => {
+  const { countryFor } = require('../src/services/matchCountries');
+  assert.equal(countryFor([{ name: 'MARTIN Alex', country: 'CEP' }], 'MARTIN Alex'), null);
+  assert.equal(countryFor([{ name: 'MARTIN Alex', country: 'FRA' }], 'MARTIN Alex'), 'FRA');
+  assert.equal(countryFor([{ name: 'MARTIN Alex', country: 'GER' }], 'MARTIN Alex'), 'DEU');
+  assert.equal(countryFor([{ name: 'MARTIN Alex', country: 'AIN' }], 'MARTIN Alex'), null);
+  // Même tireur : club en épreuve nationale, FRA en épreuve internationale → une seule nationalité.
+  const db = {
+    match: { findMany: async () => [] },
+    poolFencer: { findMany: async () => [] },
+    competition: {
+      findMany: async () =>
+        ['CEP', 'FRA'].map((country, id) => ({
+          id,
+          name: 'x',
+          createdAt: new Date(),
+          podiumRoster: [{ name: 'MARTIN Alex', country }],
+        })),
+    },
+  };
+  const profile = await fencerProfile(db, 'MARTIN Alex');
+  assert.equal(profile.name, 'MARTIN Alex');
+});
