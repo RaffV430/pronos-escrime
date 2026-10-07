@@ -238,10 +238,11 @@ async function watch(db, deps = {}) {
         // Source déjà reliée : un nouveau contrôle par jour suffit (épreuves ajoutées plus tard).
         if (
           known.get(entry.id)?.sourceUrl === source.sourceUrl &&
-          now - (rechecked.get(source.sourceUrl) || 0) < 20 * 3600000
+          now - (rechecked.get(`${entry.id}|${source.sourceUrl}`) || 0) < 20 * 3600000
         )
           continue;
-        rechecked.set(source.sourceUrl, now);
+        // Par entrée : un même tournoi officiel porte souvent plusieurs entrées (M17 samedi, M20 dimanche).
+        rechecked.set(`${entry.id}|${source.sourceUrl}`, now);
         const venue = await venueOf(entry, source.country, deps);
         const preview = await ftlTournament.preview(
           db,
