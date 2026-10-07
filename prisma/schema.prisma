@@ -99,6 +99,7 @@ model Competition {
   podiumManualUnlock Boolean           @default(false) 
   podiumFormat String @default("INDIVIDUAL")
   podiumRoster Json?
+  identityReview Json?
   rosterSourceUrl String?
   rosterCheckedAt DateTime?
   officialPodium Json?

@@ -22,12 +22,28 @@ const linkOf = (config) => ({ org: config.org, event: config.tournamentSlug, com
 async function refreshRoster(db, c, url, client, html = null) {
   const observed = E.parseRoster(html ?? (await client.get(url)));
   const current = c.podiumRoster || [];
-  const { merged, renames } = mergeRoster(current, observed);
-  if (c.podiumRoster && JSON.stringify(merged) === JSON.stringify(current) && c.rosterSourceUrl === url) return c;
+  let merged, renames;
+  try {
+    ({ merged, renames } = mergeRoster(current, observed));
+  } catch (error) {
+    if (error.status !== 409) throw error;
+    await require('./identityReview').record(db, c, url, observed);
+    throw error;
+  }
+  if (
+    !c.identityReview &&
+    c.podiumRoster &&
+    JSON.stringify(merged) === JSON.stringify(current) &&
+    c.rosterSourceUrl === url
+  )
+    return c;
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
     const fresh = await tx.competition.findUnique({ where: { id: c.id } });
-    if (JSON.stringify(fresh.podiumRoster) !== JSON.stringify(c.podiumRoster))
+    if (
+      JSON.stringify(fresh.podiumRoster) !== JSON.stringify(c.podiumRoster) ||
+      JSON.stringify(fresh.identityReview) !== JSON.stringify(c.identityReview)
+    )
       throw failure('Liste des engagés modifiée pendant le contrôle.', 409);
     for (const r of renames) {
       await tx.poolFencer.updateMany({ where: { name: r.from, pool: { competitionId: c.id } }, data: { name: r.to } });
@@ -47,7 +63,12 @@ async function refreshRoster(db, c, url, client, html = null) {
       });
     return tx.competition.update({
       where: { id: c.id },
-      data: { podiumRoster: merged, rosterSourceUrl: url, rosterCheckedAt: new Date() },
+      data: {
+        podiumRoster: merged,
+        rosterSourceUrl: url,
+        rosterCheckedAt: new Date(),
+        ...(c.identityReview ? { identityReview: require('@prisma/client').Prisma.DbNull } : {}),
+      },
     });
   });
 }
