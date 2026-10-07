@@ -2,6 +2,7 @@
 // du nom (et du club). Un nom corrigé en cours de journée (« PINEIRA Enzo » → « MOUREY PINEIRA Enzo »,
 // « ROSSI Nicolo » → « ROSSI Nicolo' ») garde son identifiant : les pronostics de podium suivent.
 const { clean } = require('./engardeParser');
+const { failure } = require('./ftlClient');
 
 const norm = (s) => clean(s).toLowerCase();
 const tokens = (name) =>
@@ -27,6 +28,14 @@ function sameFencer(a, b) {
 
 // Fusion pure : renvoie la liste fusionnée et les renommages (identifiant conservé).
 function mergeRoster(current = [], observed = []) {
+  // Une identité contradictoire exige une vérification admin ; conserver la liste précédente.
+  for (const e of current) {
+    const byId = observed.find((o) => o.id === e.id);
+    const byName = observed.filter((o) => norm(o.name) === norm(e.name));
+    const candidate = byId || (byName.length === 1 ? byName[0] : null);
+    if (candidate && e.country && candidate.country && norm(e.country) !== norm(candidate.country))
+      throw failure(`Identité à confirmer par un administrateur : ${e.name} (nation ou club différent).`, 409);
+  }
   const used = new Set();
   const matchOf = new Map(); // id courant → entrée observée
   for (const e of current) {
@@ -77,7 +86,8 @@ function mergeRoster(current = [], observed = []) {
 // Engagé d'un nom donné ; homonymes départagés par la nation ou le club publié à côté du nom.
 function entryFor(roster, name, club = '') {
   const hits = (roster || []).filter((e) => norm(e.name) === norm(name));
-  if (hits.length <= 1 || !club) return hits.length === 1 ? hits[0] : null;
+  if (hits.length === 1) return club && hits[0].country && norm(hits[0].country) !== norm(club) ? null : hits[0];
+  if (!club) return null;
   const byClub = hits.filter((e) => e.country && norm(e.country) === norm(club));
   if (byClub.length === 1) return byClub[0];
   const active = byClub.filter((e) => e.active !== false);
