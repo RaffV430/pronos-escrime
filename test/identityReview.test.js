@@ -37,3 +37,18 @@ test('stale review and short reason cannot change identities', async () => {
   await assert.rejects(confirm(f.db, 7, version, 'Je confirme après vérification', 42), { status: 409 });
   assert.equal(f.audits.length, 0);
 });
+
+test('a changed source or same-name multiple entrants cannot be confirmed as one person', async () => {
+  for (const ambiguous of [false, true]) {
+    const f = fixture();
+    const observed = [{ id: 'new', name: 'MARTIN Alex', country: 'ITA' }];
+    if (ambiguous) observed.push({ id: 'other', name: 'MARTIN Alex', country: 'DEU' });
+    if (ambiguous) observed[0].id = 'kept';
+    await record(f.db, f.get(), 'https://engarde-service.com/competition/a/b/c/tireurs.htm', observed);
+    const version = f.get().identityReview.version;
+    if (!ambiguous) f.get().rosterSourceUrl = 'https://engarde-service.com/competition/d/e/f/tireurs.htm';
+    await assert.rejects(confirm(f.db, 7, version, 'Confirmation après vérification', 42), { status: 409 });
+    assert.equal(f.get().podiumRoster[0].country, 'FRA');
+    assert.equal(f.audits.length, 0);
+  }
+});

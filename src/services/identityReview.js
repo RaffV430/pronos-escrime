@@ -50,7 +50,15 @@ async function confirm(db, competitionId, version, reason, actorId) {
     )
       throw failure('Le conflit a changé. Actualisez avant de confirmer.', 409);
     const pairs = conflicts(c.podiumRoster || [], review.observed);
-    if (!pairs.length || pairs.length !== review.conflicts.length)
+    if (
+      !pairs.length ||
+      pairs.length !== review.conflicts.length ||
+      pairs.some(
+        (pair) =>
+          c.podiumRoster.filter((e) => norm(e.name) === norm(pair.current.name)).length !== 1 ||
+          review.observed.filter((e) => norm(e.name) === norm(pair.observed.name)).length !== 1,
+      )
+    )
       throw failure('Identités ambiguës : confirmation impossible.', 409);
     // Explicit administrator confirmation changes metadata only. IDs and prediction rows are untouched.
     const corrected = c.podiumRoster.map((e) => {
