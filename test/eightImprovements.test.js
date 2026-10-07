@@ -125,6 +125,10 @@ test('roster uses full names, unique IDs, positive entry ranks and scratched sta
   assert.equal(r[1].entryRanking, null);
   assert.throws(() => parseRoster([a, a]), /dupliqués/);
   assert.throws(() => parseRoster([{ ...a, rank: -1 }]), /Rang/);
+  // Motif précis, nom compris ; club ou nation absent accepté.
+  assert.throws(() => parseRoster([{ ...a, id: '' }]), /DUPONT Alice \(identifiant officiel absent\)/);
+  assert.equal(parseRoster([{ ...a, country: null }])[0].country, '');
+  assert.throws(() => parseRoster([{ ...a, country: 12 }]), /club ou nation illisible/);
 });
 test('configuration rejects external URLs before login and expired or foreign previews', async () => {
   await assert.rejects(

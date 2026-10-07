@@ -18,14 +18,20 @@ function parseRoster(rows) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 2048)
     throw failure('Liste des engagés non publiée ou trop volumineuse.');
   const entries = rows.map((r) => {
-    if (typeof r.id !== 'string' || !/^[a-f0-9]{16,64}$/i.test(r.id) || !clean(r.name) || typeof r.country !== 'string')
-      throw failure('Identité d’un engagé non vérifiable.');
+    // Motif précis (nom compris) : l'administrateur voit tout de suite quelle ligne bloque la liste.
+    const who = clean(r?.name) || 'engagé sans nom';
+    if (typeof r.id !== 'string' || !/^[a-f0-9]{16,64}$/i.test(r.id))
+      throw failure(`Identité d’un engagé non vérifiable : ${who} (identifiant officiel absent).`);
+    if (!clean(r.name)) throw failure('Identité d’un engagé non vérifiable : nom absent.');
+    // Club ou nation non renseigné sur la source : accepté (vide), l'identifiant officiel suffit.
+    if (r.country !== null && r.country !== undefined && typeof r.country !== 'string')
+      throw failure(`Identité d’un engagé non vérifiable : ${who} (club ou nation illisible).`);
     const rank = r.rank === null || r.rank === undefined || r.rank === '' ? null : Number(r.rank);
     if (rank !== null && (!Number.isSafeInteger(rank) || rank <= 0)) throw failure('Rang d’engagement non vérifiable.');
     return {
       id: r.id,
       name: clean(r.name),
-      country: clean(r.country),
+      country: clean(r.country || ''),
       active: r.status !== 'Scratched',
       entryRanking: rank,
     };
