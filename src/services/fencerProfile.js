@@ -80,6 +80,7 @@ async function fencerProfile(db, rawName) {
     db.match.findMany({
       where: {
         isFinished: true,
+        pointsPending: false,
         OR: [{ player1: eq(name) }, { player2: eq(name) }],
         AND: [{ OR: [{ resultType: null }, { resultType: { not: 'CANCELLED' } }] }],
       },
@@ -112,6 +113,24 @@ async function fencerProfile(db, rawName) {
       tournament: { select: { id: true, name: true } },
     },
   });
+  const { countryFor } = require('./matchCountries');
+  const countries = new Set(
+    competitions
+      .flatMap((c) => (c.podiumRoster || []).filter((e) => same(e.name, name)).map((e) => countryFor([e], name)))
+      .filter(Boolean),
+  );
+  for (const row of poolRows)
+    for (const f of row.pool.fencers) {
+      if (same(f.name, name)) {
+        const code = countryFor([{ name, country: f.countryCode }], name);
+        if (code) countries.add(code);
+      }
+    }
+  if (countries.size > 1)
+    throw failure(
+      'Plusieurs tireurs portent ce nom avec des nationalités différentes. Historique non fusionné ; vérification administrateur nécessaire.',
+      409,
+    );
   let country = null;
   const entries = competitions.map((c) => {
     const tableau = matches
@@ -165,7 +184,7 @@ async function fencerProfile(db, rawName) {
 }
 
 // Assauts de poule entre deux tireurs (même poule, matrice connue), vus du côté de `a`.
-async function poolMeetings(db, a, b) {
+async function poolMeetings(db, a, b, countries = {}) {
   const rows = await db.pool.findMany({
     where: { AND: [{ fencers: { some: { name: eq(a) } } }, { fencers: { some: { name: eq(b) } } }] },
     include: {
@@ -177,6 +196,17 @@ async function poolMeetings(db, a, b) {
     const fencers = [...pool.fencers].sort((x, y) => x.position - y.position);
     const i = fencers.findIndex((f) => same(f.name, a)),
       j = fencers.findIndex((f) => same(f.name, b));
+    const { countryFor } = require('./matchCountries');
+    if (
+      [
+        [a, i],
+        [b, j],
+      ].some(
+        ([name, index]) =>
+          countries[name] && countryFor([{ name, country: fencers[index]?.countryCode }], name) !== countries[name],
+      )
+    )
+      return [];
     const r = i >= 0 && j >= 0 ? bout(pool.bouts, i, j) : null;
     return r
       ? [
