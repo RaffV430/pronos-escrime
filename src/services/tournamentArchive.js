@@ -27,7 +27,7 @@ function eventComplete(c) {
   // Legacy podium-only events have no match imports to finish.
   if (!matches.length) return !(c.matchRounds || []).length;
   return (
-    matches.every((m) => m.isFinished && !m.syncIssue) &&
+    matches.every((m) => m.isFinished && !m.syncIssue && !m.pointsPending) &&
     Boolean(c.matchRounds?.length) &&
     c.matchRounds.every((r) => matches.filter((m) => m.round === r.round).length === r.expectedMatchCount) &&
     matches.some((m) => m.round === 'T2') &&
@@ -56,24 +56,51 @@ const signature = (t) =>
       c.resultsVerifiedAt,
       c.podiumResolvedAt,
       c.officialPodium,
-      c.matches.map((m) => [m.id, m.isFinished, m.syncIssue, m.resultType]),
+      c.matches.map((m) => [m.id, m.isFinished, m.syncIssue, m.pointsPending, m.resultType]),
       c.pools.map((p) => [p.id, p.isFinal]),
       c.matchRounds.map((r) => [r.id, r.round, r.expectedMatchCount]),
     ]),
   ]);
-async function checkTournament(db, t, client = createClient(), now = new Date()) {
+async function checkTournament(db, t, client = createClient(), now = new Date(), engardeClient = null) {
   if (t.archivedAt || !t.competitions.length || !t.competitions.every(eventComplete)) return false;
   const configs = await Promise.all(t.competitions.map((c) => configuration(db, c.id)));
-  // engarde-service : épreuves terminées et podiums vérifiés (ci-dessus) suffisent, pas de calendrier FTL à relire.
   const engarde = configs.length && configs.every((cfg) => cfg?.provider === 'engarde');
   const official = engarde
-    ? {
-        source: t.ftlSourceUrl,
-        events: configs.map((cfg) => ({ eventId: cfg.eventId, event: cfg.event, date: cfg.date })),
-      }
+    ? await engardeTournamentFinished(configs, engardeClient || require('./engardeTournament').createEngardeClient())
     : await ftlTournamentFinished(t, configs, client);
   if (!official) return false;
   return archiveNow(db, t, now, official);
+}
+// Le classement d'une seule épreuve ne clôture jamais tout le tournoi.
+async function engardeTournamentFinished(configs, client) {
+  const E = require('./engardeParser');
+  const first = configs[0];
+  if (!first || configs.some((c) => c.org !== first.org || c.tournamentSlug !== first.tournamentSlug)) return false;
+  const events = E.parseCompetitions(await client.competitions(first.org, first.tournamentSlug), {
+    org: first.org,
+    event: first.tournamentSlug,
+  });
+  for (const cfg of configs) {
+    const e = events.find((e) => e.compe === cfg.compe);
+    if (!e || e.date !== cfg.date || norm(e.event) !== norm(cfg.event)) return false;
+  }
+  for (const e of events) {
+    // Un classement intermédiaire peut être publié avant la fin : exiger aussi l'état officiel terminé.
+    if (norm(e.state) !== 'terminée') return false;
+    const pages = E.competitionPages(await client.get(e.eventSourceUrl), {
+      org: e.org,
+      event: e.tournamentSlug,
+      compe: e.compe,
+    });
+    if (!pages.final) return false;
+    const rows = E.parseFinalRanking(await client.get(pages.final));
+    if (!rows.length || rows.filter((r) => r.place === '1').length !== 1 || !rows.some((r) => r.place === '2'))
+      return false;
+  }
+  return {
+    source: `${require('./engardeParser').ORIGIN || 'https://engarde-service.com'}/tournament/${first.org}/${first.tournamentSlug}`,
+    events,
+  };
 }
 async function ftlTournamentFinished(t, configs, client) {
   let source = t.ftlSourceUrl;
@@ -189,7 +216,7 @@ async function archiveCompleted(db, { clientFactory = createClient, now = new Da
   }
   return archived;
 }
-module.exports = { eventComplete, scheduleFinished, checkTournament, archiveCompleted };
+module.exports = { engardeTournamentFinished, eventComplete, scheduleFinished, checkTournament, archiveCompleted };
 
 // Archivage manuel depuis l'administration : même effet que l'archivage
 // automatique (tournoi masqué de « Pronostiquer », suivi FencingTimeLive arrêté,
