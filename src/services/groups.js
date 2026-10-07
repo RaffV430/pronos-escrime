@@ -11,7 +11,11 @@ const active = (m) => !m.leftAt;
 function clubMembersAt(members, start, now = Date.now()) {
   const t = start ? new Date(start).getTime() : null;
   if (!t || t > now) return members.filter(active);
-  return members.filter((m) => new Date(m.joinedAt).getTime() <= t && (!m.leftAt || new Date(m.leftAt).getTime() > t));
+  return members.filter((m) =>
+    [...(m.membershipPeriods || []), m].some(
+      (p) => new Date(p.joinedAt).getTime() <= t && (!p.leftAt || new Date(p.leftAt).getTime() > t),
+    ),
+  );
 }
 
 // Membres comptés pour un classement : groupe d'amis = actuels ; club = au début du tournoi choisi.
@@ -22,6 +26,7 @@ function membersFor(league, { start = null, tournamentId = null, now = Date.now(
 
 // Inscription (ou retour après un départ). Un seul club actif par joueur.
 async function enroll(tx, league, userId) {
+  await tx.$queryRaw`SELECT id FROM "User" WHERE id=${userId} FOR UPDATE`;
   if (league.archivedAt) throw failure('Ce groupe n’existe plus.', 404);
   if (league.kind === 'CLUB') {
     const other = await tx.leagueMember.findFirst({
@@ -35,15 +40,48 @@ async function enroll(tx, league, userId) {
     });
     if (other) throw failure(`Un seul club à la fois : quittez d’abord « ${other.league.name} ».`, 409);
   }
+  const previous = await tx.leagueMember.findUnique({ where: { leagueId_userId: { leagueId: league.id, userId } } });
+  const returned = previous?.leftAt
+    ? {
+        joinedAt: new Date(),
+        membershipPeriods: [
+          ...(previous.membershipPeriods || []),
+          { joinedAt: new Date(previous.joinedAt).toISOString(), leftAt: new Date(previous.leftAt).toISOString() },
+        ],
+      }
+    : {};
   return tx.leagueMember.upsert({
     where: { leagueId_userId: { leagueId: league.id, userId } },
-    update: { leftAt: null },
+    update: { leftAt: null, ...returned },
     create: { leagueId: league.id, userId },
   });
 }
 
 async function leave(tx, league, userId, now = new Date()) {
   await tx.leagueMember.updateMany({ where: { leagueId: league.id, userId, leftAt: null }, data: { leftAt: now } });
+}
+
+// Réunir les anciennes ligues du même club sans combler les périodes d'absence.
+function mergePeriods(members) {
+  const periods = members
+    .flatMap((m) => [...(m.membershipPeriods || []), m])
+    .map((p) => ({ start: new Date(p.joinedAt).getTime(), end: p.leftAt ? new Date(p.leftAt).getTime() : Infinity }))
+    .sort((a, b) => a.start - b.start);
+  const merged = [];
+  for (const p of periods) {
+    const last = merged.at(-1);
+    if (last && p.start <= last.end) last.end = Math.max(last.end, p.end);
+    else merged.push({ ...p });
+  }
+  const current = merged.pop();
+  return {
+    joinedAt: new Date(current.start),
+    leftAt: Number.isFinite(current.end) ? new Date(current.end) : null,
+    membershipPeriods: merged.map((p) => ({
+      joinedAt: new Date(p.start).toISOString(),
+      leftAt: new Date(p.end).toISOString(),
+    })),
+  };
 }
 
 // Ligue du club de l'application : une seule, permanente. Les anciennes ligues par tournoi sont
@@ -78,20 +116,22 @@ async function ensureAppClub(db, { actorId = null } = {}) {
   const first = new Map();
   for (const l of all)
     for (const m of l.members) {
-      const prev = first.get(m.userId);
-      if (!prev || new Date(m.joinedAt) < new Date(prev.joinedAt)) first.set(m.userId, m);
+      const rows = first.get(m.userId) || [];
+      rows.push(m);
+      first.set(m.userId, rows);
     }
   await db.$transaction(async (tx) => {
-    for (const [userId, m] of first) {
+    for (const [userId, rows] of first) {
+      const m = mergePeriods(rows);
       const current = keep.members.find((x) => x.userId === userId);
       if (current)
         await tx.leagueMember.update({
           where: { id: current.id },
-          data: { joinedAt: m.joinedAt, ...(current.leftAt && !m.leftAt ? { leftAt: null } : {}) },
+          data: m,
         });
       else
         await tx.leagueMember.create({
-          data: { leagueId: keep.id, userId, joinedAt: m.joinedAt, leftAt: m.leftAt || null },
+          data: { leagueId: keep.id, userId, ...m },
         });
     }
     await tx.league.updateMany({ where: { id: { in: older.map((l) => l.id) } }, data: { archivedAt: new Date() } });
@@ -117,4 +157,4 @@ async function singleClubPerPlayer(db, now = new Date()) {
   return extra.length;
 }
 
-module.exports = { active, clubMembersAt, membersFor, enroll, leave, ensureAppClub, singleClubPerPlayer };
+module.exports = { mergePeriods, active, clubMembersAt, membersFor, enroll, leave, ensureAppClub, singleClubPerPlayer };
