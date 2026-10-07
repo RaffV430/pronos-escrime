@@ -48,8 +48,10 @@ test('club permanent : membres comptés selon leur présence au début du tourno
 test('un seul club à la fois ; retour dans un groupe après un départ', async () => {
   let upsert;
   const tx = (other) => ({
+    $queryRaw: async () => [],
     leagueMember: {
       findFirst: async () => other,
+      findUnique: async () => null,
       upsert: async (q) => (upsert = q),
     },
   });
