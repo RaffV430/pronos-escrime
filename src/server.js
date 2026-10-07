@@ -30,7 +30,7 @@ app.use(express.json({ limit: '100kb' }));
 
 // Limite générale : 300 requêtes/min par session (ou par adresse IP sans session). Protège la base
 // contre un compte ou un script qui boucle, sans gêner un club entier derrière le même wifi.
-const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { rateLimit } = require('express-rate-limit');
 app.use(
   '/api',
   rateLimit({
@@ -39,12 +39,7 @@ app.use(
     standardHeaders: 'draft-8',
     legacyHeaders: false,
     message: { error: 'Trop de requêtes. Patientez une minute.' },
-    keyGenerator: (req) => {
-      const auth = req.headers.authorization;
-      return auth
-        ? `s:${require('node:crypto').createHash('sha256').update(auth).digest('base64url').slice(0, 22)}`
-        : `ip:${ipKeyGenerator(req.ip || '')}`;
-    },
+    keyGenerator: require('./middleware/rateIdentity').rateIdentity,
   }),
 );
 
@@ -87,21 +82,7 @@ app.get('/api/tournaments', authMiddleware, async (req, res) => {
 
 app.get('/', (req, res) => res.json({ message: '🤺 API MPP Escrime opérationnelle !' }));
 app.get('/health', async (req, res) => {
-  const { lastBeat } = require('./lib/heartbeat');
-  const worker = (name, enabled) => {
-    const at = lastBeat(name);
-    const age = at ? Math.round((Date.now() - at) / 1000) : null;
-    // Une tâche active qui n'a pas terminé de passage depuis 5 min est signalée (sans couper le service).
-    return {
-      enabled,
-      lastRunAt: at ? new Date(at).toISOString() : null,
-      stale: enabled && (age === null || age > 300),
-    };
-  };
-  const workers = {
-    ftl: worker('ftl', process.env.FTL_AUTO_SYNC === 'true'),
-    notifications: worker('push', require('./services/pushNotifications').configured()),
-  };
+  const workers = require('./services/workerHealth').workerHealth();
   const uptime = Math.round(process.uptime());
   // Juste après le démarrage, aucune tâche n'a encore eu le temps de passer.
   const stale = uptime > 120 && Object.values(workers).some((w) => w.stale);
@@ -114,6 +95,12 @@ app.get('/health', async (req, res) => {
 });
 
 app.use((req, res) => res.status(404).json({ error: 'Route introuvable.' }));
+// Les erreurs de saisie ne sont pas des pannes et peuvent contenir un mot de passe dans error.body.
+app.use((error, req, res, next) => {
+  if (error.type === 'entity.parse.failed') return res.status(400).json({ error: 'JSON invalide.' });
+  if (error.type === 'entity.too.large') return res.status(413).json({ error: 'Requête trop volumineuse.' });
+  next(error);
+});
 if (Sentry) Sentry.setupExpressErrorHandler(app);
 app.use((error, req, res, next) => {
   console.error('Erreur non gérée:', error);
@@ -139,6 +126,7 @@ async function start() {
   const stopNotifications = require('./services/pushNotifications').startWorker(prisma);
   const stopFtl = require('./services/ftlScheduler').startWorker(prisma);
   const stopMaintenance = require('./services/maintenance').startWorker(prisma);
+  const stopWatchdog = require('./services/workerHealth').startWatchdog();
   const stopCalendar = require('./services/calendarWatch').startWorker(prisma);
   // Arrêt propre (redéploiement Render) : plus de nouvelles requêtes ni de nouveaux passages,
   // on attend la fin des passages en cours (25 s au plus), puis on ferme la base.
@@ -149,6 +137,7 @@ async function start() {
     const force = setTimeout(() => process.exit(0), 25000);
     force.unref();
     server.close();
+    stopWatchdog();
     await Promise.allSettled([stopFtl(), stopNotifications(), stopMaintenance(), stopCalendar()]);
     await prisma.$disconnect().catch(() => {});
     process.exit(0);

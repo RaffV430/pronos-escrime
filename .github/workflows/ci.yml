@@ -33,6 +33,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm run check
       # Résumé lisible depuis l'API GitHub (annotation) : tests sur la vraie base bien exécutés, pas ignorés.
       - name: Résumé des tests sur base réelle
