@@ -340,7 +340,7 @@ async function upcoming(db, now = Date.now()) {
   const tournaments = ids.length
     ? await db.tournament.findMany({
         where: { id: { in: ids } },
-        select: { id: true, competitions: { select: { id: true, name: true } } },
+        select: { id: true, name: true, competitions: { select: { id: true, name: true } } },
       })
     : [];
   // Jour officiel de chaque épreuve (configuration FencingTimeLive / engarde-service).
@@ -369,7 +369,9 @@ async function upcoming(db, now = Date.now()) {
         ...e,
         ...(days.length ? { start: days[0], end: days.at(-1) } : {}),
         tournamentId: t.id,
+        tournamentName: t.name,
         competitionIds: mine.map((c) => c.id),
+        competitions: mine.map((c) => ({ id: c.id, name: c.name })),
       };
     })
     .filter((e) => day(e.end) + DAY > now)
