@@ -377,7 +377,8 @@ test('page publique : un joueur retiré du classement public y apparaît anonyme
   const list = await (await fetch(`${base}/api/public/tournaments`)).json();
   assert.ok(list.some((t) => t.id === c.tournamentId));
   const xml = await (await fetch(`${base}/api/public/sitemap.xml`)).text();
-  assert.ok(xml.includes(`/tournoi/${c.tournamentId}</loc>`));
+  assert.ok(new RegExp(`/tournoi/[a-z0-9-]*-?${c.tournamentId}</loc>`).test(xml));
+  assert.ok(new RegExp(`/tournoi/[a-z0-9-]*-?${c.tournamentId}/[a-z0-9-]*-?${c.id}</loc>`).test(xml));
   assert.ok(xml.includes('/resultats</loc>'));
   // Onglet Résultats sans compte : aucun pronostic dans les réponses.
   const results = await fetch(`${base}/api/public/results`);

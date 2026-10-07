@@ -45,7 +45,7 @@ test('page pour les robots : titre, podiums, classement, données structurées, 
     leaderboard: [{ rank: 1, name: 'Theo', points: 70 }],
   });
   assert.match(html, /<h1>Circuit &lt;Antony&gt;<\/h1>/);
-  assert.match(html, /<link rel="canonical" href="https:\/\/www.pronos-escrime.fr\/tournoi\/4">/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/www.pronos-escrime.fr\/tournoi\/circuit-antony-4">/);
   assert.match(html, /Or : DOE John \(FRA\)/);
   assert.match(html, /Podium pas encore publié/);
   assert.match(html, /1\. Theo — 70 pts/);
@@ -54,7 +54,44 @@ test('page pour les robots : titre, podiums, classement, données structurées, 
   assert.equal(ld.startDate, '2026-10-04');
   assert.equal(ld.location.address.addressCountry, 'FR');
   assert.ok(!html.includes('<Antony>'));
-  const xml = sitemap([{ id: 4, updatedAt: '2026-10-04' }], new Date('2026-10-06T00:00:00Z'));
-  assert.match(xml, /<loc>https:\/\/www.pronos-escrime.fr\/tournoi\/4<\/loc><lastmod>2026-10-04<\/lastmod>/);
+  const xml = sitemap(
+    [
+      {
+        id: 4,
+        name: 'Circuit Antony',
+        updatedAt: '2026-10-04',
+        competitions: [{ id: 11, name: 'Fleuret Hommes senior' }],
+      },
+    ],
+    new Date('2026-10-06T00:00:00Z'),
+  );
+  assert.match(
+    xml,
+    /<loc>https:\/\/www.pronos-escrime.fr\/tournoi\/circuit-antony-4<\/loc><lastmod>2026-10-04<\/lastmod>/,
+  );
+  assert.match(xml, /<loc>https:\/\/www.pronos-escrime.fr\/tournoi\/circuit-antony-4\/fleuret-hommes-senior-11<\/loc>/);
   assert.match(xml, /<loc>https:\/\/www.pronos-escrime.fr\/<\/loc><lastmod>2026-10-06<\/lastmod>/);
+});
+
+test('page robots d’une seule épreuve : titre, adresse et lien vers le tournoi', () => {
+  const { tournamentPage, idOf } = require('../src/services/publicHtml');
+  const data = {
+    id: 4,
+    name: 'Etampes CN M17/M20',
+    start: '2026-10-10',
+    end: '2026-10-11',
+    city: 'Étampes',
+    countries: ['FR'],
+    competitions: [
+      { id: 13, name: "Cadet Women's Foil", podium: [] },
+      { id: 16, name: "Junior Women's Foil", podium: [{ place: 1, name: 'SOUMAGNE Perle', country: '' }] },
+    ],
+    leaderboard: [],
+  };
+  const html = tournamentPage(data, 16);
+  assert.match(html, /<h1>Junior Women&#39;s Foil<\/h1>/);
+  assert.match(html, /tournoi\/etampes-cn-m17-m20-4\/junior-womens-foil-16/);
+  assert.ok(!html.includes('Cadet Women'));
+  assert.equal(idOf('etampes-cn-m17-m20-4'), 4);
+  assert.equal(idOf('nom-sans-numero'), null);
 });

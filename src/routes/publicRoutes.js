@@ -125,19 +125,17 @@ router.get('/tournaments/:tournamentId', async (req, res) => {
 
 // Page du tournoi rendue côté serveur pour les robots (moteurs de recherche, aperçus de liens) : le site
 // leur renvoie ici /tournoi/:id, avec le même contenu que la page de l'application.
-const { tournamentPage, sitemap, SITE } = require('../services/publicHtml');
+const { tournamentPage, sitemap, SITE, idOf } = require('../services/publicHtml');
+// Robots : /tournoi/<tournoi>[/<épreuve>] (nom lisible + numéro, ou numéro seul).
 router.get('/tournaments/:tournamentId/share', async (req, res) => {
-  let tournamentId;
-  try {
-    tournamentId = id(req.params.tournamentId);
-  } catch {
-    return res.redirect(302, SITE);
-  }
+  const tournamentId = idOf(req.params.tournamentId);
+  if (!tournamentId) return res.redirect(302, SITE);
+  const eventId = idOf(req.query.event);
   try {
     const data = await publicTournament(tournamentId);
     if (!data) return res.status(404).type('html').send('<!doctype html><title>Tournoi introuvable</title>');
     res.set('Cache-Control', 'public, max-age=600, s-maxage=3600, stale-while-revalidate=86400');
-    res.type('html').send(tournamentPage(data));
+    res.type('html').send(tournamentPage(data, eventId));
   } catch (error) {
     reportError(error, 'page publique (robots)');
     res.redirect(302, `${SITE}/tournoi/${tournamentId}`);
@@ -189,6 +187,7 @@ async function publicList() {
       city: r?.city || null,
       countries: r?.countries || [],
       finished: Boolean(r && r.competitions.length === t.competitions.length),
+      competitions: t.competitions.map((c) => ({ id: c.id, name: c.name })),
       updatedAt: t.createdAt,
     };
   });
@@ -247,7 +246,16 @@ router.get('/sitemap.xml', async (req, res) => {
     const list = await publicList();
     // s-maxage : le CDN du site garde le plan, servi instantanément même si le serveur se réveille.
     res.set('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800');
-    res.type('application/xml').send(sitemap(list.map((t) => ({ id: t.id, updatedAt: t.end || t.updatedAt }))));
+    res.type('application/xml').send(
+      sitemap(
+        list.map((t) => ({
+          id: t.id,
+          name: t.name,
+          competitions: t.competitions,
+          updatedAt: t.end || t.updatedAt,
+        })),
+      ),
+    );
   } catch (error) {
     reportError(error, 'plan du site');
     res.status(500).type('text/plain').send('Plan du site indisponible.');
