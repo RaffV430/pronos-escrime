@@ -26,6 +26,32 @@ router.get(
     );
   }),
 );
+// Conflicts are read and confirmed under the same competition lock as official imports.
+router.get(
+  '/identity-review/:competitionId',
+  wrap(async (req, res) => {
+    const c = await prisma.competition.findUnique({
+      where: { id: id(req.params.competitionId) },
+      select: { id: true, name: true, identityReview: true },
+    });
+    if (!c) return res.status(404).json({ error: 'Épreuve introuvable.' });
+    res.json(c);
+  }),
+);
+router.post(
+  '/identity-review/:competitionId/confirm',
+  wrap(async (req, res) => {
+    res.json(
+      await require('../services/identityReview').confirm(
+        prisma,
+        id(req.params.competitionId),
+        req.body?.version,
+        req.body?.reason,
+        req.user.userId,
+      ),
+    );
+  }),
+);
 // Journal d'administration : par défaut sans les contrôles automatiques FencingTimeLive
 // (un toutes les 2 min par épreuve), qui noyaient les actions des administrateurs. ?all=1 pour tout voir.
 const ROUTINE = ['Contrôle FTL démarré', 'Contrôle FTL terminé'];

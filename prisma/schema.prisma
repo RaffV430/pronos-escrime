@@ -99,6 +99,7 @@ model Competition {
   podiumManualUnlock Boolean           @default(false) 
   podiumFormat String @default("INDIVIDUAL")
   podiumRoster Json?
+  identityReview Json?
   rosterSourceUrl String?
   rosterCheckedAt DateTime?
   officialPodium Json?
@@ -243,6 +244,7 @@ model LeagueMember {
   joinedAt DateTime @default(now())
   // Départ : la ligne est gardée pour les classements des clubs des tournois déjà commencés.
   leftAt DateTime?
+  membershipPeriods Json? // Périodes closes conservées lors d’un retour au club.
   @@unique([leagueId,userId])
   @@index([userId])
 }
