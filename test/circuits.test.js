@@ -83,3 +83,60 @@ test('circuit ranking: sum of each player’s best results, the worst one droppe
   );
   await assert.rejects(circuitRanking(d, 7), /introuvable/);
 });
+
+function categoryDb() {
+  const d = db({});
+  const all = [
+    { id: 11, tournamentId: 1 },
+    { id: 12, tournamentId: 1 },
+    { id: 21, tournamentId: 2 },
+  ];
+  d.competition.findMany = async ({ where }) =>
+    all.filter(
+      (c) =>
+        (!where.tournamentId || c.tournamentId === where.tournamentId) &&
+        (!where.id || (typeof where.id === 'number' ? c.id === where.id : where.id.in.includes(c.id))),
+    );
+  d.prediction.groupBy = async ({ where }) => [
+    {
+      userId: 1,
+      _sum: {
+        pointsEarned: where.match.competitionId.in.reduce((sum, id) => sum + ({ 11: 10, 12: 90, 21: 20 }[id] || 0), 0),
+        bonusPoints: 0,
+      },
+    },
+  ];
+  return d;
+}
+
+test('circuits: selected categories exclude other events, cache scopes stay separate and worst results remain per tournament', async () => {
+  const d = categoryDb();
+  await saveCircuits(
+    d,
+    [
+      { name: 'All', tournamentIds: [1, 2], dropWorst: 0 },
+      { name: 'Cadets', tournamentIds: [1, 2], competitionIdsByTournament: { 1: [11], 2: [21] }, dropWorst: 0 },
+      { name: 'Best cadets', tournamentIds: [1, 2], competitionIdsByTournament: { 1: [11], 2: [21] }, dropWorst: 1 },
+      { name: 'Both', tournamentIds: [1], competitionIdsByTournament: { 1: [11, 12] }, dropWorst: 0 },
+    ],
+    9,
+  );
+  assert.equal((await circuitRanking(d, 1)).rows[0].totalPoints, 120);
+  assert.equal((await circuitRanking(d, 2)).rows[0].totalPoints, 30);
+  assert.equal((await circuitRanking(d, 3)).rows[0].totalPoints, 20);
+  assert.deepEqual((await circuitRanking(d, 4)).rows[0].results, [100]);
+  assert.equal((await circuitRanking(d, 1)).rows[0].totalPoints, 120);
+});
+
+test('circuits: reject empty, foreign and malformed event selections before saving or auditing', async () => {
+  const d = categoryDb();
+  await saveCircuits(d, [{ name: 'Original', tournamentIds: [1] }], 9);
+  const before = await d.appSetting.findUnique();
+  for (const selection of [{ 1: [] }, { 1: [21] }, { 2: [21] }, { 1: ['11'] }, []]) {
+    await assert.rejects(
+      saveCircuits(d, [{ name: 'Invalid', tournamentIds: [1], competitionIdsByTournament: selection }], 9),
+    );
+    assert.deepEqual(await d.appSetting.findUnique(), before);
+  }
+  assert.equal(d.audits.length, 1);
+});
