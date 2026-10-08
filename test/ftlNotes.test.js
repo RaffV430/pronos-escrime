@@ -56,6 +56,25 @@ test('pace: 15 min before the start (last check 1 min before), then 2 min while 
   };
   assert.equal(await pace('2026-10-09T21:00:00Z', { openFirstResultPools: 3 }), 15);
   assert.equal(await pace('2026-10-09T21:50:00Z', { openFirstResultPools: 3 }), 9);
-  assert.equal(await pace('2026-10-10T08:00:00Z', { openFirstResultPools: 3, warnings: ['x'] }), 2);
+  assert.equal(await pace('2026-10-10T08:00:00Z', { openFirstResultPools: 3, warnings: ['x'] }), 0.5);
   assert.equal(await pace('2026-10-10T08:00:00Z', { openFirstResultPools: 0, warnings: ['x'] }), 5);
+});
+
+test('active phases use 30 seconds for pools and 10 seconds for published tableaux', async () => {
+  for (const [syncPhase, delay] of [
+    ['POOLS', 30000],
+    ['TABLEAU', 10000],
+  ]) {
+    const db = fakeDb();
+    await finish(db, 1, 't', { syncPhase, eventStart: '2026-10-10T08:00:00Z', warnings: [] }, null, now);
+    assert.equal(db.state.nextAutomaticAt - now, delay);
+  }
+});
+test('fast tableau polling retains failure backoff and completion stop', async () => {
+  const db = fakeDb();
+  await finish(db, 1, 't', { syncPhase: 'TABLEAU' }, 'Source unavailable', now);
+  assert.equal(db.state.nextAutomaticAt - now, 120000);
+  db.state.leaseToken = 't';
+  await finish(db, 1, 't', { syncPhase: 'TABLEAU', podium: true }, null, now);
+  assert.equal(db.state.nextAutomaticAt, null);
 });

@@ -52,7 +52,7 @@ test('event start uses the FencingTimeLive local time and the venue time zone', 
   );
 });
 
-test('pace: 15 min before the pools, last slow check 1 min before their start, then 2 min', async () => {
+test('pace: 15 min before the pools, last slow check 1 min before their start, then 30 seconds', async () => {
   const start = '2026-10-10T07:00:00.000Z';
   const pace = async (at) => {
     const state = { competitionId: 1, leaseToken: 't', failures: 0 };
@@ -71,7 +71,7 @@ test('pace: 15 min before the pools, last slow check 1 min before their start, t
   };
   assert.equal(await pace('2026-10-10T05:00:00Z'), '2026-10-10T05:15:00.000Z');
   assert.equal(await pace('2026-10-10T06:50:00Z'), '2026-10-10T06:59:00.000Z', 'capped 1 min before the start');
-  assert.equal(await pace('2026-10-10T06:59:10Z'), '2026-10-10T07:01:10.000Z');
+  assert.equal(await pace('2026-10-10T06:59:10Z'), '2026-10-10T06:59:40.000Z');
 });
 
 test('plan: unchanged pools are left alone; changed, added, removed and reordered pools are detected', () => {
