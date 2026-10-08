@@ -414,7 +414,17 @@ router.get('/export', async (req, res) => {
       await Promise.all([
         db.user.findUnique({
           where: { id: userId },
-          select: { id: true, name: true, email: true, isAdmin: true, createdAt: true, totpEnabledAt: true },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            isAdmin: true,
+            createdAt: true,
+            totpEnabledAt: true,
+            club: true,
+            clubChoiceAt: true,
+            clubResponsibilities: true,
+          },
         }),
         db.prediction.findMany({
           where: { userId },

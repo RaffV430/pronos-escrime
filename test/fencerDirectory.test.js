@@ -57,7 +57,8 @@ test('recherche accentuée, pagination, épreuve hors tournoi refusée et lectur
         return [];
       },
     },
-    appSetting: { findUnique: async () => null },
+    user: { findUnique: async () => ({ club: null }) },
+    club: { findMany: async () => [] },
   };
   const args = { tournamentId: 1, query: 'elodie', offset: 0 };
   const first = await search(db, 7, args);

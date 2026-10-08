@@ -123,12 +123,12 @@ router.post('/register', registerPerIp, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, BCRYPT_COST);
 
-    const newUser = await prisma.user.create({
-      data: {
-        email,
-        name: nameToSave, // On enregistre dans la colonne 'name'
-        password: hashedPassword,
-      },
+    const newUser = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({ data: { email, name: nameToSave, password: hashedPassword } });
+      // Older clients can still register; the next visit asks them to choose a club.
+      if (req.body.clubChoice !== undefined)
+        await require('../services/accountClubs').setClubInTransaction(tx, user.id, req.body.clubChoice);
+      return user;
     });
 
     const token = session.issueToken(newUser);
@@ -140,6 +140,7 @@ router.post('/register', registerPerIp, async (req, res) => {
   } catch (err) {
     if (err.code === 'P2002')
       return res.status(409).json({ error: 'Ce nom ou cette adresse e-mail est déjà utilisé.' });
+    if (err.status) return res.status(err.status).json({ error: err.message });
     console.error('Erreur Register:', err);
     res.status(500).json({ error: "Erreur lors de l'inscription." });
   }

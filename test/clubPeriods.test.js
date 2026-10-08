@@ -9,6 +9,8 @@ test('rejoining preserves both membership periods and the gap between them', asy
     $queryRaw: async () => {
       locks++;
     },
+    club: { findFirst: async () => ({ id: 1 }) },
+    user: { update: async () => ({}) },
     leagueMember: {
       findFirst: async () => null,
       findUnique: async () => member,
@@ -16,7 +18,7 @@ test('rejoining preserves both membership periods and the gap between them', asy
     },
   };
   await enroll(tx, { id: 2, kind: 'CLUB' }, 7);
-  assert.equal(locks, 1);
+  assert.equal(locks, 2);
   assert.equal(member.membershipPeriods.length, 1);
   assert.equal(clubMembersAt([member], '2026-09-05').length, 1);
   assert.equal(clubMembersAt([member], '2026-09-15').length, 0);

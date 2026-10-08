@@ -22,13 +22,14 @@ function createRouter(db) {
   router.get(
     '/directory',
     run(async (req, res) => {
-      const { tournamentId, competitionId, query = '', clubOnly, offset = '0' } = req.query;
+      const { tournamentId, competitionId, query = '', clubOnly, clubId, offset = '0' } = req.query;
       if (
         !validId(tournamentId) ||
         (competitionId !== undefined && !validId(competitionId)) ||
         typeof query !== 'string' ||
         query.length > 160 ||
         (clubOnly !== undefined && clubOnly !== '1') ||
+        (clubId !== undefined && !validId(clubId)) ||
         !/^\d{1,6}$/.test(String(offset))
       )
         return res.status(400).json({ error: 'Recherche de tireurs invalide.' });
@@ -38,6 +39,7 @@ function createRouter(db) {
           competitionId: Number(competitionId) || null,
           query,
           clubOnly: clubOnly === '1',
+          clubId: Number(clubId) || null,
           offset: Number(offset),
         }),
       );

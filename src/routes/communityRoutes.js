@@ -131,7 +131,10 @@ router.get(
     res.json(
       await db.league.findMany({
         where: { archivedAt: null, members: { some: { userId: req.user.userId, leftAt: null } } },
-        include: { _count: { select: { members: { where: { leftAt: null } } } } },
+        include: {
+          registeredClub: { select: { description: true } },
+          _count: { select: { members: { where: { leftAt: null } } } },
+        },
         orderBy: { id: 'desc' },
       }),
     ),
@@ -178,7 +181,7 @@ router.post(
   wrap(async (req, res) => {
     const league = await db.league.findUnique({ where: { id: id(req.params.id) } });
     if (!league) fail('Groupe introuvable.', 404);
-    if (league.ownerId === req.user.userId) fail('Le créateur reste membre de son groupe.');
+    if (league.kind !== 'CLUB' && league.ownerId === req.user.userId) fail('Le créateur reste membre de son groupe.');
     await groups.leave(db, league, req.user.userId);
     res.json({ success: true });
   }),
