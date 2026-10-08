@@ -292,7 +292,17 @@ async function save(db, input, actorId, client = createClient()) {
     { timeout: 30000 },
   );
 }
-async function applyEvent(tx, c, { config, roster }, actorId) {
+// Un retrait officiel ne supprime jamais un engagé figé ni ses pronostics.
+// Le contrôle automatique accepte seulement un sous-ensemble des mêmes identités.
+function rosterIsSubset(current, observed) {
+  if (!Array.isArray(observed) || !observed.length) return false;
+  const known = new Map(current.map((e) => [e.id, norm(e.name)]));
+  return (
+    new Set(observed.map((e) => e.id)).size === observed.length &&
+    observed.every((e) => known.has(e.id) && known.get(e.id) === norm(e.name))
+  );
+}
+async function applyEvent(tx, c, { config, roster }, actorId, allowWithdrawals = false) {
   if (
     c.podiumFormat !== config.format ||
     (c.ftlEventId && c.ftlEventId !== config.eventId) ||
@@ -300,7 +310,11 @@ async function applyEvent(tx, c, { config, roster }, actorId) {
   )
     throw failure('L’identité existante diffère de la source.', 409);
   const identity = (r) => JSON.stringify(r.map((x) => [x.id, norm(x.name)]).sort((a, b) => a[0].localeCompare(b[0])));
-  if (c.podiumRoster && (!roster || identity(c.podiumRoster) !== identity(roster)))
+  if (
+    c.podiumRoster &&
+    (!roster ||
+      (identity(c.podiumRoster) !== identity(roster) && !(allowWithdrawals && rosterIsSubset(c.podiumRoster, roster))))
+  )
     throw failure('Les engagés existants diffèrent : vérification individuelle requise.', 409);
   const sources = await tx.match.findMany({
     where: { competitionId: c.id, sourceUrl: { not: null } },
@@ -368,11 +382,20 @@ async function refreshPending(db, c, config, actorId, client) {
     const current = await tx.competition.findUnique({ where: { id: c.id } });
     if (current.name !== c.name || JSON.stringify(current.podiumRoster) !== JSON.stringify(c.podiumRoster))
       throw failure('Configuration modifiée pendant le contrôle.', 409);
-    await applyEvent(tx, current, observation, actorId);
+    await applyEvent(tx, current, observation, actorId, true);
   });
   return {
     c: await db.competition.findUnique({ where: { id: c.id } }),
     config: { ...observation.config, name: c.name },
   };
 }
-module.exports = { scheduleUrl, parseSchedule, readEvent, preview, save, refreshPending, discoverTableau };
+module.exports = {
+  scheduleUrl,
+  parseSchedule,
+  readEvent,
+  preview,
+  save,
+  refreshPending,
+  discoverTableau,
+  rosterIsSubset,
+};
