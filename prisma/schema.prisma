@@ -17,6 +17,10 @@ model User {
   totpSecret        String?
   totpEnabledAt     DateTime?
   totpLastStep      Int?
+  clubId Int?
+  club Club? @relation(fields: [clubId], references: [id])
+  clubChoiceAt DateTime?
+  clubResponsibilities ClubResponsibility[]
   favoriteLeagueId  Int?
   publicListing     Boolean            @default(true)
   followedFencers   FollowedFencer[]
@@ -224,6 +228,7 @@ model AuditLog {
   @@index([action, targetType, targetId])
 }
 model League {
+  registeredClub Club?
   id Int @id @default(autoincrement())
   name String
   kind String @default("PRIVATE")
@@ -386,4 +391,34 @@ model FollowedFencer {
   originEntryId String
   createdAt DateTime @default(now())
   @@unique([userId, identityKey])
+}
+
+model Club {
+  description String @default("")
+  id Int @id @default(autoincrement())
+  name String
+  nameKey String @unique
+  shortName String @default("")
+  city String @default("")
+  status String @default("PENDING")
+  source String @default("USER")
+  leagueId Int? @unique
+  league League? @relation(fields:[leagueId],references:[id],onDelete:SetNull)
+  users User[]
+  responsibilities ClubResponsibility[]
+  createdAt DateTime @default(now())
+}
+model ClubResponsibility {
+  id Int @id @default(autoincrement())
+  clubId Int
+  club Club @relation(fields:[clubId],references:[id])
+  userId Int
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  status String @default("PENDING")
+  reason String
+  reviewedBy Int?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([clubId,userId])
+  @@index([status])
 }

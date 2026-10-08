@@ -26,6 +26,7 @@ function membersFor(league, { start = null, tournamentId = null, now = Date.now(
 
 // Inscription (ou retour après un départ). Un seul club actif par joueur.
 async function enroll(tx, league, userId) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(72610309)::text`;
   await tx.$queryRaw`SELECT id FROM "User" WHERE id=${userId} FOR UPDATE`;
   if (league.archivedAt) throw failure('Ce groupe n’existe plus.', 404);
   if (league.kind === 'CLUB') {
@@ -39,6 +40,24 @@ async function enroll(tx, league, userId) {
       include: { league: { select: { name: true } } },
     });
     if (other) throw failure(`Un seul club à la fois : quittez d’abord « ${other.league.name} ».`, 409);
+  }
+  if (league.kind === 'CLUB') {
+    const nameKey = require('./accountClubs').key(league.name);
+    let club = await tx.club.findFirst({ where: { leagueId: league.id } });
+    if (!club) {
+      const normalize = require('./accountClubs').key;
+      const candidates = (await tx.club.findMany()).filter(
+        (c) => c.nameKey === nameKey || (normalize(c.shortName) && normalize(c.shortName) === nameKey),
+      );
+      if (candidates.length > 1) throw failure('Plusieurs clubs correspondent. Contactez un administrateur.', 409);
+      club = candidates[0];
+      if (club?.leagueId && club.leagueId !== league.id)
+        throw failure('Ce club possède déjà un groupe. Rejoignez-le depuis Mon compte.', 409);
+      club = club
+        ? await tx.club.update({ where: { id: club.id }, data: { leagueId: league.id } })
+        : await tx.club.create({ data: { name: league.name, nameKey, leagueId: league.id, source: 'LEGACY' } });
+    }
+    await tx.user.update({ where: { id: userId }, data: { clubId: club.id, clubChoiceAt: new Date() } });
   }
   const previous = await tx.leagueMember.findUnique({ where: { leagueId_userId: { leagueId: league.id, userId } } });
   const returned = previous?.leftAt
@@ -58,6 +77,17 @@ async function enroll(tx, league, userId) {
 }
 
 async function leave(tx, league, userId, now = new Date()) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(72610309)::text`;
+  if (league.kind === 'CLUB') {
+    const club = await tx.club.findFirst({ where: { leagueId: league.id } });
+    if (club) {
+      await tx.user.updateMany({ where: { id: userId, clubId: club.id }, data: { clubId: null, clubChoiceAt: null } });
+      await tx.clubResponsibility.updateMany({
+        where: { clubId: club.id, userId, status: { in: ['PENDING', 'APPROVED'] } },
+        data: { status: 'REVOKED', reviewedAt: now },
+      });
+    }
+  }
   await tx.leagueMember.updateMany({ where: { leagueId: league.id, userId, leftAt: null }, data: { leftAt: now } });
 }
 

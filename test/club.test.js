@@ -49,6 +49,8 @@ test('un seul club à la fois ; retour dans un groupe après un départ', async 
   let upsert;
   const tx = (other) => ({
     $queryRaw: async () => [],
+    club: { findFirst: async () => ({ id: 1 }) },
+    user: { update: async () => ({}) },
     leagueMember: {
       findFirst: async () => other,
       findUnique: async () => null,
