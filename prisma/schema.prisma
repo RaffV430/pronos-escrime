@@ -18,6 +18,7 @@ model User {
   totpEnabledAt     DateTime?
   totpLastStep      Int?
   publicListing     Boolean            @default(true)
+  followedFencers   FollowedFencer[]
   pushSubscriptions PushSubscription[]
   predictions       Prediction[]
   poolPredictions   PoolPrediction[]
@@ -369,4 +370,19 @@ model MatchComment {
   hiddenBy  Int?
 
   @@index([matchId, createdAt])
+}
+
+// Favoris personnels indépendants des identifiants des engagés d’une épreuve.
+model FollowedFencer {
+  id Int @id @default(autoincrement())
+  userId Int
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  identityKey String
+  name String
+  country String
+  club String
+  originCompetitionId Int
+  originEntryId String
+  createdAt DateTime @default(now())
+  @@unique([userId, identityKey])
 }
