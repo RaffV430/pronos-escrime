@@ -19,6 +19,30 @@ function createRouter(db) {
       res.json(await follows.list(db, req.user.userId, Number(req.query.competitionId) || null));
     }),
   );
+  router.get(
+    '/directory',
+    run(async (req, res) => {
+      const { tournamentId, competitionId, query = '', clubOnly, offset = '0' } = req.query;
+      if (
+        !validId(tournamentId) ||
+        (competitionId !== undefined && !validId(competitionId)) ||
+        typeof query !== 'string' ||
+        query.length > 160 ||
+        (clubOnly !== undefined && clubOnly !== '1') ||
+        !/^\d{1,6}$/.test(String(offset))
+      )
+        return res.status(400).json({ error: 'Recherche de tireurs invalide.' });
+      res.json(
+        await require('../services/fencerDirectory').search(db, req.user.userId, {
+          tournamentId: Number(tournamentId),
+          competitionId: Number(competitionId) || null,
+          query,
+          clubOnly: clubOnly === '1',
+          offset: Number(offset),
+        }),
+      );
+    }),
+  );
   router.post(
     '/',
     run(async (req, res) => {

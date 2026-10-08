@@ -34,7 +34,7 @@ function compatible(favorite, entry, competitionId) {
   if (favorite.country && candidate.country && favorite.country === candidate.country) return true;
   return Boolean(favorite.club && candidate.club && normalize(favorite.club) === normalize(candidate.club));
 }
-function resolve(favorites, competition) {
+function resolve(favorites, competition, { includeMatchNames = true } = {}) {
   const roster = entriesOf(competition);
   const links = [],
     ambiguousIds = [];
@@ -48,7 +48,7 @@ function resolve(favorites, competition) {
     else if (roster.some((e) => normalize(e.name) === normalize(f.name))) ambiguousIds.push(f.id);
   }
   // Les matchs n’ont qu’un nom : aucune étoile attribuée si ce nom désigne plusieurs engagés.
-  const matchNames = roster
+  const matchNames = (includeMatchNames ? roster : [])
     .filter(
       (e) =>
         links.some((l) => l.entryId === String(e.id)) &&
@@ -66,17 +66,38 @@ async function list(db, userId, competitionId) {
     ...(competition ? resolve(favorites, competition) : { links: [], ambiguousIds: [], matchNames: [] }),
   };
 }
-function selected(competition, entryId) {
-  const found = entriesOf(competition).filter((e) => String(e.id) === entryId);
-  if (found.length !== 1) throw failure('Tireur absent ou ambigu dans la liste officielle.', 409);
-  const data = { ...identity(found[0]), originCompetitionId: competition.id, originEntryId: entryId };
-  const key = keyFor(data);
-  const duplicates = entriesOf(competition).filter(
-    (e) => keyFor({ ...identity(e), originCompetitionId: competition.id, originEntryId: String(e.id) }) === key,
+function selections(competition) {
+  const rows = entriesOf(competition)
+    .filter((e) => e?.id != null && typeof e.name === 'string')
+    .map((entry) => {
+      const data = { ...identity(entry), originCompetitionId: competition.id, originEntryId: String(entry.id) };
+      return { data, key: keyFor(data) };
+    });
+  const keyCounts = new Map(),
+    idCounts = new Map();
+  for (const { data, key } of rows) {
+    keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
+    idCounts.set(data.originEntryId, (idCounts.get(data.originEntryId) || 0) + 1);
+  }
+  return new Map(
+    rows
+      .filter(({ data }) => idCounts.get(data.originEntryId) === 1)
+      .map(({ data, key }) => [
+        data.originEntryId,
+        {
+          ...data,
+          identityKey:
+            keyCounts.get(key) > 1
+              ? createHash('sha256').update(`${key}:${competition.id}:${data.originEntryId}`).digest('hex')
+              : key,
+        },
+      ]),
   );
-  const identityKey =
-    duplicates.length > 1 ? createHash('sha256').update(`${key}:${competition.id}:${entryId}`).digest('hex') : key;
-  return { ...data, identityKey };
+}
+function selected(competition, entryId) {
+  const data = selections(competition).get(entryId);
+  if (!data) throw failure('Tireur absent ou ambigu dans la liste officielle.', 409);
+  return data;
 }
 async function locked(db, userId, fn) {
   return db.$transaction(async (tx) => {
@@ -129,4 +150,4 @@ async function importLocal(db, userId, items) {
     return { imported: [...new Set(imported)], unresolved };
   });
 }
-module.exports = { normalize, identity, keyFor, compatible, resolve, list, follow, importLocal };
+module.exports = { normalize, identity, keyFor, compatible, resolve, list, follow, importLocal, selections };
