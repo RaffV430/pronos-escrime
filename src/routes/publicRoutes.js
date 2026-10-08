@@ -4,7 +4,7 @@ const express = require('express');
 const db = require('../lib/prisma');
 const { reportError } = require('../lib/report');
 const { id } = require('../services/poolRules');
-const { buildResults, publicName } = require('../services/eventResults');
+const { buildResults, publicName, tournamentMetadata } = require('../services/eventResults');
 const { withCountries } = require('../services/matchCountries');
 
 const router = express.Router();
@@ -74,6 +74,7 @@ async function publicTournament(tournamentId) {
   // En cours ou terminé : toutes les épreuves sont montrées (podium seulement une fois publié).
   const all = t.competitions.map((c) => ({ ...c, officialPodium: c.officialPodium || null }));
   const finished = buildResults([{ ...t, competitions: all }], { configs })[0];
+  const metadata = tournamentMetadata(t, { configs });
   const matches = await db.match.findMany({
     where: { competitionId: { in: ids }, OR: [{ resultType: null }, { resultType: { not: 'CANCELLED' } }] },
     include: { competition: { select: { podiumRoster: true } } },
@@ -87,10 +88,10 @@ async function publicTournament(tournamentId) {
   return {
     id: t.id,
     name: t.name,
-    start: finished?.start || null,
-    end: finished?.end || null,
-    city: finished?.city || null,
-    countries: finished?.countries || [],
+    start: metadata.start || finished?.start || null,
+    end: metadata.end || finished?.end || null,
+    city: metadata.city || finished?.city || null,
+    countries: metadata.countries.length ? metadata.countries : finished?.countries || [],
     competitions: t.competitions.map((c) => ({
       id: c.id,
       name: c.name,
@@ -179,13 +180,14 @@ async function publicList() {
   const finished = new Map(buildResults(tournaments, { configs }).map((r) => [r.id, r]));
   return tournaments.map((t) => {
     const r = finished.get(t.id);
+    const metadata = tournamentMetadata(t, { configs });
     return {
       id: t.id,
       name: t.name,
-      start: r?.start || null,
-      end: r?.end || null,
-      city: r?.city || null,
-      countries: r?.countries || [],
+      start: metadata.start || r?.start || null,
+      end: metadata.end || r?.end || null,
+      city: metadata.city || r?.city || null,
+      countries: metadata.countries.length ? metadata.countries : r?.countries || [],
       finished: Boolean(r && r.competitions.length === t.competitions.length),
       competitions: t.competitions.map((c) => ({ id: c.id, name: c.name })),
       updatedAt: t.createdAt,
