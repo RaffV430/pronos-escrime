@@ -162,6 +162,23 @@ function podiumOf(c) {
   });
 }
 
+// Le lieu et les jours de compétition existent avant les résultats. Ne jamais
+// utiliser la création en base comme date d’un tournoi à venir.
+function tournamentMetadata(tournament, { configs = new Map() } = {}) {
+  const details = (tournament.competitions || []).map((c) => configs.get(c.id) || {});
+  const validDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && Number.isFinite(Date.parse(`${d}T12:00:00Z`));
+  const dates = details
+    .flatMap((config) => [config.date, ...Object.values(config.phaseDays || {})])
+    .filter(validDay)
+    .sort();
+  return {
+    start: dates[0] || null,
+    end: dates.at(-1) || null,
+    city: details.find((config) => config.city)?.city || null,
+    countries: [...new Set(details.map(countryOf).filter(Boolean))],
+  };
+}
+
 // Tournois triés du plus récent au plus ancien ; seules les épreuves terminées y figurent.
 function buildResults(tournaments, { configs = new Map(), firstDates = new Map() } = {}) {
   const out = [];
@@ -241,4 +258,4 @@ function shareText(t, result) {
   return [where, body].filter(Boolean).join(' · ');
 }
 
-module.exports = { buildResults, countryOf, podiumOf, finished, publicName, shareText, shareDates };
+module.exports = { tournamentMetadata, buildResults, countryOf, podiumOf, finished, publicName, shareText, shareDates };

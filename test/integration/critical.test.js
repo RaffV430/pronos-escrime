@@ -451,3 +451,48 @@ test('invitation par lien et duel depuis les classements', opts, async () => {
   const clubs = await call('GET', `/api/community/clubs/${c.tournamentId}`, owner.token);
   assert.equal(clubs.status, 200);
 });
+
+test(
+  'tournoi à venir : dates, ville et pays publics avant tout résultat, correction admin prise en compte',
+  opts,
+  async () => {
+    const admin = await createUser({ isAdmin: true });
+    const cadet = await createCompetition();
+    const junior = await prisma.competition.create({ data: { tournamentId: cadet.tournamentId, name: 'Juniors' } });
+    for (const [c, date] of [
+      [cadet, '2026-10-10'],
+      [junior, '2026-10-10'],
+    ]) {
+      await prisma.auditLog.create({
+        data: {
+          actorId: admin.id,
+          action: 'Configuration FTL validée',
+          targetType: 'Competition',
+          targetId: c.id,
+          after: { date, city: 'Étampes', timezone: 'Europe/Paris' },
+        },
+      });
+    }
+    await prisma.auditLog.create({
+      data: {
+        actorId: admin.id,
+        action: 'Lieu et dates corrigés',
+        targetType: 'Competition',
+        targetId: junior.id,
+        after: { date: '2026-10-11' },
+      },
+    });
+    const page = await (await fetch(`${base}/api/public/tournaments/${cadet.tournamentId}`)).json();
+    const list = await (await fetch(`${base}/api/public/tournaments`)).json();
+    const row = list.find((t) => t.id === cadet.tournamentId);
+    for (const data of [page, row]) {
+      assert.equal(data.start, '2026-10-10');
+      assert.equal(data.end, '2026-10-11');
+      assert.equal(data.city, 'Étampes');
+      assert.deepEqual(data.countries, ['FR']);
+    }
+    assert.equal(row.finished, false);
+    assert.ok(page.competitions.every((c) => c.podium.length === 0 && c.matches.length === 0));
+    assert.equal(await prisma.match.count({ where: { competitionId: { in: [cadet.id, junior.id] } } }), 0);
+  },
+);

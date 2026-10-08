@@ -1,7 +1,7 @@
 // Onglet « Résultats » : tournois passés, date, saison, pays du lieu et podium officiel.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { buildResults, countryOf } = require('../src/services/eventResults');
+const { buildResults, countryOf, tournamentMetadata } = require('../src/services/eventResults');
 
 const roster = [
   { id: 'a', name: 'DUPONT Anna', country: 'FRA' },
@@ -67,4 +67,45 @@ test('seules les épreuves terminées ; dates, saison, podium et tri du plus ré
   );
   assert.deepEqual(out[1].competitions[0].podium, []);
   assert.equal(out[1].competitions[0].sourceUrl, 'https://x');
+});
+
+test('Étampes à venir : dates et pays indépendants des podiums, quatre épreuves sur deux jours', () => {
+  const t = {
+    id: 4,
+    name: 'Etampes CN M17/M20',
+    createdAt: new Date('2026-10-07'),
+    competitions: [13, 14, 15, 16].map((id) => ({ id, officialPodium: null })),
+  };
+  const configs = new Map(
+    t.competitions.map((c) => [
+      c.id,
+      { date: c.id < 15 ? '2026-10-10' : '2026-10-11', city: 'Étampes', timezone: 'Europe/Paris' },
+    ]),
+  );
+  const expected = { start: '2026-10-10', end: '2026-10-11', city: 'Étampes', countries: ['FR'] };
+  assert.deepEqual(tournamentMetadata(t, { configs }), expected);
+  assert.deepEqual(buildResults([t], { configs }), []);
+  t.competitions[0].officialPodium = { finalConfirmed: true };
+  assert.deepEqual(tournamentMetadata(t, { configs }), expected);
+});
+test('métadonnées : jours des phases conservés, pays du lieu et absence de date inventée', () => {
+  const t = { createdAt: new Date('2026-10-08'), competitions: [{ id: 1 }] };
+  assert.deepEqual(tournamentMetadata(t), { start: null, end: null, city: null, countries: [] });
+  const configs = new Map([
+    [
+      1,
+      {
+        date: '2026-10-10',
+        phaseDays: { 'pools-2': '2026-10-11', T32: '2026-10-12' },
+        country: 'ITA',
+        timezone: 'Europe/Paris',
+      },
+    ],
+  ]);
+  assert.deepEqual(tournamentMetadata(t, { configs }), {
+    start: '2026-10-10',
+    end: '2026-10-12',
+    city: null,
+    countries: ['IT'],
+  });
 });
