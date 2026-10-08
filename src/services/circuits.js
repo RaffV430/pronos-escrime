@@ -15,22 +15,53 @@ async function validateCircuits(db, input) {
   if (!Array.isArray(input) || input.length > 20) throw failure('Liste de circuits invalide (20 au plus).', 400);
   const known = new Set((await db.tournament.findMany({ select: { id: true } })).map((t) => t.id));
   const names = new Set();
-  return input.map((c, i) => {
-    const name = String(c?.name || '')
-      .normalize('NFC')
-      .trim();
-    if (!name || name.length > 60) throw failure(`Circuit ${i + 1} : nom requis (60 caractères au plus).`, 400);
-    if (names.has(name.toLowerCase())) throw failure(`Deux circuits portent le nom « ${name} ».`, 400);
-    names.add(name.toLowerCase());
-    const tournamentIds = [...new Set((c.tournamentIds || []).map(Number))];
-    if (!tournamentIds.length || tournamentIds.length > 30 || tournamentIds.some((t) => !known.has(t)))
-      throw failure(`Circuit « ${name} » : choisissez de 1 à 30 tournois existants.`, 400);
-    const dropWorst = Number(c.dropWorst || 0);
-    if (!Number.isInteger(dropWorst) || dropWorst < 0 || dropWorst >= tournamentIds.length)
-      throw failure(`Circuit « ${name} » : résultats retirés entre 0 et ${tournamentIds.length - 1}.`, 400);
-    const id = Number.isSafeInteger(c.id) && c.id > 0 ? c.id : null;
-    return { id, name, tournamentIds, dropWorst };
-  });
+  return Promise.all(
+    input.map(async (c, i) => {
+      const name = String(c?.name || '')
+        .normalize('NFC')
+        .trim();
+      if (!name || name.length > 60) throw failure(`Circuit ${i + 1} : nom requis (60 caractères au plus).`, 400);
+      if (names.has(name.toLowerCase())) throw failure(`Deux circuits portent le nom « ${name} ».`, 400);
+      names.add(name.toLowerCase());
+      const tournamentIds = [...new Set((c.tournamentIds || []).map(Number))];
+      if (!tournamentIds.length || tournamentIds.length > 30 || tournamentIds.some((t) => !known.has(t)))
+        throw failure(`Circuit « ${name} » : choisissez de 1 à 30 tournois existants.`, 400);
+      const dropWorst = Number(c.dropWorst || 0);
+      if (!Number.isInteger(dropWorst) || dropWorst < 0 || dropWorst >= tournamentIds.length)
+        throw failure(`Circuit « ${name} » : résultats retirés entre 0 et ${tournamentIds.length - 1}.`, 400);
+      const id = Number.isSafeInteger(c.id) && c.id > 0 ? c.id : null;
+      const selection = c.competitionIdsByTournament;
+      if (selection !== undefined && (!selection || typeof selection !== 'object' || Array.isArray(selection)))
+        throw failure(`Circuit « ${name} » : sélection d’épreuves invalide.`, 400);
+      const competitionIdsByTournament = {};
+      for (const [tournament, values] of Object.entries(selection || {})) {
+        const t = Number(tournament);
+        if (
+          !tournamentIds.includes(t) ||
+          !Array.isArray(values) ||
+          !values.length ||
+          values.length > 100 ||
+          values.some((v) => !Number.isSafeInteger(v) || v <= 0)
+        )
+          throw failure(`Circuit « ${name} » : choisissez au moins une épreuve par tournoi sélectionné.`, 400);
+        const ids = [...new Set(values)];
+        const competitions = await db.competition.findMany({
+          where: { tournamentId: t, id: { in: ids } },
+          select: { id: true },
+        });
+        if (competitions.length !== ids.length || ids.some((id) => !competitions.some((c) => c.id === id)))
+          throw failure(`Circuit « ${name} » : épreuve absente du tournoi.`, 400);
+        competitionIdsByTournament[t] = ids;
+      }
+      return {
+        id,
+        name,
+        tournamentIds,
+        dropWorst,
+        ...(Object.keys(competitionIdsByTournament).length ? { competitionIdsByTournament } : {}),
+      };
+    }),
+  );
 }
 
 async function saveCircuits(db, input, actorId) {
@@ -57,7 +88,23 @@ async function circuitRanking(db, circuitId) {
     where: { id: { in: circuit.tournamentIds } },
     select: { id: true, name: true },
   });
-  const perTournament = await Promise.all(circuit.tournamentIds.map((id) => standings(db, { tournamentId: id })));
+  const perTournament = await Promise.all(
+    circuit.tournamentIds.map(async (id) => {
+      const selected = circuit.competitionIdsByTournament?.[id];
+      if (!selected) return standings(db, { tournamentId: id });
+      // Un résultat par tournoi, même si plusieurs épreuves sont retenues. Les ajustements
+      // globaux du tournoi ne sont pas attribués arbitrairement à une catégorie.
+      const totals = new Map();
+      for (const rows of await Promise.all(selected.map((competitionId) => standings(db, { competitionId })))) {
+        for (const row of rows) {
+          const player = totals.get(row.id) || { id: row.id, name: row.name, totalPoints: 0 };
+          player.totalPoints += row.totalPoints || 0;
+          totals.set(row.id, player);
+        }
+      }
+      return [...totals.values()];
+    }),
+  );
   const players = new Map();
   perTournament.forEach((rows, i) => {
     for (const r of rows) {
