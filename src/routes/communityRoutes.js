@@ -63,6 +63,40 @@ router.get(
   '/circuits/:id',
   wrap(async (req, res) => res.json(await require('../services/circuits').circuitRanking(db, id(req.params.id)))),
 );
+// Préférence personnelle ; une délégation quittée n'est jamais sélectionnée implicitement.
+router.get(
+  '/favorite',
+  wrap(async (req, res) => {
+    const user = await db.user.findUnique({ where: { id: req.user.userId }, select: { favoriteLeagueId: true } });
+    const league = user?.favoriteLeagueId
+      ? await db.league.findFirst({
+          where: {
+            id: user.favoriteLeagueId,
+            archivedAt: null,
+            members: { some: { userId: req.user.userId, leftAt: null } },
+          },
+          select: { id: true },
+        })
+      : null;
+    res.json({ leagueId: league?.id || null });
+  }),
+);
+router.put(
+  '/favorite',
+  wrap(async (req, res) => {
+    const leagueId = req.body.leagueId === null ? null : id(req.body.leagueId);
+    if (
+      leagueId &&
+      !(await db.league.findFirst({
+        where: { id: leagueId, archivedAt: null, members: { some: { userId: req.user.userId, leftAt: null } } },
+        select: { id: true },
+      }))
+    )
+      fail('Cette délégation ne fait pas partie de vos adhésions.', 403);
+    await db.user.update({ where: { id: req.user.userId }, data: { favoriteLeagueId: leagueId } });
+    res.json({ leagueId });
+  }),
+);
 // Club de l'application : tireurs mis en avant et ligue du club de chaque tournoi (créée automatiquement).
 let clubCheckedAt = 0;
 router.get(

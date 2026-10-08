@@ -5,6 +5,8 @@ const events = require('./ftlEvents');
 const { eventComplete, archiveCompleted } = require('./tournamentArchive');
 const { configuration } = require('./ftlConfiguration');
 const CONCURRENCY = 3;
+const POOLS_INTERVAL = 30000,
+  TABLEAU_INTERVAL = 10000;
 const INTERVAL = 120000,
   LEASE = 180000,
   LEAD = 60000;
@@ -22,7 +24,7 @@ async function claim(db, competitionId, { automatic = false, now = new Date() } 
       throw Object.assign(failure('Un contrôle de cette épreuve est déjà en cours.', 409), {
         retryAfter: Math.ceil((state.leaseUntil - now) / 1000),
       });
-    const allowed = state.lastStartedAt ? state.lastStartedAt.getTime() + INTERVAL : 0;
+    const allowed = state.lastStartedAt ? state.lastStartedAt.getTime() + (automatic ? TABLEAU_INTERVAL : INTERVAL) : 0;
     if (now.getTime() < allowed)
       throw Object.assign(failure('Patientez deux minutes entre deux contrôles de cette épreuve.', 429), {
         retryAfter: Math.ceil((allowed - now) / 1000),
@@ -47,13 +49,19 @@ async function finish(db, competitionId, token, summary, error = null, now = new
   const start = summary?.eventStart ? Date.parse(summary.eventStart) : Date.parse(`${summary?.eventDate}T00:00:00Z`);
   const beforeEvent = start - LEAD > now.getTime();
   const openPools = summary?.openFirstResultPools > 0;
+  const activeInterval =
+    summary?.syncPhase === 'TABLEAU'
+      ? TABLEAU_INTERVAL
+      : summary?.syncPhase === 'POOLS' || openPools
+        ? POOLS_INTERVAL
+        : INTERVAL;
   const delay = error
     ? Math.min(30 * 60000, INTERVAL * 2 ** Math.min(failures - 1, 4))
     : beforeEvent
       ? Math.min(15 * 60000, start - LEAD - now.getTime())
-      : issues && !openPools
+      : issues && !openPools && summary?.syncPhase !== 'TABLEAU'
         ? 5 * 60000
-        : INTERVAL;
+        : activeInterval;
   await db.ftlSyncState.updateMany({
     where: { competitionId, leaseToken: token },
     data: {
@@ -205,7 +213,7 @@ function startWorker(db) {
     console.warn('Suivi FencingTimeLive automatique désactivé (FTL_AUTO_SYNC ≠ true).');
     return () => {};
   }
-  console.log('Suivi FencingTimeLive automatique actif (contrôle toutes les 30 s).');
+  console.log('Suivi FencingTimeLive automatique actif (contrôle des échéances toutes les 5 s).');
   let current = null;
   const run = () =>
     (current = tick(db)
@@ -214,7 +222,7 @@ function startWorker(db) {
         console.warn('Contrôles automatiques temporairement indisponibles.');
         reportError(error, 'tâche FencingTimeLive');
       }));
-  const timer = setInterval(run, 30000);
+  const timer = setInterval(run, 5000);
   timer.unref();
   run();
   // Arrêt : plus de nouveau passage ; renvoie le passage en cours pour que l'arrêt l'attende
@@ -224,4 +232,16 @@ function startWorker(db) {
     return current;
   };
 }
-module.exports = { enabled, claim, finish, assertClaim, configFor, windowDelay, tick, startWorker, INTERVAL };
+module.exports = {
+  enabled,
+  claim,
+  finish,
+  assertClaim,
+  configFor,
+  windowDelay,
+  tick,
+  startWorker,
+  INTERVAL,
+  POOLS_INTERVAL,
+  TABLEAU_INTERVAL,
+};

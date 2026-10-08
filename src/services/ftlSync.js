@@ -953,6 +953,7 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     } catch {
       summary.openFirstResultPools = 0;
     }
+    summary.syncPhase = (await db.match.count({ where: { competitionId: c.id } })) > 0 ? 'TABLEAU' : 'POOLS';
     summary.pools = poolSummary;
     const newRoundAlerts = await require('./poolRoundAlerts').alertNewPoolRounds(db, c);
     if (newRoundAlerts) summary.notes = [...(summary.notes || []), 'Nouveau tour de poules annoncé aux joueurs.'];

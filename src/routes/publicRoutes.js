@@ -189,7 +189,18 @@ async function publicList() {
       city: metadata.city || r?.city || null,
       countries: metadata.countries.length ? metadata.countries : r?.countries || [],
       finished: Boolean(r && r.competitions.length === t.competitions.length),
-      competitions: t.competitions.map((c) => ({ id: c.id, name: c.name })),
+      competitions: t.competitions.map((c) => {
+        const config = configs.get(c.id);
+        // Pas de faux minuit : le compte à rebours requiert un horaire configuré.
+        const start =
+          config?.timezone &&
+          /(?:^([01]?\d|2[0-3]):[0-5]\d$|(?:1[0-2]|0?[1-9]):[0-5]\d\s*(?:AM|PM)$)/i.test(
+            config.time || config.eventTime || '',
+          )
+            ? require('../services/eventStart').eventStart(config)
+            : null;
+        return { id: c.id, name: c.name, startsAt: start == null ? null : new Date(start).toISOString() };
+      }),
       updatedAt: t.createdAt,
     };
   });

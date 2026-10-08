@@ -17,6 +17,7 @@ model User {
   totpSecret        String?
   totpEnabledAt     DateTime?
   totpLastStep      Int?
+  favoriteLeagueId  Int?
   publicListing     Boolean            @default(true)
   followedFencers   FollowedFencer[]
   pushSubscriptions PushSubscription[]

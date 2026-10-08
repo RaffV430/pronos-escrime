@@ -469,7 +469,7 @@ test(
           action: 'Configuration FTL validée',
           targetType: 'Competition',
           targetId: c.id,
-          after: { date, city: 'Étampes', timezone: 'Europe/Paris' },
+          after: { date, time: '09:00', city: 'Étampes', timezone: 'Europe/Paris' },
         },
       });
     }
@@ -491,8 +491,141 @@ test(
       assert.equal(data.city, 'Étampes');
       assert.deepEqual(data.countries, ['FR']);
     }
+    assert.equal(row.competitions.find((c) => c.id === cadet.id).startsAt, '2026-10-10T07:00:00.000Z');
+    assert.equal(row.competitions.find((c) => c.id === junior.id).startsAt, '2026-10-11T07:00:00.000Z');
     assert.equal(row.finished, false);
     assert.ok(page.competitions.every((c) => c.podium.length === 0 && c.matches.length === 0));
     assert.equal(await prisma.match.count({ where: { competitionId: { in: [cadet.id, junior.id] } } }), 0);
+  },
+);
+
+test('délégation favorite : réservée aux adhésions actives et conservée sur le compte', opts, async () => {
+  const owner = await createUser(),
+    outsider = await createUser();
+  const league = await prisma.league.create({
+    data: {
+      name: 'Favorite ' + tag(),
+      ownerId: owner.id,
+      code: tag(),
+      startsAt: new Date(),
+      members: { create: { userId: owner.id } },
+    },
+  });
+  assert.equal((await call('PUT', '/api/community/favorite', outsider.token, { leagueId: league.id })).status, 403);
+  assert.equal((await call('PUT', '/api/community/favorite', owner.token, { leagueId: league.id })).status, 200);
+  assert.equal((await call('GET', '/api/community/favorite', owner.token)).body.leagueId, league.id);
+  await prisma.leagueMember.updateMany({
+    where: { leagueId: league.id, userId: owner.id },
+    data: { leftAt: new Date() },
+  });
+  assert.equal((await call('GET', '/api/community/favorite', owner.token)).body.leagueId, null);
+  assert.equal((await call('PUT', '/api/community/favorite', owner.token, { leagueId: null })).status, 200);
+});
+
+test('engagement favori : idempotent, retrait avant envoi et restriction aux matchs suivis', opts, async () => {
+  const user = await createUser();
+  let c = await createCompetition();
+  c = await prisma.competition.update({
+    where: { id: c.id },
+    data: { podiumRoster: [{ id: 'alice', name: 'MARTIN Alice', country: 'FRA', club: 'Paris' }] },
+  });
+  const followed = await require('../../src/services/fencerFollows').follow(prisma, user.id, c.id, 'alice');
+  const config = { date: '2099-10-10', time: '09:00', timezone: 'Europe/Paris' };
+  await prisma.auditLog.create({
+    data: {
+      actorId: user.id,
+      action: 'Configuration FTL validée',
+      targetType: 'Competition',
+      targetId: c.id,
+      after: config,
+    },
+  });
+  const sub = await prisma.pushSubscription.create({
+    data: {
+      userId: user.id,
+      endpoint: 'https://example.test/' + tag(),
+      p256dh: 'test',
+      auth: 'test',
+      tournamentIds: [],
+      competitionIds: [],
+      preferences: { followAll: true, fencerEntries: true, fencersOnly: true, quietEnabled: false },
+    },
+  });
+  const { queueEnrollments } = require('../../src/services/fencerNotifications');
+  await queueEnrollments(prisma, sub, [{ competition: c }]);
+  await queueEnrollments(prisma, sub, [{ competition: c }]);
+  let deliveries = await prisma.pushDelivery.findMany({ where: { subscriptionId: sub.id } });
+  assert.equal(deliveries.length, 1);
+  let delivery = await prisma.pushDelivery.update({
+    where: { id: deliveries[0].id },
+    data: { status: 'SENDING', attempts: 1 },
+  });
+  const push = require('../../src/services/pushNotifications');
+  const sent = [];
+  await push.deliverSpecial(prisma, delivery, sub, c, [], async (_, content) => sent.push(content));
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].body, /MARTIN Alice/);
+  await queueEnrollments(prisma, sub, [{ competition: c }]);
+  assert.equal(await prisma.pushDelivery.count({ where: { subscriptionId: sub.id } }), 1);
+  // Un favori retiré entre la file et l’envoi ne reçoit pas de notification.
+  await prisma.followedFencer.deleteMany({ where: { userId: user.id } });
+  delivery = await prisma.pushDelivery.update({ where: { id: delivery.id }, data: { status: 'SENDING' } });
+  await push.deliverSpecial(prisma, delivery, sub, c, [], async (_, content) => sent.push(content));
+  assert.equal(sent.length, 1);
+  assert.equal((await prisma.pushDelivery.findUnique({ where: { id: delivery.id } })).status, 'CANCELLED');
+  assert.ok(followed);
+});
+
+test(
+  'alertes Mes tireurs : seules les rencontres concernées sont envoyées, seuil officiel conservé',
+  opts,
+  async () => {
+    const user = await createUser();
+    let c = await createCompetition();
+    c = await prisma.competition.update({
+      where: { id: c.id },
+      data: { podiumRoster: [{ id: 'a', name: 'MARTIN Alice', country: 'FRA', club: 'Paris' }] },
+    });
+    await require('../../src/services/fencerFollows').follow(prisma, user.id, c.id, 'a');
+    const own = await createOpenMatch(c.id, { player1: 'MARTIN Alice', player2: 'Autre' });
+    const other = await createOpenMatch(c.id, { player1: 'Rien', player2: 'Encore' });
+    await prisma.matchRound.update({
+      where: { competitionId_round: { competitionId: c.id, round: 'T16' } },
+      data: { expectedMatchCount: 2 },
+    });
+    const sub = await prisma.pushSubscription.create({
+      data: {
+        userId: user.id,
+        endpoint: 'https://example.test/' + tag(),
+        p256dh: 'test',
+        auth: 'test',
+        tournamentIds: [],
+        competitionIds: [],
+        preferences: { followAll: true, fencersOnly: true },
+      },
+    });
+    const delivery = await prisma.pushDelivery.create({
+      data: {
+        subscriptionId: sub.id,
+        competitionId: c.id,
+        throughEventId: 0,
+        kind: 'AVAILABLE',
+        round: 'T16',
+        matchIds: [own.id, other.id],
+        status: 'SENDING',
+      },
+    });
+    const sent = [];
+    await require('../../src/services/pushNotifications').deliverSpecial(
+      prisma,
+      delivery,
+      sub,
+      c,
+      [own, other],
+      async (_, content) => sent.push(content),
+    );
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].url, new RegExp(`matches=${own.id}(?:&|$)`));
+    assert.equal(new URL(sent[0].url, 'https://example.test').searchParams.get('matches'), String(own.id));
   },
 );
