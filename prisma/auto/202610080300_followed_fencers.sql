@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS "FollowedFencer" ("id" SERIAL PRIMARY KEY, "userId" INTEGER NOT NULL REFERENCES "User"("id") ON DELETE CASCADE, "identityKey" TEXT NOT NULL, "name" TEXT NOT NULL, "country" TEXT NOT NULL, "club" TEXT NOT NULL, "originCompetitionId" INTEGER NOT NULL, "originEntryId" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE UNIQUE INDEX IF NOT EXISTS "FollowedFencer_userId_identityKey_key" ON "FollowedFencer"("userId", "identityKey");
