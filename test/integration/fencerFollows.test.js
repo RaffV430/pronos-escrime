@@ -60,6 +60,20 @@ test(
     assert.ok(results.every((r) => r.status === 200));
     assert.equal(results[0].body.id, results[1].body.id);
     const favoriteId = results[0].body.id;
+    assert.equal((await call('GET', `/fencers/directory?tournamentId=${t.id}&query=Martin`)).status, 401);
+    const directory = await call('GET', `/fencers/directory?tournamentId=${t.id}&query=Martin`, a);
+    assert.equal(directory.status, 200);
+    assert.equal(directory.body.results.length, 1);
+    assert.equal(directory.body.results[0].events.length, 2);
+    assert.equal(directory.body.results[0].favoriteId, favoriteId);
+    const privateDirectory = await call('GET', `/fencers/directory?tournamentId=${t.id}&query=Martin`, b);
+    assert.equal(privateDirectory.body.results[0].favoriteId, null);
+    assert.equal(
+      (await call('GET', `/fencers/directory?tournamentId=${t.id}&competitionId=999999&query=Martin`, a)).status,
+      400,
+    );
+    assert.equal((await call('GET', `/fencers/directory?tournamentId=${t.id}&offset=-1`, a)).status, 400);
+
     assert.equal((await call('GET', '/fencers', b)).body.favorites.length, 0);
     assert.equal((await call('DELETE', `/fencers/${favoriteId}`, b)).status, 404);
     const juniors = await call('GET', `/fencers?competitionId=${j.id}`, a);

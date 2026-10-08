@@ -9,3 +9,11 @@ La reconnaissance ignore accents/casse/espaces et les identifiants propres à un
 Migration additive : `prisma/auto/202610080300_followed_fencers.sql`, appliquée par le démarrage habituel. Déployer le backend avant le frontend. Un retour à l’ancien frontend laisse la table et ses données intactes.
 
 Validation : `npm ci`, `npm run check` avec PostgreSQL local dédié (366 tests, aucun ignoré), notamment isolation des comptes, ajouts concurrents, idempotence, homonymes, passage cadet/junior/nouveau tournoi, récupération partielle et pronostics inchangés.
+
+## Recherche dans un tournoi
+
+`GET /api/me/fencers/directory?tournamentId=…&query=…` (session requise) recherche dans les listes officielles déjà importées, sans collecte FTL/Engarde. `competitionId` limite à une épreuve du tournoi, `clubOnly=1` aux tireurs du club de l’application, `offset` pagine par 20. Hors filtre club, deux caractères sont nécessaires. `events` contient les épreuves individuelles sélectionnables ; les équipes sont exclues.
+
+Les identités reprennent les règles des favoris. Une identité complète présente dans plusieurs épreuves apparaît une fois avec ses catégories. Les homonymes d’une même liste et les identités incomplètes restent distincts. Les favoris retournés appartiennent uniquement au compte connecté. Le raccourci club accepte un club officiel identique au club configuré ou un nom configuré sans homonyme dans le tournoi, sans correspondance approximative.
+
+Le suivi utilise la route POST existante avec l’épreuve et l’identifiant officiel renvoyés. Aucun changement de schéma. Déployer le backend avant l’interface de recherche ; le déploiement seul ne modifie ni favoris ni pronostics.
