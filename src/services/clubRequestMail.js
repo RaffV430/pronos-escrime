@@ -117,7 +117,7 @@ async function alertAdmins(db, notify = require('./syncHealth').notifyAdmins, no
       title: 'Pronos Escrime — club à valider',
       body: 'Une demande de création de club attend votre décision dans Administration, rubrique Clubs ajoutés à vérifier.',
       tag: `club-request-${row.id}`,
-      url: '/admin',
+      url: `/admin?panel=clubs&request=${row.id}`,
     });
   } catch {
     sent = {};

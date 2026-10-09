@@ -64,6 +64,21 @@ async function syncHealth(db, now = Date.now()) {
 
 // E-mail (si configuré) et notification à chaque administrateur ; un échec d'envoi n'interrompt rien.
 async function notifyAdmins(db, { title, body, tag, url }, deps = {}) {
+  const escape = (value) => String(value).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const destination =
+    String(url || '/admin').startsWith('/?') && !String(tag).startsWith('no-time-')
+      ? `/admin?panel=sync&${String(url)
+          .slice(2)
+          .replace(/(^|&)admin=sync(&|$)/, '$1')}`
+      : url;
+  const link = new URL(destination || '/admin', require('./account').appUrl());
+  if (link.origin !== new URL(require('./account').appUrl()).origin) throw new Error('Destination invalide.');
+  let badgeCount;
+  try {
+    badgeCount = (await require('./adminAlerts').summary(db)).total;
+  } catch {
+    // Notification delivery must survive a temporary failure of the summary query.
+  }
   const admins = await db.user.findMany({ where: { isAdmin: true }, select: { id: true, email: true, name: true } });
   const sent = { mail: 0, push: 0, mailFailed: 0, pushFailed: 0, mailConfigured: false, pushConfigured: false };
   const mailer = deps.mailer || require('./mailer');
@@ -71,7 +86,12 @@ async function notifyAdmins(db, { title, body, tag, url }, deps = {}) {
   if (sent.mailConfigured)
     for (const admin of admins) {
       try {
-        await mailer.sendMail({ to: admin.email, subject: title, text: body, html: `<p>${body}</p>` });
+        await mailer.sendMail({
+          to: admin.email,
+          subject: title,
+          text: `${body}\n\nOuvrir le panneau d’administration : ${link.href}\nSi votre session a expiré, connectez-vous pour retrouver ce panneau.`,
+          html: `<p>${escape(body)}</p><p><a href="${escape(link.href)}">Ouvrir le panneau d’administration</a></p><p>Si votre session a expiré, connectez-vous pour retrouver ce panneau.</p>`,
+        });
         sent.mail++;
       } catch (e) {
         sent.mailFailed++;
@@ -86,7 +106,19 @@ async function notifyAdmins(db, { title, body, tag, url }, deps = {}) {
     });
     for (const sub of subs) {
       try {
-        await push.send(sub, { title, body, tag, url }, 3600, 'high');
+        await push.send(
+          sub,
+          {
+            title,
+            body,
+            tag,
+            url: link.pathname + link.search,
+            adminAlert: true,
+            ...(Number.isInteger(badgeCount) ? { badgeCount } : {}),
+          },
+          3600,
+          'high',
+        );
         sent.push++;
       } catch (e) {
         sent.pushFailed++;

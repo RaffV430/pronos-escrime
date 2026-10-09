@@ -47,3 +47,37 @@ test('administrator access uses current database role, fails closed, and ignores
   });
   assert.equal(error.message, 'offline');
 });
+test('every current administrator can pass the same guard; required 2FA is explained, not bypassed', async () => {
+  const previous = process.env.REQUIRE_ADMIN_2FA;
+  process.env.REQUIRE_ADMIN_2FA = 'true';
+  try {
+    let setup = false;
+    const guard = createAdminMiddleware({
+      user: {
+        findUnique: async ({ where }) => ({
+          isAdmin: [1, 6].includes(where.id),
+          totpEnabledAt: setup ? new Date() : null,
+        }),
+      },
+    });
+    let payload,
+      advanced = 0;
+    const res = {
+      status() {
+        return this;
+      },
+      json(value) {
+        payload = value;
+      },
+    };
+    await guard({ user: { userId: 6 } }, res, () => advanced++);
+    assert.equal(payload.twoFactorSetupRequired, true);
+    assert.equal(advanced, 0);
+    setup = true;
+    for (const userId of [1, 6]) await guard({ user: { userId } }, res, () => advanced++);
+    assert.equal(advanced, 2);
+  } finally {
+    if (previous === undefined) delete process.env.REQUIRE_ADMIN_2FA;
+    else process.env.REQUIRE_ADMIN_2FA = previous;
+  }
+});
