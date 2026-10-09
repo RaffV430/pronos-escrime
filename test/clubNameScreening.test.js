@@ -9,6 +9,7 @@ test('CSV retains category/actions and rejects invalid rows without silently dro
   assert.throws(() => parseCsv('terme;categorie;action\nclub;regles;accepter'), { status: 400 });
   assert.throws(() => parseCsv('terme;categorie;action\nclub;regles'), { status: 400 });
   assert.throws(() => parseCsv('terme;categorie;action\n"club;regles;revoir'), { status: 400 });
+  assert.throws(() => parseCsv('é'.repeat(20001)), /40 Ko maximum/);
   assert.equal(
     validateTerms([{ terme: 'interdît', categorie: 'regles', action: 'revoir' }, terms[0]])[0].action,
     'bloquer',

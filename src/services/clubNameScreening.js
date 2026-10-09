@@ -39,7 +39,8 @@ function validateTerms(terms) {
   return [...result.values()];
 }
 function parseCsv(input) {
-  if (typeof input !== 'string' || input.length > 250000) throw failure('CSV invalide (250 Ko maximum).', 400);
+  if (typeof input !== 'string' || Buffer.byteLength(input, 'utf8') > 40000)
+    throw failure('CSV invalide (40 Ko maximum).', 400);
   const rows = [],
     row = [];
   let field = '',
