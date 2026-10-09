@@ -26,12 +26,12 @@ function playerMailAvailable() {
   return mailConfigured() && !sandboxSender();
 }
 
-async function sendMail({ to, subject, html, text, idempotencyKey }, http = axios) {
+async function sendMail({ to, subject, html, text, idempotencyKey, replyTo }, http = axios) {
   if (!mailConfigured()) throw Object.assign(new Error('Envoi d’e-mails non configuré.'), { status: 503 });
   try {
     await http.post(
       'https://api.resend.com/emails',
-      { from: process.env.MAIL_FROM.trim(), to: [to], subject, html, text },
+      { from: process.env.MAIL_FROM.trim(), to: [to], subject, html, text, ...(replyTo ? { reply_to: replyTo } : {}) },
       {
         headers: {
           Authorization: `Bearer ${process.env.RESEND_API_KEY.trim()}`,
