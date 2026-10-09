@@ -62,7 +62,8 @@ function startWorker(db) {
     stopped = false;
   const tick = () => {
     if (stopped || running) return;
-    running = deliver(db)
+    running = alertAdmins(db)
+      .then(() => deliver(db))
       .catch(() => {})
       .finally(() => {
         running = null;
@@ -76,4 +77,49 @@ function startWorker(db) {
     return running;
   };
 }
-module.exports = { deliver, startWorker };
+async function alertAdmins(db, notify = require('./syncHealth').notifyAdmins, now = new Date()) {
+  const row = await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(72610411)::text`;
+    const r = await tx.clubRegistrationRequest.findFirst({
+      where: {
+        status: 'PENDING',
+        adminAlertStatus: { in: ['PENDING', 'SENDING'] },
+        adminAlertAttempts: { lt: 5 },
+        adminAlertNextAt: { lte: now },
+      },
+      orderBy: { id: 'asc' },
+    });
+    if (!r) return null;
+    await tx.clubRegistrationRequest.update({
+      where: { id: r.id },
+      data: {
+        adminAlertStatus: 'SENDING',
+        adminAlertAttempts: { increment: 1 },
+        adminAlertNextAt: new Date(now.getTime() + 5 * 60000),
+      },
+    });
+    return r;
+  });
+  if (!row) return 0;
+  let sent;
+  try {
+    sent = await notify(db, {
+      title: 'Pronos Escrime — club à valider',
+      body: 'Une demande de création de club attend votre décision dans Administration, rubrique Clubs ajoutés à vérifier.',
+      tag: `club-request-${row.id}`,
+      url: '/admin',
+    });
+  } catch {
+    sent = {};
+  }
+  const success = (sent.mail || sent.push) && !sent.mailFailed && !sent.pushFailed;
+  await db.clubRegistrationRequest.update({
+    where: { id: row.id },
+    data: {
+      adminAlertStatus: success ? 'SENT' : row.adminAlertAttempts + 1 >= 5 ? 'FAILED' : 'PENDING',
+      adminAlertNextAt: new Date(now.getTime() + 10 * 60000),
+    },
+  });
+  return success ? 1 : 0;
+}
+module.exports = { deliver, startWorker, alertAdmins };

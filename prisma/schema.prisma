@@ -481,6 +481,9 @@ model ClubRegistrationRequest {
   reviewedBy Int?
   reviewedAt DateTime?
   createdAt DateTime @default(now())
+  adminAlertStatus String @default("PENDING")
+  adminAlertAttempts Int @default(0)
+  adminAlertNextAt DateTime @default(now())
   mailStatus String @default("NONE")
   mailAttempts Int @default(0)
   mailNextAt DateTime?

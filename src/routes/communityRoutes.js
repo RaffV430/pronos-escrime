@@ -130,7 +130,7 @@ router.get(
   wrap(async (req, res) =>
     res.json(
       await db.league.findMany({
-        where: { archivedAt: null, members: { some: { userId: req.user.userId, leftAt: null } } },
+        where: groups.currentLeaguesWhere(req.user.userId),
         include: {
           registeredClub: { select: { description: true } },
           _count: { select: { members: { where: { leftAt: null } } } },

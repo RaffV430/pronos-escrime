@@ -222,3 +222,25 @@ test('legacy club abbreviation reuses the registry and keeps its membership iden
     joined.id,
   );
 });
+
+test(
+  'home club list follows account affiliation even when the directory club is deleted, without deleting membership history',
+  options,
+  async () => {
+    const a = await user('home-stale');
+    const profile = await approvedClub(a.id, { name: 'Home stale club', city: 'Paris' });
+    const leagueId = profile.club.leagueId;
+    const where = require('../../src/services/groups').currentLeaguesWhere(a.id);
+    assert.equal(
+      (await db.league.findMany({ where })).some((l) => l.id === leagueId),
+      true,
+    );
+    await db.user.update({ where: { id: a.id }, data: { clubId: null } });
+    await db.club.delete({ where: { id: profile.club.id } });
+    assert.equal(
+      (await db.league.findMany({ where })).some((l) => l.id === leagueId),
+      false,
+    );
+    assert.ok(await db.leagueMember.findUnique({ where: { leagueId_userId: { leagueId, userId: a.id } } }));
+  },
+);
