@@ -30,6 +30,7 @@ async function refreshRoster(db, c, url, client, html = null) {
     await require('./identityReview').record(db, c, url, observed);
     throw error;
   }
+  if (db.fencerAffiliation) await db.$transaction((tx) => require('./fencerAffiliations').ingest(tx, c, observed, url));
   if (
     !c.identityReview &&
     c.podiumRoster &&

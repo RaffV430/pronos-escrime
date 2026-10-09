@@ -95,6 +95,7 @@ model Tournament {
 }
 
 model Competition {
+  affiliationEntries FencerAffiliationEntry[]
   ftlEventId String? @unique
   id                Int                @id @default(autoincrement())
   tournamentId      Int
@@ -394,6 +395,7 @@ model FollowedFencer {
 }
 
 model Club {
+  federationCode String? @unique
   description String @default("")
   id Int @id @default(autoincrement())
   name String
@@ -421,4 +423,46 @@ model ClubResponsibility {
   createdAt DateTime @default(now())
   @@unique([clubId,userId])
   @@index([status])
+}
+
+model FencerAffiliation {
+  id Int @id @default(autoincrement())
+  identityKey String @unique
+  name String
+  nameKey String
+  country String
+  club String @default("")
+  clubCode String @default("")
+  sourceUrl String @default("")
+  observedAt DateTime?
+  locked Boolean @default(false)
+  federationVerified Boolean @default(false)
+  revision Int @default(0)
+  entries FencerAffiliationEntry[]
+  history FencerAffiliationHistory[]
+  @@index([nameKey, country])
+}
+model FencerAffiliationEntry {
+  id Int @id @default(autoincrement())
+  competitionId Int
+  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  entryId String
+  affiliationId Int
+  affiliation FencerAffiliation @relation(fields: [affiliationId], references: [id])
+  @@unique([competitionId, entryId])
+  @@index([affiliationId])
+}
+model FencerAffiliationHistory {
+  id Int @id @default(autoincrement())
+  affiliationId Int
+  affiliation FencerAffiliation @relation(fields: [affiliationId], references: [id])
+  club String
+  clubCode String @default("")
+  sourceUrl String
+  observedAt DateTime
+  status String
+  actorId Int @default(0)
+  reason String @default("")
+  createdAt DateTime @default(now())
+  @@index([affiliationId, id])
 }

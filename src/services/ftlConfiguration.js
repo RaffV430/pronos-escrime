@@ -32,6 +32,7 @@ function parseRoster(rows) {
       id: r.id,
       name: clean(r.name),
       country: clean(r.country || ''),
+      ...(typeof r.club === 'string' && clean(r.club) ? { club: clean(r.club) } : {}),
       active: r.status !== 'Scratched',
       entryRanking: rank,
     };

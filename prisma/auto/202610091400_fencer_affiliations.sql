@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS "FencerAffiliation" ("id" SERIAL PRIMARY KEY, "identityKey" TEXT NOT NULL, "name" TEXT NOT NULL, "nameKey" TEXT NOT NULL, "country" TEXT NOT NULL, "club" TEXT NOT NULL DEFAULT '', "clubCode" TEXT NOT NULL DEFAULT '', "sourceUrl" TEXT NOT NULL DEFAULT '', "observedAt" TIMESTAMP(3), "locked" BOOLEAN NOT NULL DEFAULT false, "federationVerified" BOOLEAN NOT NULL DEFAULT false, "revision" INTEGER NOT NULL DEFAULT 0);
+CREATE UNIQUE INDEX IF NOT EXISTS "FencerAffiliation_identityKey_key" ON "FencerAffiliation"("identityKey");
+CREATE INDEX IF NOT EXISTS "FencerAffiliation_nameKey_country_idx" ON "FencerAffiliation"("nameKey", "country");
+CREATE TABLE IF NOT EXISTS "FencerAffiliationEntry" ("id" SERIAL PRIMARY KEY, "competitionId" INTEGER NOT NULL REFERENCES "Competition"("id") ON DELETE CASCADE, "entryId" TEXT NOT NULL, "affiliationId" INTEGER NOT NULL REFERENCES "FencerAffiliation"("id"));
+CREATE UNIQUE INDEX IF NOT EXISTS "FencerAffiliationEntry_competitionId_entryId_key" ON "FencerAffiliationEntry"("competitionId", "entryId");
+CREATE INDEX IF NOT EXISTS "FencerAffiliationEntry_affiliationId_idx" ON "FencerAffiliationEntry"("affiliationId");
+CREATE TABLE IF NOT EXISTS "FencerAffiliationHistory" ("id" SERIAL PRIMARY KEY, "affiliationId" INTEGER NOT NULL REFERENCES "FencerAffiliation"("id"), "club" TEXT NOT NULL, "clubCode" TEXT NOT NULL DEFAULT '', "sourceUrl" TEXT NOT NULL, "observedAt" TIMESTAMP(3) NOT NULL, "status" TEXT NOT NULL, "actorId" INTEGER NOT NULL DEFAULT 0, "reason" TEXT NOT NULL DEFAULT '', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS "FencerAffiliationHistory_affiliationId_id_idx" ON "FencerAffiliationHistory"("affiliationId", "id");
