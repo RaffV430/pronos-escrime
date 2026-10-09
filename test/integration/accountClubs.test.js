@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { url, freshDatabase } = require('./helpers');
 const { PrismaClient } = require('@prisma/client');
 const clubs = require('../../src/services/accountClubs');
+const moderation = require('../../src/services/clubModeration');
 const { clubMembersAt } = require('../../src/services/groups');
 let db;
 before(async () => {
@@ -12,6 +13,12 @@ after(async () => {
   await db?.$disconnect();
 });
 const options = { skip: !url && 'TEST_DATABASE_URL non défini' };
+async function approvedClub(userId, input) {
+  const pending = await clubs.setClub(db, userId, input);
+  const admin = await user(`approve-${userId}-${pending.clubRequest.id}`, true);
+  await moderation.decide(db, admin.id, pending.clubRequest.id, { status: 'APPROVED' });
+  return clubs.profile(db, userId);
+}
 async function user(name, isAdmin = false) {
   return db.user.create({ data: { name, email: `${name}@example.test`, password: 'test-only', isAdmin } });
 }
@@ -25,9 +32,19 @@ test(
       clubs.setClub(db, a.id, input),
       clubs.setClub(db, b.id, { ...input, name: 'club local test' }),
     ]);
+    assert.equal(pa.club, null);
+    assert.equal(pb.club, null);
+    assert.equal(await db.club.count({ where: { nameKey: 'club local test' } }), 0);
+    const admin = await user('registration-admin', true);
+    await Promise.all([
+      moderation.decide(db, admin.id, pa.clubRequest.id, { status: 'APPROVED' }),
+      moderation.decide(db, admin.id, pb.clubRequest.id, { status: 'APPROVED' }),
+    ]);
+    Object.assign(pa, await clubs.profile(db, a.id));
+    Object.assign(pb, await clubs.profile(db, b.id));
     assert.equal(pa.club.id, pb.club.id);
     assert.equal(pa.club.leagueId, pb.club.leagueId);
-    assert.equal(pa.club.status, 'PENDING');
+    assert.equal(pa.club.status, 'VERIFIED');
     assert.equal(await db.leagueMember.count({ where: { leagueId: pa.club.leagueId, leftAt: null } }), 2);
     assert.equal((await clubs.setClub(db, a.id, { clubId: pa.club.id })).club.id, pa.club.id);
     assert.equal(await db.leagueMember.count({ where: { leagueId: pa.club.leagueId, userId: a.id } }), 1);
@@ -68,7 +85,7 @@ test(
         originEntryId: 'f',
       },
     });
-    const first = await clubs.setClub(db, a.id, { name: 'History club', city: 'Paris' });
+    const first = await approvedClub(a.id, { name: 'History club', city: 'Paris' });
     await db.leagueMember.update({
       where: { leagueId_userId: { leagueId: first.club.leagueId, userId: a.id } },
       data: { joinedAt: new Date('2026-09-01') },
@@ -78,7 +95,7 @@ test(
     await clubs.decideRole(db, admin.id, a.id, first.club.id, 'APPROVED');
     assert.equal((await clubs.profile(db, a.id)).responsibility.status, 'APPROVED');
     await clubs.updatePresentation(db, a.id, 'Présentation du club');
-    const next = await clubs.setClub(db, a.id, { name: 'Next club', city: 'Melun' });
+    const next = await approvedClub(a.id, { name: 'Next club', city: 'Melun' });
     assert.notEqual(next.club.id, first.club.id);
     assert.equal(
       (await db.clubResponsibility.findUnique({ where: { clubId_userId: { clubId: first.club.id, userId: a.id } } }))

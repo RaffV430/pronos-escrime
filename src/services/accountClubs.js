@@ -71,7 +71,13 @@ async function setClubInTransaction(tx, userId, input) {
   await tx.$queryRaw`SELECT id FROM "User" WHERE id=${userId} FOR UPDATE`;
   if (!input || (input.none !== true && !positive(input.clubId) && typeof input.name !== 'string'))
     throw failure('Choisissez un club ou « sans club ». ', 400);
-  const club = input.none === true ? null : await findOrCreate(tx, input);
+  const custom = input.none !== true && !positive(input.clubId);
+  await tx.clubRegistrationRequest.updateMany({
+    where: { userId, status: 'PENDING' },
+    data: { status: 'CANCELLED', reviewedAt: new Date() },
+  });
+  if (custom) await require('./clubModeration').submit(tx, userId, input);
+  const club = input.none === true || custom ? null : await findOrCreate(tx, input);
   const league = club ? await leagueFor(tx, club, userId) : null;
   const previous = await tx.leagueMember.findMany({
     where: { userId, leftAt: null, league: { kind: 'CLUB', archivedAt: null } },
@@ -102,6 +108,11 @@ async function profile(db, userId) {
     : null;
   return {
     ...user,
+    clubRequest: await db.clubRegistrationRequest.findFirst({
+      where: { userId },
+      orderBy: { id: 'desc' },
+      select: { id: true, name: true, city: true, status: true, reason: true, mailStatus: true },
+    }),
     responsibility: responsibility
       ? { id: responsibility.id, status: responsibility.status, reason: responsibility.reason }
       : null,
@@ -211,6 +222,7 @@ module.exports = {
   directory,
   setClub,
   setClubInTransaction,
+  findOrCreate,
   requestRole,
   decideRole,
 };
