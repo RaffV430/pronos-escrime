@@ -108,6 +108,12 @@ function createRouter(db) {
     run(async (req, res) => res.json(await moderation.updatePolicy(db, req.user.userId, req.body))),
   );
   router.get(
+    '/admin/alerts',
+    auth,
+    admin,
+    run(async (req, res) => res.json(await require('../services/adminAlerts').summary(db))),
+  );
+  router.get(
     '/admin/requests',
     auth,
     admin,

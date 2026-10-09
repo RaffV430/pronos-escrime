@@ -171,3 +171,17 @@ test(
     assert.equal(await mail.alertAdmins(db, async () => assert.fail('already delivered')), 0);
   },
 );
+test('two different administrators see and decide the shared club queue', options, async () => {
+  const first = await user('shared-admin-first', true),
+    second = await user('shared-admin-second', true),
+    applicant = await user('shared-applicant');
+  const pending = await clubs.setClub(db, applicant.id, { name: 'Shared fencing club', city: 'Paris' });
+  assert.ok((await moderation.listRequests(db)).some((r) => r.id === pending.clubRequest.id));
+  await moderation.decide(db, second.id, pending.clubRequest.id, {
+    status: 'REJECTED',
+    reason: 'Club non identifiable dans cette demande.',
+  });
+  const next = await clubs.setClub(db, applicant.id, { name: 'Another shared fencing club', city: 'Paris' });
+  await moderation.decide(db, first.id, next.clubRequest.id, { status: 'APPROVED' });
+  assert.equal((await clubs.profile(db, applicant.id)).clubRequest.status, 'APPROVED');
+});

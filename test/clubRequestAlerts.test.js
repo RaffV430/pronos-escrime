@@ -26,7 +26,7 @@ function fixture(row) {
 test('pending requests alert administrators and mark successful delivery', async () => {
   const { db, updates } = fixture({ id: 9, adminAlertAttempts: 0 });
   const result = await alertAdmins(db, async (_, message) => {
-    assert.equal(message.url, '/admin');
+    assert.equal(message.url, '/admin?panel=clubs&request=9');
     assert.equal(message.tag, 'club-request-9');
     return { mail: 1, push: 1, mailFailed: 0, pushFailed: 0 };
   });
@@ -103,10 +103,29 @@ test('administrator delivery targets every admin and every enabled admin subscri
   };
   const result = await require('../src/services/syncHealth').notifyAdmins(
     db,
-    { title: 'Club à valider', body: 'Demande en attente', tag: 'club-request-1', url: '/admin' },
     {
-      mailer: { mailConfigured: () => true, sendMail: async ({ to }) => emails.push(to) },
-      push: { configured: () => true, send: async (sub) => subscriptions.push(sub.id) },
+      title: 'Club à valider',
+      body: '<Demande en attente>',
+      tag: 'club-request-1',
+      url: '/admin?panel=clubs&request=1',
+    },
+    {
+      mailer: {
+        mailConfigured: () => true,
+        sendMail: async ({ to, html, text }) => {
+          assert.match(html, /&#60;Demande en attente&#62;/);
+          assert.match(text, /admin\?panel=clubs&request=1/);
+          emails.push(to);
+        },
+      },
+      push: {
+        configured: () => true,
+        send: async (sub, payload) => {
+          assert.equal(payload.url, '/admin?panel=clubs&request=1');
+          assert.equal(payload.adminAlert, true);
+          subscriptions.push(sub.id);
+        },
+      },
     },
   );
   assert.deepEqual(
