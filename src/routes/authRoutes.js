@@ -136,7 +136,13 @@ router.post('/register', registerPerIp, async (req, res) => {
 
     res.json({
       token,
-      user: { id: newUser.id, username: newUser.name, email: newUser.email, isAdmin: newUser.isAdmin },
+      user: {
+        id: newUser.id,
+        username: newUser.name,
+        email: newUser.email,
+        isAdmin: newUser.isAdmin,
+        publicListing: newUser.publicListing,
+      },
     });
   } catch (err) {
     if (err.code === 'P2002')
@@ -284,7 +290,13 @@ router.post('/login', loginPerIp, loginPerIdentifier, async (req, res) => {
 
     res.json({
       token,
-      user: { id: user.id, username: user.name, email: user.email, isAdmin: user.isAdmin },
+      user: {
+        id: user.id,
+        username: user.name,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        publicListing: user.publicListing,
+      },
     });
   } catch (err) {
     console.error('Erreur Login:', err);
