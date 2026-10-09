@@ -629,3 +629,22 @@ test(
     assert.equal(new URL(sent[0].url, 'https://example.test').searchParams.get('matches'), String(own.id));
   },
 );
+
+test('public listing choice survives new login and session revocation in both directions', opts, async () => {
+  const user = await createUser();
+  const password = 'Preview-privacy-7392';
+  await prisma.user.update({ where: { id: user.id }, data: { password: await require('bcryptjs').hash(password, 4) } });
+  for (const publicListing of [false, true, false]) {
+    const saved = await call('PUT', '/api/auth/me/public-listing', user.token, { publicListing });
+    assert.equal(saved.status, 200);
+    await require('../../src/services/session').revokeSessions(prisma, user.id);
+    assert.equal((await call('GET', '/api/auth/me', user.token)).status, 401);
+    const login = await call('POST', '/api/auth/login', null, { email: user.email, password });
+    assert.equal(login.status, 200);
+    assert.equal(login.body.user.publicListing, publicListing);
+    assert.equal(login.body.user.password, undefined);
+    user.token = login.body.token;
+    assert.equal((await call('GET', '/api/auth/me', user.token)).body.publicListing, publicListing);
+    assert.equal((await prisma.user.findUnique({ where: { id: user.id } })).publicListing, publicListing);
+  }
+});
