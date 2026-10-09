@@ -185,3 +185,66 @@ test('two different administrators see and decide the shared club queue', option
   await moderation.decide(db, first.id, next.clubRequest.id, { status: 'APPROVED' });
   assert.equal((await clubs.profile(db, applicant.id)).clubRequest.status, 'APPROVED');
 });
+test(
+  'wake reads committed club requests and refusals, but not rolled-back changes',
+  { ...options, timeout: 10000 },
+  async () => {
+    const applicant = await user('wake-applicant'),
+      admin = await user('wake-admin', true);
+    let observedPending,
+      observedRejected,
+      reads = 0;
+    let resolvePending, resolveRejected;
+    const pendingSeen = new Promise((resolve) => {
+      resolvePending = resolve;
+    });
+    const rejectedSeen = new Promise((resolve) => {
+      resolveRejected = resolve;
+    });
+    let resolveIdle;
+    const idle = new Promise((resolve) => {
+      resolveIdle = resolve;
+    });
+    const stop = mail.startWorker(db, {
+      setInterval: () => ({ unref() {} }),
+      clearInterval: () => {},
+      alertAdmins: async () => {
+        reads++;
+        const row = await db.clubRegistrationRequest.findFirst({ where: { userId: applicant.id, status: 'PENDING' } });
+        if (row) {
+          observedPending = row;
+          resolvePending();
+        }
+        return 0;
+      },
+      deliver: async () => {
+        const row = await db.clubRegistrationRequest.findFirst({ where: { userId: applicant.id, status: 'REJECTED' } });
+        if (row) {
+          observedRejected = row;
+          resolveRejected();
+        }
+        resolveIdle();
+        return 0;
+      },
+    });
+    try {
+      await idle;
+      await new Promise((resolve) => setImmediate(resolve));
+      const before = reads;
+      await assert.rejects(clubs.setClub(db, applicant.id, { name: 'X', city: 'Paris' }));
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(reads, before);
+      const choice = await clubs.setClub(db, applicant.id, { name: 'Club wake test', city: 'Paris' });
+      await pendingSeen;
+      assert.equal(observedPending.id, choice.clubRequest.id);
+      await moderation.decide(db, admin.id, choice.clubRequest.id, {
+        status: 'REJECTED',
+        reason: 'Club non identifiable.',
+      });
+      await rejectedSeen;
+      assert.equal(observedRejected.id, choice.clubRequest.id);
+    } finally {
+      await stop();
+    }
+  },
+);

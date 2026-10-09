@@ -136,6 +136,7 @@ function createRouter(db) {
         where: { id, status: 'PENDING', adminAlertStatus: 'FAILED' },
         data: { adminAlertStatus: 'PENDING', adminAlertAttempts: 0, adminAlertNextAt: new Date() },
       });
+      if (result.count) require('../services/clubRequestMail').wake(db);
       res.json({ queued: result.count === 1 });
     }),
   );
@@ -150,6 +151,7 @@ function createRouter(db) {
         where: { id, status: 'REJECTED', mailStatus: 'FAILED' },
         data: { mailStatus: 'PENDING', mailAttempts: 0, mailNextAt: new Date() },
       });
+      if (result.count) require('../services/clubRequestMail').wake(db);
       res.json({ queued: result.count === 1 });
     }),
   );

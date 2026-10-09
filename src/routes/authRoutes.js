@@ -131,6 +131,7 @@ router.post('/register', registerPerIp, async (req, res) => {
       return user;
     });
 
+    if (req.body.clubChoice !== undefined) require('../services/clubRequestMail').wake(prisma);
     const token = session.issueToken(newUser);
 
     res.json({

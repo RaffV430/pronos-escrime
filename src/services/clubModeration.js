@@ -91,7 +91,7 @@ async function updatePolicy(db, actorId, input) {
 }
 async function decide(db, actorId, id, input) {
   if (!clubs.positive(id) || !['APPROVED', 'REJECTED'].includes(input.status)) throw failure('Décision invalide.', 400);
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     await clubs.lock(tx);
     const actor = await tx.user.findUnique({ where: { id: actorId }, select: { isAdmin: true } });
     if (!actor?.isAdmin) throw failure('Accès administrateur requis.', 403);
@@ -133,6 +133,8 @@ async function decide(db, actorId, id, input) {
     });
     return updated;
   });
+  require('./clubRequestMail').wake(db);
+  return result;
 }
 async function listRequests(db) {
   const include = { user: { select: { id: true, name: true } } };
