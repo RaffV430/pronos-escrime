@@ -127,6 +127,7 @@ async function start() {
   const port = Number(process.env.PORT) || 5000;
   const server = app.listen(port, () => console.log(`Serveur démarré sur le port ${port}`));
 
+  const stopClubMail = require('./services/clubRequestMail').startWorker(prisma);
   const stopNotifications = require('./services/pushNotifications').startWorker(prisma);
   const stopFtl = require('./services/ftlScheduler').startWorker(prisma);
   const stopMaintenance = require('./services/maintenance').startWorker(prisma);
@@ -142,7 +143,7 @@ async function start() {
     force.unref();
     server.close();
     stopWatchdog();
-    await Promise.allSettled([stopFtl(), stopNotifications(), stopMaintenance(), stopCalendar()]);
+    await Promise.allSettled([stopFtl(), stopNotifications(), stopMaintenance(), stopCalendar(), stopClubMail()]);
     await prisma.$disconnect().catch(() => {});
     process.exit(0);
   };

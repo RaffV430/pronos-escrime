@@ -1,0 +1,1267 @@
+[
+  {
+    "terme": "sale arabe",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sales arabes",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "bougnoule",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "bougnoules",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "bicot",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "bicots",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "raton",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "ratons",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "négro",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "negro",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "négros",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "negros",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "nègre",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "nègres",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "negresse",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "négresse",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "chinetoque",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "chinetoques",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "bridé de merde",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "race inférieure",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "races inférieures",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "suprématie blanche",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "white supremacy",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "white power",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "heil hitler",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sieg heil",
+    "categorie": "haine_raciale",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sale juif",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sales juifs",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "youpin",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "youpins",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "youpine",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "youpines",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux juifs",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "death to jews",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "juden raus",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill the jews",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "jewish vermin",
+    "categorie": "antisémitisme",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux musulmans",
+    "categorie": "islamophobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill all muslims",
+    "categorie": "islamophobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "muslim vermin",
+    "categorie": "islamophobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sales musulmans",
+    "categorie": "islamophobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sale musulman",
+    "categorie": "islamophobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux chrétiens",
+    "categorie": "haine_antichretienne",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill all christians",
+    "categorie": "haine_antichretienne",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sales chrétiens",
+    "categorie": "haine_antichretienne",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sale pédé",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sales pédés",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "pédé de merde",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "tapette de merde",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sale gouine",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sales gouines",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sale trans",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sales trans",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux gays",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill all gays",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill trans people",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "tranny",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "trannies",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "faggot",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "faggots",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "dyke de merde",
+    "categorie": "homophobie_transphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sale pute",
+    "categorie": "sexisme_misogynie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sales putes",
+    "categorie": "sexisme_misogynie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "salope de merde",
+    "categorie": "sexisme_misogynie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "femmes inférieures",
+    "categorie": "sexisme_misogynie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "women are inferior",
+    "categorie": "sexisme_misogynie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux femmes",
+    "categorie": "sexisme_misogynie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill all women",
+    "categorie": "sexisme_misogynie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "violons les femmes",
+    "categorie": "sexisme_misogynie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "rape all women",
+    "categorie": "sexisme_misogynie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sale handicapé",
+    "categorie": "handiphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "sales handicapés",
+    "categorie": "handiphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux handicapés",
+    "categorie": "handiphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill disabled people",
+    "categorie": "handiphobie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "1488",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "14/88",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "hh 88",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "blood and honour",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "blut und ehre",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "aryan supremacy",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "aryan brotherhood",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "national socialist movement",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "nazi power",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "nazis au pouvoir",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "vive hitler",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "hitler did nothing wrong",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "hitler avait raison",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "ss totenkopf",
+    "categorie": "nazisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "vive daech",
+    "categorie": "terrorisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "gloire à daech",
+    "categorie": "terrorisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "isis forever",
+    "categorie": "terrorisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "support isis",
+    "categorie": "terrorisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "vive al qaida",
+    "categorie": "terrorisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "gloire à al qaida",
+    "categorie": "terrorisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "vive le terrorisme",
+    "categorie": "terrorisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "terrorist power",
+    "categorie": "terrorisme_apologie",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux étrangers",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux immigrés",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux noirs",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "mort aux arabes",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill all immigrants",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill all refugees",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill all blacks",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "kill all arabs",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "exterminons les",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "on va vous tuer",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "tuez les tous",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "massacrons les",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "gazons les",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "au four les juifs",
+    "categorie": "menaces_violence",
+    "action": "bloquer"
+  },
+  {
+    "terme": "nique ta mère",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "ntm",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "fils de pute",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "fils de putes",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "fdp",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "motherfucker",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "motherfuckers",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "fuck you",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "fuck off",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "enculé de merde",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "connard de merde",
+    "categorie": "injures_graves",
+    "action": "bloquer"
+  },
+  {
+    "terme": "pornhub",
+    "categorie": "pornographie_explicitement_sexuelle",
+    "action": "bloquer"
+  },
+  {
+    "terme": "gangbang",
+    "categorie": "pornographie_explicitement_sexuelle",
+    "action": "bloquer"
+  },
+  {
+    "terme": "child porn",
+    "categorie": "pornographie_explicitement_sexuelle",
+    "action": "bloquer"
+  },
+  {
+    "terme": "pedo porn",
+    "categorie": "pornographie_explicitement_sexuelle",
+    "action": "bloquer"
+  },
+  {
+    "terme": "violer des enfants",
+    "categorie": "pornographie_explicitement_sexuelle",
+    "action": "bloquer"
+  },
+  {
+    "terme": "pornographie infantile",
+    "categorie": "pornographie_explicitement_sexuelle",
+    "action": "bloquer"
+  },
+  {
+    "terme": "putain",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "merde",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "connard",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "connasse",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "conasse",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "abruti",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "crétin",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "débile",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "idiot",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "salaud",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "salope",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "pute",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "bite",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "couille",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "couilles",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "cul",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "fuck",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "shit",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "bitch",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "asshole",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "bullshit",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "bastard",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "dickhead",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "wtf",
+    "categorie": "grossieretes",
+    "action": "revoir"
+  },
+  {
+    "terme": "hitler",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "mussolini",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "pétain",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "petain",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "goebbels",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "himmler",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "göring",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "goering",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "gestapo",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "waffen ss",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "schutzstaffel",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "troisième reich",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "third reich",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "reich",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "nazi",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "nazisme",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "fasciste",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "fascisme",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "fascist",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "négationnisme",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "negationnisme",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "ku klux klan",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "kkk",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "confederate",
+    "categorie": "ideologies_noms_historiques",
+    "action": "revoir"
+  },
+  {
+    "terme": "88",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "18",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "14",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "ss",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "wp",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "white pride",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "croix gammée",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "swastika",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "soleil noir",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "black sun",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "celtic cross",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "croix celtique",
+    "categorie": "symboles_codes_ambigus",
+    "action": "revoir"
+  },
+  {
+    "terme": "suprémaciste",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "supremacist",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "ultranationaliste",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "néonazi",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "neo nazi",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "identitaire",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "milice",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "militia",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "extrémiste",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "extremist",
+    "categorie": "politique_extremisme",
+    "action": "revoir"
+  },
+  {
+    "terme": "daech",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "isis",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "isil",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "état islamique",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "etat islamique",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "al qaida",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "al-qaïda",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "al qaïda",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "boko haram",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "terroriste",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "terrorist",
+    "categorie": "terrorisme_references",
+    "action": "revoir"
+  },
+  {
+    "terme": "étranger dehors",
+    "categorie": "discrimination_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "étrangers dehors",
+    "categorie": "discrimination_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "dehors les immigrés",
+    "categorie": "discrimination_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "go home foreigners",
+    "categorie": "discrimination_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "pas de femmes",
+    "categorie": "discrimination_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "réservé aux hommes",
+    "categorie": "discrimination_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "interdit aux femmes",
+    "categorie": "discrimination_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "no women allowed",
+    "categorie": "discrimination_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "no foreigners",
+    "categorie": "discrimination_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "massacre",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "massacrer",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "extermination",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "exterminer",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "génocide",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "genocide",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "kill",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "murder",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "tuer",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "tueurs",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "viol",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "rape",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "violence",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "bombe",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "explosif",
+    "categorie": "violence_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "fédération française d'escrime",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "federation francaise d'escrime",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "ffe officiel",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "official ffe",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "équipe de france",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "equipe de france",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "team france official",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "comité olympique",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "comite olympique",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "international fencing federation",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "fie officiel",
+    "categorie": "usurpation_identite_sportive",
+    "action": "revoir"
+  },
+  {
+    "terme": "haine",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "hate",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "raciste",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "racist",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "sexiste",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "sexist",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "homophobe",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "homophobic",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "suprématie",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  },
+  {
+    "terme": "supremacy",
+    "categorie": "provocation_ambigue",
+    "action": "revoir"
+  }
+]

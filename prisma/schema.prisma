@@ -21,6 +21,7 @@ model User {
   club Club? @relation(fields: [clubId], references: [id])
   clubChoiceAt DateTime?
   clubResponsibilities ClubResponsibility[]
+  clubRequests ClubRegistrationRequest[]
   favoriteLeagueId  Int?
   publicListing     Boolean            @default(true)
   followedFencers   FollowedFencer[]
@@ -465,4 +466,32 @@ model FencerAffiliationHistory {
   reason String @default("")
   createdAt DateTime @default(now())
   @@index([affiliationId, id])
+}
+
+model ClubRegistrationRequest {
+  id Int @id @default(autoincrement())
+  userId Int
+  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  name String
+  city String
+  shortName String @default("")
+  status String @default("PENDING")
+  reason String @default("")
+  clubId Int?
+  reviewedBy Int?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  mailStatus String @default("NONE")
+  mailAttempts Int @default(0)
+  mailNextAt DateTime?
+  mailSentAt DateTime?
+  @@index([status, createdAt])
+  @@index([mailStatus, mailNextAt])
+}
+model ClubNamePolicy {
+  id Int @id @default(1)
+  revision Int @default(0)
+  terms Json @default("[]")
+  rules String @default("Utilisez le nom réel de votre club d’escrime et sa ville. Les noms injurieux, discriminatoires, menaçants, à caractère sexuel, publicitaires ou usurpant une identité sont refusés. Chaque ajout doit être validé par un administrateur. En attendant, vous restez sans club / accompagnant. Vous pouvez demander un réexamen auprès de l’éditeur.")
+  updatedAt DateTime @updatedAt
 }
