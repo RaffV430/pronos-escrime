@@ -33,7 +33,7 @@ async function deliver(db, transport = mailer, now = new Date()) {
   });
   if (!row) return 0;
   try {
-    const text = `Votre demande d’ajout du club « ${row.name} » a été refusée.\n\nMotif : ${row.reason}\n\nVous pouvez consulter votre rattachement actuel ou choisir un club existant dans Mon compte. Pour demander un réexamen, contactez l’éditeur depuis les mentions légales du site.`;
+    const text = `Bonjour,\n\nVotre demande d’ajout du club « ${row.name} » n’a pas été acceptée.\n\nMotif : ${row.reason}\n\nCe club n’a pas été ajouté à la liste. Votre compte, vos tireurs favoris et vos pronostics restent accessibles.\n\nVous pouvez proposer un autre nom ou choisir un club existant dans Mon compte. Si vous pensez qu’il s’agit d’une erreur, vous pouvez demander un réexamen auprès de l’éditeur, dont les coordonnées figurent dans les mentions légales du site.\n\nL’équipe Pronos Escrime`;
     await transport.sendMail({
       to: row.user.email,
       subject: 'Pronos Escrime — demande de club refusée',

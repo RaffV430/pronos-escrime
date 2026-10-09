@@ -2,30 +2,16 @@ const { failure } = require('./ftlClient');
 const clubs = require('./accountClubs');
 const DEFAULT_RULES =
   'Utilisez le nom réel de votre club d’escrime et sa ville. Les noms injurieux, discriminatoires, menaçants, à caractère sexuel, publicitaires ou usurpant une identité sont refusés. Chaque ajout doit être validé par un administrateur. En attendant, vous restez sans club / accompagnant. Vous pouvez demander un réexamen auprès de l’éditeur.';
-const normalize = (s) =>
-  clubs.key(
-    String(s || '')
-      .replace(/œ/g, 'oe')
-      .replace(/æ/g, 'ae'),
-  );
-function validateTerms(terms) {
-  if (!Array.isArray(terms) || terms.length > 2000) throw failure('Liste limitée à 2 000 mots ou expressions.', 400);
-  const cleaned = terms.map((t) => normalize(clubs.clean(t, 2, 100, 'Mot ou expression')));
-  if (cleaned.some((t) => t.length < 2)) throw failure('Mot ou expression invalide.', 400);
-  return [...new Set(cleaned)];
-}
-function prohibited(input, terms) {
-  return [input.name, input.city, input.shortName].some((value) => {
-    const text = ` ${normalize(value)} `;
-    return terms.some((term) => text.includes(` ${term} `));
-  });
-}
+const screening = require('./clubNameScreening');
+const { normalize, validateTerms } = screening;
+const defaultTerms = validateTerms(require('../data/club-name-moderation.json'));
+const prohibited = (input, terms) => Boolean(screening.screen(input, terms).blocked);
 async function policy(db) {
   return (
     (await db.clubNamePolicy.findUnique({ where: { id: 1 } })) || {
       id: 1,
       revision: 0,
-      terms: [],
+      terms: defaultTerms,
       rules: DEFAULT_RULES,
     }
   );
@@ -38,20 +24,30 @@ async function submit(tx, userId, input) {
     shortName: clubs.clean(input.shortName || '', 0, 40, 'Abréviation'),
   };
   const p = await policy(tx);
-  const rejected = prohibited(data, p.terms);
+  const result = screening.screen(data, p.terms);
+  const rejected = Boolean(result.blocked);
   const row = await tx.clubRegistrationRequest.create({
     data: {
       ...data,
       ...(rejected
         ? {
             status: 'REJECTED',
-            reason:
-              'Le nom, la ville ou l’abréviation ne respecte pas les règles de nommage publiées. Vous pouvez demander un réexamen auprès de l’éditeur.',
+            reason: screening.refusalReason(result.blocked),
             reviewedAt: new Date(),
             mailStatus: 'PENDING',
             mailNextAt: new Date(),
           }
-        : {}),
+        : result.review.length
+          ? {
+              reason: `Vérification requise : ${result.review
+                .map(
+                  (m) =>
+                    `${m.kind === 'similar' ? 'ressemblance avec' : 'terme à revoir'} « ${m.terme} » (${m.categorie})`,
+                )
+                .slice(0, 8)
+                .join('; ')}`,
+            }
+          : {}),
     },
   });
   await tx.auditLog.create({
@@ -60,13 +56,13 @@ async function submit(tx, userId, input) {
       action: rejected ? 'CLUB_REQUEST_AUTO_REJECT' : 'CLUB_REQUEST',
       targetType: 'ClubRegistrationRequest',
       targetId: row.id,
-      after: { status: row.status, policyRevision: p.revision },
+      after: { status: row.status, policyRevision: p.revision, screening: result.matches },
     },
   });
   return row;
 }
 async function updatePolicy(db, actorId, input) {
-  const terms = validateTerms(input.terms),
+  const terms = input.csv !== undefined ? screening.parseCsv(input.csv) : validateTerms(input.terms),
     rules = clubs.clean(input.rules, 20, 5000, 'Règles');
   if (!Number.isSafeInteger(input.revision)) throw failure('Version des règles requise.', 400);
   return db.$transaction(async (tx) => {

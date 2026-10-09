@@ -56,7 +56,7 @@ test(
     const p = await moderation.policy(db);
     await moderation.updatePolicy(db, admin.id, {
       revision: p.revision,
-      terms: ['interdit'],
+      csv: 'terme;categorie;action\ninterdit;injures_graves;bloquer\nambigu;grossieretes;revoir',
       rules: moderation.DEFAULT_RULES,
     });
     await assert.rejects(
@@ -67,6 +67,7 @@ test(
     assert.equal(r.club, null);
     assert.equal(r.clubRequest.status, 'REJECTED');
     assert.equal(r.clubRequest.mailStatus, 'PENDING');
+    assert.match(r.clubRequest.reason, /injures graves/);
     assert.equal(await db.club.count({ where: { nameKey: 'club interdit' } }), 0);
     assert.equal(await mail.deliver(db, { playerMailAvailable: () => false }), 0);
     const now = new Date();
@@ -127,5 +128,15 @@ test(
       now,
     );
     assert.equal((await clubs.profile(db, a.id)).clubRequest.mailStatus, 'FAILED');
+    const close = await clubs.setClub(db, a.id, { name: 'Club interdiit', city: 'Paris' });
+    assert.equal(close.clubRequest.status, 'PENDING');
+    assert.match(close.clubRequest.reason, /ressemblance/);
+    assert.equal(close.clubRequest.mailStatus, 'NONE');
+    assert.equal(close.club, null);
+    await moderation.decide(db, admin.id, close.clubRequest.id, { status: 'APPROVED' });
+    assert.ok((await clubs.profile(db, a.id)).club);
+    const review = await clubs.setClub(db, a.id, { name: 'Club ambigu', city: 'Tours' });
+    assert.equal(review.clubRequest.status, 'PENDING');
+    assert.match(review.clubRequest.reason, /terme à revoir/);
   },
 );
