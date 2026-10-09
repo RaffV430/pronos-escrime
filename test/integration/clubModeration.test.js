@@ -165,7 +165,7 @@ test(
       where: { id: { not: row.id }, status: 'PENDING' },
       data: { status: 'CANCELLED' },
     });
-    const sent = await mail.alertAdmins(db, async () => ({ mail: 1, push: 0, mailFailed: 0, pushFailed: 0 }));
+    const sent = await mail.alertAdmins(db, async () => ({ mail: 1, push: 1, mailFailed: 0, pushFailed: 0 }));
     assert.equal(sent, 1);
     assert.equal((await db.clubRegistrationRequest.findUnique({ where: { id: row.id } })).adminAlertStatus, 'SENT');
     assert.equal(await mail.alertAdmins(db, async () => assert.fail('already delivered')), 0);

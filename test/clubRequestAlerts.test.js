@@ -28,7 +28,7 @@ test('pending requests alert administrators and mark successful delivery', async
   const result = await alertAdmins(db, async (_, message) => {
     assert.equal(message.url, '/admin');
     assert.equal(message.tag, 'club-request-9');
-    return { mail: 1, mailFailed: 0, pushFailed: 0 };
+    return { mail: 1, push: 1, mailFailed: 0, pushFailed: 0 };
   });
   assert.equal(result, 1);
   assert.equal(updates[0].adminAlertStatus, 'SENDING');
@@ -67,4 +67,53 @@ test('no configured recipient does not falsely mark alert sent', async () => {
   const { db, updates } = fixture({ id: 9, adminAlertAttempts: 0 });
   await alertAdmins(db, async () => ({ mail: 0, push: 0, mailFailed: 0, pushFailed: 0 }));
   assert.equal(updates[1].adminAlertStatus, 'PENDING');
+});
+
+test('mail alone or push alone keeps the other channel pending', async () => {
+  for (const result of [
+    { mail: 1, push: 0 },
+    { mail: 0, push: 1 },
+  ]) {
+    const { db, updates } = fixture({ id: 9, adminAlertAttempts: 0 });
+    assert.equal(await alertAdmins(db, async () => result), 0);
+    assert.equal(updates[1].adminAlertStatus, 'PENDING');
+  }
+});
+test('administrator delivery targets every admin and every enabled admin subscription', async () => {
+  const emails = [],
+    subscriptions = [];
+  const admins = [
+    { id: 1, email: 'one@example.test' },
+    { id: 2, email: 'two@example.test' },
+    { id: 3, email: 'three@example.test' },
+  ];
+  const db = {
+    user: {
+      findMany: async ({ where }) => {
+        assert.deepEqual(where, { isAdmin: true });
+        return admins;
+      },
+    },
+    pushSubscription: {
+      findMany: async ({ where }) => {
+        assert.deepEqual(where, { enabled: true, userId: { in: [1, 2, 3] } });
+        return [{ id: 11 }, { id: 22 }, { id: 33 }, { id: 34 }];
+      },
+    },
+  };
+  const result = await require('../src/services/syncHealth').notifyAdmins(
+    db,
+    { title: 'Club à valider', body: 'Demande en attente', tag: 'club-request-1', url: '/admin' },
+    {
+      mailer: { mailConfigured: () => true, sendMail: async ({ to }) => emails.push(to) },
+      push: { configured: () => true, send: async (sub) => subscriptions.push(sub.id) },
+    },
+  );
+  assert.deepEqual(
+    emails,
+    admins.map((a) => a.email),
+  );
+  assert.deepEqual(subscriptions, [11, 22, 33, 34]);
+  assert.equal(result.mail, 3);
+  assert.equal(result.push, 4);
 });

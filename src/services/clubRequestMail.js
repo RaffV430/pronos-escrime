@@ -122,7 +122,7 @@ async function alertAdmins(db, notify = require('./syncHealth').notifyAdmins, no
   } catch {
     sent = {};
   }
-  const success = (sent.mail || sent.push) && !sent.mailFailed && !sent.pushFailed;
+  const success = sent.mail > 0 && sent.push > 0 && !sent.mailFailed && !sent.pushFailed;
   await db.clubRegistrationRequest.update({
     where: { id: row.id },
     data: {
