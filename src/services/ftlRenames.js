@@ -22,6 +22,15 @@ async function reconcileRenames(db, c, eventId, client, actorId = 0) {
   if (!c.podiumRoster || !/^[a-f0-9]{32}$/i.test(eventId || '')) return { c, renames: [] };
   const observed = parseRoster(await client.get(`/events/competitors/data/${eventId}`));
   const renames = plannedRenames(c.podiumRoster, observed);
+  if (db.fencerAffiliation)
+    await db.$transaction((tx) =>
+      require('./fencerAffiliations').ingest(
+        tx,
+        c,
+        observed,
+        `https://www.fencingtimelive.com/events/competitors/${eventId}`,
+      ),
+    );
   if (!renames.length) return { c, renames };
   const updated = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;

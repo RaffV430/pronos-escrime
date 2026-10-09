@@ -15,7 +15,15 @@ function directory(competitions, favorites, club) {
       const key = selectable.get(String(entry.id))?.identityKey;
       if (!key) continue;
       if (!groups.has(key))
-        groups.set(key, { ...entry, ...identity(entry), key, competitionId: c.id, events: [], favoriteId: null });
+        groups.set(key, {
+          ...entry,
+          ...identity(entry),
+          ...(entry.currentClub ? { club: entry.currentClub } : {}),
+          key,
+          competitionId: c.id,
+          events: [],
+          favoriteId: null,
+        });
       const row = groups.get(key);
       if (!row.events.some((e) => e.id === c.id)) row.events.push({ id: c.id, name: c.name });
       row.favoriteId ||= links.find((l) => l.entryId === String(entry.id))?.favoriteId || null;
@@ -56,7 +64,8 @@ async function search(db, userId, { tournamentId, competitionId, query, clubOnly
   const selectedClub = clubId ? clubs.find((c) => c.id === clubId) : club;
   if (clubId && !selectedClub) throw failure('Club introuvable.', 404);
   const term = normalize(query);
-  const rows = directory(competitions, favorites, selectedClub).filter(
+  const decorated = await require('./fencerAffiliations').decorate(db, competitions, favorites);
+  const rows = directory(decorated.competitions, decorated.favorites, selectedClub).filter(
     (row) =>
       (!competitionId || row.events.some((e) => e.id === competitionId)) &&
       (!(clubOnly || clubId) || row.isClub) &&

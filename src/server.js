@@ -62,6 +62,7 @@ app.use('/api/pools', require('./routes/poolRoutes'));
 
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/admin/fencer-affiliations', require('./routes/fencerAffiliationRoutes').createRouter(prisma));
 app.use('/api/community', require('./routes/communityRoutes'));
 app.use('/api/me/fencers', require('./routes/fencerFollowRoutes').createRouter(prisma));
 app.use('/api/me', require('./routes/personalRoutes'));
@@ -122,6 +123,7 @@ async function start() {
     const { tables } = await require('./services/schemaCheck').checkSchema(prisma);
     console.log(`Schéma de la base vérifié (${tables} tables).`);
   }
+  await require('./services/ffeRankingImport').run(prisma);
   const port = Number(process.env.PORT) || 5000;
   const server = app.listen(port, () => console.log(`Serveur démarré sur le port ${port}`));
 

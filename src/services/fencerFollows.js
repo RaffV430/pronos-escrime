@@ -26,6 +26,12 @@ function keyFor(data) {
 function compatible(favorite, entry, competitionId) {
   const candidate = identity(entry);
   if (normalize(favorite.name) !== normalize(candidate.name)) return false;
+  if (
+    favorite.affiliationId &&
+    favorite.affiliationId === entry.affiliationId &&
+    (!favorite.country || !candidate.country || favorite.country === candidate.country)
+  )
+    return true;
   for (const field of ['country', 'club'])
     if (favorite[field] && candidate[field] && normalize(favorite[field]) !== normalize(candidate[field])) return false;
   if (favorite.originCompetitionId === competitionId && favorite.originEntryId === String(entry.id)) return true;
@@ -58,9 +64,12 @@ function resolve(favorites, competition, { includeMatchNames = true } = {}) {
   return { links, ambiguousIds, matchNames };
 }
 async function list(db, userId, competitionId) {
-  const favorites = await db.followedFencer.findMany({ where: { userId }, orderBy: { id: 'asc' } });
-  const competition = competitionId ? await db.competition.findUnique({ where: { id: competitionId } }) : null;
+  let favorites = await db.followedFencer.findMany({ where: { userId }, orderBy: { id: 'asc' } });
+  let competition = competitionId ? await db.competition.findUnique({ where: { id: competitionId } }) : null;
   if (competitionId && !competition) throw failure('Épreuve introuvable.', 404);
+  const decorated = await require('./fencerAffiliations').decorate(db, competition ? [competition] : [], favorites);
+  favorites = decorated.favorites;
+  if (competition) competition = decorated.competitions[0];
   return {
     favorites,
     ...(competition ? resolve(favorites, competition) : { links: [], ambiguousIds: [], matchNames: [] }),
@@ -106,6 +115,19 @@ async function locked(db, userId, fn) {
   });
 }
 async function save(tx, userId, data) {
+  if (tx.fencerAffiliationEntry) {
+    const link = await tx.fencerAffiliationEntry.findUnique({
+      where: { competitionId_entryId: { competitionId: data.originCompetitionId, entryId: data.originEntryId } },
+    });
+    if (link) {
+      const favorites = await tx.followedFencer.findMany({ where: { userId } });
+      const origins = await tx.fencerAffiliationEntry.findMany({ where: { affiliationId: link.affiliationId } });
+      const previous = favorites.find((f) =>
+        origins.some((o) => o.competitionId === f.originCompetitionId && o.entryId === f.originEntryId),
+      );
+      if (previous) return previous;
+    }
+  }
   const existing = await tx.followedFencer.findUnique({
     where: { userId_identityKey: { userId, identityKey: data.identityKey } },
   });
