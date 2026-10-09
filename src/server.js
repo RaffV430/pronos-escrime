@@ -55,6 +55,7 @@ app.use((req, res, next) => {
 
 // Les limites anti-abus de connexion sont dans authRoutes (par identifiant, échecs seulement).
 app.use('/api/auth', authRoutes);
+app.use('/api/support', require('./routes/supportRoutes'));
 app.use('/api/clubs', require('./routes/accountClubRoutes').createRouter(prisma));
 app.use('/api/matches', matchRoutes);
 app.use('/api/podium', podiumRoutes);
