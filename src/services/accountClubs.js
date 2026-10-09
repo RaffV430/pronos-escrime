@@ -98,7 +98,9 @@ async function setClubInTransaction(tx, userId, input) {
   return profile(tx, userId);
 }
 async function setClub(db, userId, input) {
-  return db.$transaction((tx) => setClubInTransaction(tx, userId, input));
+  const result = await db.$transaction((tx) => setClubInTransaction(tx, userId, input));
+  if (result.clubRequest) require('./clubRequestMail').wake(db);
+  return result;
 }
 async function profile(db, userId) {
   const user = await db.user.findUnique({ where: { id: userId }, select: { club: true, clubChoiceAt: true } });

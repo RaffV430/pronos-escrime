@@ -1,9 +1,12 @@
 const mailer = require('./mailer');
-const escape = (value) =>
-  String(value).replace(
-    /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
-  );
+const { refusalMessage } = require('./clubRequestEmail');
+const workers = new WeakMap();
+function wake(db) {
+  const tick = workers.get(db);
+  if (!tick) return false;
+  tick();
+  return true;
+}
 async function deliver(db, transport = mailer, now = new Date()) {
   if (!transport.playerMailAvailable()) return 0;
   const row = await db.$transaction(async (tx) => {
@@ -33,12 +36,9 @@ async function deliver(db, transport = mailer, now = new Date()) {
   });
   if (!row) return 0;
   try {
-    const text = `Bonjour,\n\nVotre demande d’ajout du club « ${row.name} » n’a pas été acceptée.\n\nMotif : ${row.reason}\n\nCe club n’a pas été ajouté à la liste. Votre compte, vos tireurs favoris et vos pronostics restent accessibles.\n\nVous pouvez proposer un autre nom ou choisir un club existant dans Mon compte. Si vous pensez qu’il s’agit d’une erreur, vous pouvez demander un réexamen auprès de l’éditeur, dont les coordonnées figurent dans les mentions légales du site.\n\nL’équipe Pronos Escrime`;
     await transport.sendMail({
       to: row.user.email,
-      subject: 'Pronos Escrime — demande de club refusée',
-      text,
-      html: `<p>${escape(text).replace(/\n/g, '<br>')}</p>`,
+      ...refusalMessage(row),
       idempotencyKey: `club-request-refused-${row.id}`,
     });
     await db.clubRegistrationRequest.update({
@@ -57,24 +57,38 @@ async function deliver(db, transport = mailer, now = new Date()) {
     return 0;
   }
 }
-function startWorker(db) {
+function startWorker(db, deps = {}) {
   let running = null,
-    stopped = false;
+    stopped = false,
+    requested = false;
   const tick = () => {
-    if (stopped || running) return;
-    running = alertAdmins(db)
-      .then(() => deliver(db))
+    if (stopped) return;
+    requested = true;
+    if (running) return;
+    // A committed request wakes the existing queue; the timer remains a recovery path.
+    running = Promise.resolve()
+      .then(async () => {
+        do {
+          requested = false;
+          const alerted = await (deps.alertAdmins || alertAdmins)(db);
+          const mailed = await (deps.deliver || deliver)(db);
+          if (alerted || mailed) requested = true;
+        } while (requested && !stopped);
+      })
       .catch(() => {})
       .finally(() => {
         running = null;
+        if (requested && !stopped) tick();
       });
   };
-  const timer = setInterval(tick, 60000);
+  workers.set(db, tick);
+  const timer = (deps.setInterval || setInterval)(tick, 60000);
   timer.unref();
   tick();
   return () => {
     stopped = true;
-    clearInterval(timer);
+    if (workers.get(db) === tick) workers.delete(db);
+    (deps.clearInterval || clearInterval)(timer);
     return running;
   };
 }
@@ -132,4 +146,4 @@ async function alertAdmins(db, notify = require('./syncHealth').notifyAdmins, no
   });
   return success ? 1 : 0;
 }
-module.exports = { deliver, startWorker, alertAdmins };
+module.exports = { deliver, startWorker, alertAdmins, wake };
