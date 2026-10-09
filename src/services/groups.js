@@ -5,6 +5,14 @@
 //    note du club = moyenne de ses membres ; 3 membres au moins ; un seul club à la fois.
 const { failure } = require('./ftlClient');
 
+function currentLeaguesWhere(userId) {
+  return {
+    archivedAt: null,
+    members: { some: { userId, leftAt: null } },
+    OR: [{ kind: 'PRIVATE' }, { kind: 'CLUB', registeredClub: { is: { users: { some: { id: userId } } } } }],
+  };
+}
+
 const active = (m) => !m.leftAt;
 
 // Membres du club pour un tournoi : présents à son début ; avant le début (ou sans horaire), les membres actuels.
@@ -187,4 +195,14 @@ async function singleClubPerPlayer(db, now = new Date()) {
   return extra.length;
 }
 
-module.exports = { mergePeriods, active, clubMembersAt, membersFor, enroll, leave, ensureAppClub, singleClubPerPlayer };
+module.exports = {
+  currentLeaguesWhere,
+  mergePeriods,
+  active,
+  clubMembersAt,
+  membersFor,
+  enroll,
+  leave,
+  ensureAppClub,
+  singleClubPerPlayer,
+};

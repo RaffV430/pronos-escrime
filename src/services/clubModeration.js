@@ -134,4 +134,31 @@ async function decide(db, actorId, id, input) {
     return updated;
   });
 }
-module.exports = { DEFAULT_RULES, normalize, validateTerms, prohibited, policy, submit, updatePolicy, decide };
+async function listRequests(db) {
+  const include = { user: { select: { id: true, name: true } } };
+  return db.$transaction(async (tx) => {
+    const pending = await tx.clubRegistrationRequest.findMany({
+      where: { status: 'PENDING' },
+      include,
+      orderBy: { id: 'desc' },
+    });
+    const recent = await tx.clubRegistrationRequest.findMany({
+      where: { status: { not: 'PENDING' } },
+      include,
+      orderBy: { id: 'desc' },
+      take: 200,
+    });
+    return [...pending, ...recent];
+  });
+}
+module.exports = {
+  listRequests,
+  DEFAULT_RULES,
+  normalize,
+  validateTerms,
+  prohibited,
+  policy,
+  submit,
+  updatePolicy,
+  decide,
+};

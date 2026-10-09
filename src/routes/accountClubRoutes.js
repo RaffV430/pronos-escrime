@@ -111,21 +111,27 @@ function createRouter(db) {
     '/admin/requests',
     auth,
     admin,
-    run(async (req, res) =>
-      res.json(
-        await db.clubRegistrationRequest.findMany({
-          include: { user: { select: { id: true, name: true } } },
-          orderBy: { id: 'desc' },
-          take: 200,
-        }),
-      ),
-    ),
+    run(async (req, res) => res.json(await moderation.listRequests(db))),
   );
   router.put(
     '/admin/requests/:id',
     auth,
     admin,
     run(async (req, res) => res.json(await moderation.decide(db, req.user.userId, Number(req.params.id), req.body))),
+  );
+  router.post(
+    '/admin/requests/:id/retry-alert',
+    auth,
+    admin,
+    run(async (req, res) => {
+      const id = Number(req.params.id);
+      if (!service.positive(id)) return res.status(400).json({ error: 'Demande invalide.' });
+      const result = await db.clubRegistrationRequest.updateMany({
+        where: { id, status: 'PENDING', adminAlertStatus: 'FAILED' },
+        data: { adminAlertStatus: 'PENDING', adminAlertAttempts: 0, adminAlertNextAt: new Date() },
+      });
+      res.json({ queued: result.count === 1 });
+    }),
   );
   router.post(
     '/admin/requests/:id/retry-mail',
