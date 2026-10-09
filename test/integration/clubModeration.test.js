@@ -140,3 +140,34 @@ test(
     assert.match(review.clubRequest.reason, /terme à revoir/);
   },
 );
+
+test(
+  'all pending requests remain visible beyond the recent decisions limit and old requests are alerted',
+  options,
+  async () => {
+    const a = await user('alert-backlog-user');
+    const row = await db.clubRegistrationRequest.create({
+      data: { userId: a.id, name: 'Club à valider', city: 'Paris', shortName: '' },
+    });
+    await db.clubRegistrationRequest.createMany({
+      data: Array.from({ length: 201 }, (_, i) => ({
+        userId: a.id,
+        name: `Demande terminée ${i}`,
+        city: 'Paris',
+        shortName: '',
+        status: 'CANCELLED',
+      })),
+    });
+    const rows = await moderation.listRequests(db);
+    assert.ok(rows.some((r) => r.id === row.id && r.status === 'PENDING'));
+    assert.ok(rows.filter((r) => r.status !== 'PENDING').length <= 200);
+    await db.clubRegistrationRequest.updateMany({
+      where: { id: { not: row.id }, status: 'PENDING' },
+      data: { status: 'CANCELLED' },
+    });
+    const sent = await mail.alertAdmins(db, async () => ({ mail: 1, push: 0, mailFailed: 0, pushFailed: 0 }));
+    assert.equal(sent, 1);
+    assert.equal((await db.clubRegistrationRequest.findUnique({ where: { id: row.id } })).adminAlertStatus, 'SENT');
+    assert.equal(await mail.alertAdmins(db, async () => assert.fail('already delivered')), 0);
+  },
+);

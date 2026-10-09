@@ -71,6 +71,7 @@ function startWorker(db) {
   };
   const timer = setInterval(tick, 60000);
   timer.unref();
+  tick();
   return () => {
     stopped = true;
     clearInterval(timer);
@@ -80,6 +81,15 @@ function startWorker(db) {
 async function alertAdmins(db, notify = require('./syncHealth').notifyAdmins, now = new Date()) {
   const row = await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(72610411)::text`;
+    await tx.clubRegistrationRequest.updateMany({
+      where: {
+        status: 'PENDING',
+        adminAlertStatus: 'SENDING',
+        adminAlertNextAt: { lte: now },
+        adminAlertAttempts: { gte: 5 },
+      },
+      data: { adminAlertStatus: 'FAILED' },
+    });
     const r = await tx.clubRegistrationRequest.findFirst({
       where: {
         status: 'PENDING',
