@@ -20,6 +20,13 @@ function createRouter(db) {
     }),
   );
   router.get(
+    '/:id/history',
+    run(async (req, res) => {
+      if (!validId(req.params.id)) return res.status(400).json({ error: 'Favori invalide.' });
+      res.json(await require('../services/fencerHistory').history(db, req.user.userId, Number(req.params.id)));
+    }),
+  );
+  router.get(
     '/directory',
     run(async (req, res) => {
       const { tournamentId, competitionId, query = '', clubOnly, clubId, offset = '0' } = req.query;

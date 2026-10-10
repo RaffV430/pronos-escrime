@@ -97,6 +97,19 @@ function podiumFromResults(rows, c, matches) {
     silver: silver.id,
     bronze1: third[0].id,
     ...(third[1] ? { bronze2: third[1].id } : {}),
+    // Keep only ranks whose official entry ID and full name match uniquely.
+    classification: rows.flatMap((row) => {
+      const rank = Number(String(row.place).replace(/T$/, ''));
+      const found = c.podiumRoster.filter((e) => String(e.id) === String(row.id) && norm(e.name) === norm(row.name));
+      if (
+        !Number.isSafeInteger(rank) ||
+        rank < 1 ||
+        found.length !== 1 ||
+        rows.filter((r) => String(r.id) === String(row.id)).length !== 1
+      )
+        return [];
+      return [{ entryId: String(found[0].id), rank, tied: /T$/.test(String(row.place)) }];
+    }),
     finalConfirmed: true,
     ...(bronze ? { bronzeMatchConfirmed: true } : {}),
   };
