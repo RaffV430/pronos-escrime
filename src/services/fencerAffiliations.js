@@ -285,4 +285,14 @@ async function decorate(db, competitions, favorites = []) {
     favorites: favorites.map((f) => ({ ...f, ...extra(f.originCompetitionId, f.originEntryId) })),
   };
 }
-module.exports = { key, source, observe, ingest, ingestObserved, federationImport, manual, decorate, _ingested: ingested };
+module.exports = {
+  key,
+  source,
+  observe,
+  ingest,
+  ingestObserved,
+  federationImport,
+  manual,
+  decorate,
+  _ingested: ingested,
+};

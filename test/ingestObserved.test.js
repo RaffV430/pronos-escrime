@@ -26,7 +26,10 @@ test('club ingest runs once per roster and never blocks the sync', async () => {
   assert.equal(await ingestObserved(ok, c, roster, 'https://x/1', 1000), false);
   assert.equal(ok.calls.tx, 1);
   assert.equal(ok.calls.options.timeout, 30000);
-  assert.equal(await ingestObserved(ok, c, [...roster, { id: 2, name: 'DURAND Chloé', country: 'FRA' }], 'https://x/1', 2000), true);
+  assert.equal(
+    await ingestObserved(ok, c, [...roster, { id: 2, name: 'DURAND Chloé', country: 'FRA' }], 'https://x/1', 2000),
+    true,
+  );
   assert.equal(await ingestObserved(ok, c, roster, 'https://x/1', 2000 + 7 * 3600000), true);
   const broken = db({ fail: true });
   _ingested.clear();

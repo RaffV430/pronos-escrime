@@ -33,7 +33,8 @@ router.post(
       if (error.status === 502 || error.status === 503) {
         require('../lib/report').reportError(error, 'formulaire support');
         return res.status(503).json({
-          error: 'Le message n’a pas pu être envoyé pour le moment. Réessayez plus tard ou écrivez à support@pronos-escrime.fr.',
+          error:
+            'Le message n’a pas pu être envoyé pour le moment. Réessayez plus tard ou écrivez à support@pronos-escrime.fr.',
         });
       }
       next(error);
