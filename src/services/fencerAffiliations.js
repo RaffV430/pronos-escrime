@@ -122,6 +122,27 @@ async function ingest(tx, c, observed = c.podiumRoster, sourceUrl = c.rosterSour
     if (!duplicate) await observe(tx, profile, { club: data.club, sourceUrl, observedAt });
   }
 }
+// Lecture des clubs à chaque contrôle officiel : seulement quand la liste des engagés a changé
+// (empreinte gardée en mémoire, relue au plus toutes les 6 h), hors du chemin critique : un échec
+// ou une lenteur ne bloque jamais la synchronisation des résultats.
+const ingested = new Map();
+const REINGEST = 6 * 3600000;
+async function ingestObserved(db, c, observed, sourceUrl, now = Date.now()) {
+  if (!db.fencerAffiliation || c.podiumFormat === 'TEAM' || !Array.isArray(observed) || !sourceUrl) return false;
+  const signature = hash(
+    JSON.stringify([sourceUrl, observed.map((e) => [e?.id, e?.name, e?.country, e?.club, e?.clubCode])]),
+  );
+  const last = ingested.get(c.id);
+  if (last && last.signature === signature && now - last.at < REINGEST) return false;
+  try {
+    await db.$transaction((tx) => ingest(tx, c, observed, sourceUrl), { timeout: 30000, maxWait: 10000 });
+    ingested.set(c.id, { signature, at: now });
+    return true;
+  } catch (error) {
+    require('../lib/report').reportError(error, 'affiliations des engagés', { competitionId: c.id });
+    return false;
+  }
+}
 async function federationImport(db, rows, actorId) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 1000)
     throw failure('Lot de 1 à 1 000 affiliations attendu.', 400);
@@ -264,4 +285,14 @@ async function decorate(db, competitions, favorites = []) {
     favorites: favorites.map((f) => ({ ...f, ...extra(f.originCompetitionId, f.originEntryId) })),
   };
 }
-module.exports = { key, source, observe, ingest, federationImport, manual, decorate };
+module.exports = {
+  key,
+  source,
+  observe,
+  ingest,
+  ingestObserved,
+  federationImport,
+  manual,
+  decorate,
+  _ingested: ingested,
+};
