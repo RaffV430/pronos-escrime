@@ -70,7 +70,16 @@ function createRouter(db) {
     auth,
     admin,
     run(async (req, res) =>
-      res.json(await service.decideRole(db, req.user.userId, req.body.userId, req.body.clubId, req.body.status)),
+      res.json(
+        await service.decideRole(
+          db,
+          req.user.userId,
+          req.body.userId,
+          req.body.clubId,
+          req.body.status,
+          req.body.comment,
+        ),
+      ),
     ),
   );
   router.put(
