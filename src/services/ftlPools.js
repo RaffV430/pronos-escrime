@@ -4,6 +4,17 @@ const { failure } = require('./ftlClient');
 const { poolPoints, validateResults, followsSource, sourceLock } = require('./poolRules');
 const { rescore } = require('./rescore');
 const WITHDRAWALS = new Set(['Failed to Appear', 'Medical Withdrawal']);
+// Sortie relevée sur la feuille officielle (FencingTimeLive ou engarde) → statut du tireur dans l'application.
+const OFFICIAL_STATUS = {
+  'Failed to Appear': 'ABSENT',
+  DNS: 'ABSENT',
+  'Medical Withdrawal': 'MEDICAL',
+  ABANDON: 'MEDICAL',
+  Excluded: 'EXCLUDED',
+  Exclusion: 'EXCLUDED',
+  EXCLUSION: 'EXCLUDED',
+};
+const officialStatus = (status) => OFFICIAL_STATUS[status] || null;
 const pattern = /^https:\/\/www\.fencingtimelive\.com\/pools\/scores\/([a-f0-9]{32})\/[a-f0-9]{32}$/i;
 // « On strip 10 at 9:00 AM » / « On strip 4 » : piste et heure locale du lieu (affichage seulement,
 // jamais bloquant). L'heure est convertie avec le fuseau de l'épreuve lors de l'import.
@@ -185,7 +196,9 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
       return [f, hits[0]];
     });
   else throw differs();
-  const size = kept.length;
+  // Taille de la poule pour le barème : celle de la feuille officielle (un tireur sorti en cours de poule
+  // y figure encore, ses matchs annulés sont alors pris en compte pour les autres).
+  const size = observed.rows.length;
   if (current.isFinal && !observed.complete) throw failure(`Résultat final retiré pour ${current.name}.`, 409);
   const predictions = observed.complete
     ? await tx.poolPrediction.findMany({ where: { fencerId: { in: current.fencers.map((f) => f.id) } } })
@@ -193,11 +206,17 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
   let locks = 0,
     pointsUpdated = 0,
     changed = 0;
+  // Statuts relevés automatiquement (absent, abandon, exclusion) : plus de pronostic, 0 point.
+  const marked = [];
   for (const [f, r] of pairs) {
     const data = {};
     if (r.firstResult && !f.firstResultAt && followsSource(current)) {
       data.firstResultAt = checkedAt;
       locks++;
+    }
+    if (r.absent && !f.status && officialStatus(r.status)) {
+      data.status = officialStatus(r.status);
+      marked.push({ id: f.id, name: f.name, status: data.status });
     }
     if (r.hasResult || r.absent) {
       // Un retrait en cours de poule annule les matchs déjà tirés : le bilan provisoire est effacé.
@@ -221,7 +240,7 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
       );
   }
   // Pronostics sur un tireur mis à part : neutralisés (0 point).
-  const aside = current.fencers.filter((f) => f.status).map((f) => f.id);
+  const aside = [...current.fencers.filter((f) => f.status).map((f) => f.id), ...marked.map((f) => f.id)];
   if (aside.length)
     pointsUpdated += (
       await tx.poolPrediction.updateMany({
@@ -258,6 +277,40 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
         : {}),
     },
   });
-  return { locks, pointsUpdated, changed, finalized: observed.complete && !current.isFinal ? 1 : 0 };
+  return {
+    locks,
+    pointsUpdated,
+    changed,
+    finalized: observed.complete && !current.isFinal ? 1 : 0,
+    statuses: marked.map((f) => ({ ...f, pool: current.name })),
+  };
 }
-module.exports = { parsePools, applyPool, pattern, stripTime };
+const STATUS_LABELS = { ABSENT: 'Absent', MEDICAL: 'Retrait médical', EXCLUDED: 'Exclu' };
+// Statuts posés d'après la feuille officielle : note du contrôle et trace dans le journal d'administration.
+async function recordStatuses(db, c, statuses, actorId, summary) {
+  if (!statuses?.length) return;
+  for (const f of statuses) {
+    const text = `${f.pool} : ${f.name} — ${STATUS_LABELS[f.status]} (relevé sur le suivi officiel, pronostics à 0 point).`;
+    summary.notes = [...(summary.notes || []), text];
+    if (actorId == null) continue;
+    await db.auditLog
+      .create({
+        data: {
+          actorId,
+          action: 'Statut de tireur relevé sur le suivi officiel',
+          targetType: 'Competition',
+          targetId: c.id,
+          after: { fencerId: f.id, name: f.name, pool: f.pool, status: f.status },
+        },
+      })
+      .catch(() => {});
+  }
+}
+module.exports = {
+  recordStatuses,
+  officialStatus,
+  parsePools,
+  applyPool,
+  pattern,
+  stripTime,
+};

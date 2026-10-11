@@ -4,7 +4,7 @@ const { createClient, failure, ORIGIN } = require('./ftlClient');
 const { parseTable, clean, norm, namedEntries } = require('./ftlParser');
 const events = require('./ftlEvents');
 const { configuration } = require('./ftlConfiguration');
-const { parsePools, applyPool, pattern: poolPattern } = require('./ftlPools');
+const { parsePools, applyPool, officialStatus, recordStatuses, pattern: poolPattern } = require('./ftlPools');
 const { localTime } = require('./localTime');
 const { captureRankings } = require('./rankingHistory');
 const { validateManifest } = require('./roundManifest');
@@ -846,13 +846,17 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           if (observed.startsAt) snapshot.startsAt = observed.startsAt;
           summary.checked++;
           for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
+          await recordStatuses(db, c, result.statuses, actorId, summary);
           // Forfait ou abandon médical en poule : alerte aux joueurs qui ont ce tireur sur leur podium.
           for (const r of observed.rows.filter((x) => x.absent)) {
             const hits = namedEntries(c.podiumRoster, r.name);
             if (hits.length === 1)
               summary.outs = [
                 ...(summary.outs || []),
-                { id: hits[0].id, status: r.status === 'Medical Withdrawal' ? 'ABANDON' : 'DNS' },
+                {
+                  id: hits[0].id,
+                  status: { MEDICAL: 'ABANDON', EXCLUDED: 'EXCLUSION' }[officialStatus(r.status)] || 'DNS',
+                },
               ];
           }
           if (observed.ambiguous)
