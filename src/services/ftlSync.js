@@ -877,7 +877,13 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
       ));
     } else {
       await client.login();
-      ({ c, config } = await require('./ftlTournament').refreshPending(db, c, config, actorId, client));
+      // Lecture de la page d'épreuve (tableau pas encore publié) : un échec ne doit pas bloquer les poules.
+      try {
+        ({ c, config } = await require('./ftlTournament').refreshPending(db, c, config, actorId, client));
+      } catch (e) {
+        if (!c.podiumRoster) throw e;
+        discoveryWarning = e.status ? e.message : 'Page officielle de l’épreuve illisible pour le moment.';
+      }
       try {
         ({ c, renames } = await require('./ftlRenames').reconcileRenames(db, c, config.eventId, client, actorId));
       } catch (e) {
