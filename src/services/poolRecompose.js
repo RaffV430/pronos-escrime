@@ -43,7 +43,7 @@ function planRecomposition(pools, url, observed, roster = [], label = (n) => `Po
     throw failure('Composition des poules modifiée après leur début : vérification manuelle nécessaire.', 409);
   for (const o of [...plan.changed.map((x) => x.observed), ...plan.added])
     for (const r of o.rows)
-      if (!r.absent && (roster || []).filter((e) => norm(e.name) === norm(r.name)).length !== 1)
+      if (!r.absent && require('./ftlParser').namedEntries(roster, r.name).length !== 1)
         throw failure(`${label(o.number)} modifiée : tireur absent ou ambigu dans les engagés.`, 409);
   const names = new Set(pools.filter((p) => p.sourceUrl !== url).map((p) => p.name));
   if (plan.added.some((o) => names.has(label(o.number))))

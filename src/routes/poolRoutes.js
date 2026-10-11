@@ -286,7 +286,9 @@ function createPoolRouter(db = prisma, { sourceCheck = require('../services/pool
         id(req.params.poolId),
         async (tx, pool) => {
           if (!closed(pool)) fail('Fermez les pronostics avant de publier les résultats.', 409);
-          const results = validateResults(req.body.results, pool.fencers);
+          // Tireurs absents, retirés ou exclus : hors bilan, leurs pronostics restent à 0.
+          const kept = pool.fencers.filter((f) => !f.status);
+          const results = validateResults(req.body.results, kept);
           const before = pool.fencers.map((f) => ({ id: f.id, name: f.name, wins: f.wins, indicator: f.indicator }));
           for (const { fencerId, ...data } of results) {
             await tx.poolFencer.update({ where: { id: fencerId }, data });
@@ -296,15 +298,48 @@ function createPoolRouter(db = prisma, { sourceCheck = require('../services/pool
               { fencerId },
               predictions,
               ['wins', 'indicator'],
-              (p) => poolPoints(p, data, pool.fencers.length).total,
+              (p) => poolPoints(p, data, kept.length).total,
             );
           }
+          const aside = pool.fencers.filter((f) => f.status).map((f) => f.id);
+          if (aside.length)
+            await tx.poolPrediction.updateMany({ where: { fencerId: { in: aside } }, data: { pointsEarned: 0 } });
           await tx.pool.update({ where: { id: pool.id }, data: { isLocked: true, isFinal: true } });
           await audit(req, 'Publication des résultats de poule', pool.id, { fencers: before }, { results }, tx);
         },
         { timeout: 30000 },
       );
       res.json({ message: 'Résultats publiés. Comparaisons et points recalculés.' });
+    }),
+  );
+  // Statut particulier d'un tireur (absent, retrait médical, exclu) : plus de pronostic possible sur lui,
+  // ses pronostics valent 0, et la poule se termine avec les autres tireurs.
+  const STATUSES = { ABSENT: 'Absent', MEDICAL: 'Retrait médical', EXCLUDED: 'Exclu' };
+  router.put(
+    '/:poolId/fencers/:fencerId/status',
+    admin,
+    handle(async (req, res) => {
+      const status = req.body?.status ?? null;
+      if (status !== null && !STATUSES[status]) fail('Statut inconnu.');
+      const fencerId = id(req.params.fencerId);
+      const result = await withPool(id(req.params.poolId), async (tx, pool) => {
+        const fencer = pool.fencers.find((f) => f.id === fencerId);
+        if (!fencer) fail('Tireur introuvable dans cette poule.', 404);
+        if (status && pool.fencers.filter((f) => f.status && f.id !== fencerId).length >= pool.fencers.length - 2)
+          fail('Une poule doit garder au moins deux tireurs.', 409);
+        await tx.poolFencer.update({ where: { id: fencerId }, data: { status } });
+        if (status) await tx.poolPrediction.updateMany({ where: { fencerId }, data: { pointsEarned: 0 } });
+        await audit(
+          req,
+          'Statut de tireur en poule',
+          pool.id,
+          { fencerId, name: fencer.name, status: fencer.status || null },
+          { fencerId, name: fencer.name, status },
+          tx,
+        );
+        return { fencerId, name: fencer.name, status, label: status ? STATUSES[status] : null };
+      });
+      res.json(result);
     }),
   );
   return router;

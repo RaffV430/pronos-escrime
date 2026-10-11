@@ -1,7 +1,7 @@
 const { reportError } = require('../lib/report');
 const { load } = require('cheerio');
 const { createClient, failure, ORIGIN } = require('./ftlClient');
-const { parseTable, clean, norm } = require('./ftlParser');
+const { parseTable, clean, norm, namedEntries } = require('./ftlParser');
 const events = require('./ftlEvents');
 const { configuration } = require('./ftlConfiguration');
 const { parsePools, applyPool, pattern: poolPattern } = require('./ftlPools');
@@ -732,7 +732,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           }
           observed.closeAtStart = Boolean(context.date) && config.timezone === 'Europe/Paris';
           for (const row of observed.rows)
-            if ((c.podiumRoster || []).filter((e) => norm(e.name) === norm(row.name)).length !== 1)
+            if (namedEntries(c.podiumRoster, row.name).length !== 1)
               throw failure('Composition de poule absente ou ambiguë dans les engagés.');
           let snapshot = pools.find((p) => p.sourceUrl === url && p.sourcePoolNumber === observed.number);
           if (!snapshot) {
@@ -821,7 +821,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
           // Forfait ou abandon médical en poule : alerte aux joueurs qui ont ce tireur sur leur podium.
           for (const r of observed.rows.filter((x) => x.absent)) {
-            const hits = (c.podiumRoster || []).filter((e) => norm(e.name) === norm(r.name));
+            const hits = namedEntries(c.podiumRoster, r.name);
             if (hits.length === 1)
               summary.outs = [
                 ...(summary.outs || []),

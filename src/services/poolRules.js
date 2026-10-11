@@ -51,6 +51,8 @@ function sourceUnavailable(pool, now = new Date(), start = null) {
   return !pool.sourceCheckedAt || now - new Date(pool.sourceCheckedAt) > SOURCE_WINDOW;
 }
 function fencerClosed(pool, fencer, now = new Date(), start = null) {
+  // Tireur absent, retiré ou exclu : plus de pronostic possible sur lui.
+  if (fencer.status) return true;
   return closed(pool, now) || Boolean(fencer.firstResultAt) || sourceUnavailable(pool, now, start);
 }
 function validateSource(sourceUrl, sourcePoolNumber) {
