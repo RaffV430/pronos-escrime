@@ -66,11 +66,10 @@ test('common grace waits for last sporting advancement, not later point validati
   ];
   const next = { competitionId: 1, round: 'T2' };
   assert.equal(closesAt(roundContext([...prior, next], rounds).at(-1)), '2026-10-05T10:10:00.000Z');
-  assert.equal(
-    roundContext([{ ...prior[0] }, { ...prior[1], progressionConfirmedAt: null }, next], rounds).at(-1)
-      .awaitingPreviousRound,
-    true,
-  );
+  // A match set aside for verification no longer holds the next round open: the competition goes on.
+  const setAside = roundContext([{ ...prior[0] }, { ...prior[1], progressionConfirmedAt: null }, next], rounds).at(-1);
+  assert.equal(setAside.awaitingPreviousRound, false);
+  assert.equal(closesAt(setAside), '2026-10-05T10:05:00.000Z');
   assert.equal(
     closesAt(
       roundContext(
