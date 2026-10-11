@@ -79,10 +79,8 @@ function createClient({
         const response = await request(url.href);
         if (response.status >= 300 && response.status < 400) {
           const next = new URL(response.headers.location || '/', url);
-          const allowed = new RegExp(
-            `^/(?:events/(?:view|competitors|format|results)/${id}|(?:pools|tableaus)/scores/${id}/[a-f0-9]{32})$`,
-            'i',
-          );
+          // Pages de la même épreuve uniquement (vue, engagés, résultats, poules, tableau…), sur FencingTimeLive.
+          const allowed = new RegExp(`^/(?:events|pools|tableaus)/[a-z]+/${id}(?:/[a-f0-9]{32})?/?$`, 'i');
           if (
             next.origin !== ORIGIN ||
             next.username ||
@@ -91,7 +89,9 @@ function createClient({
             next.hash ||
             !allowed.test(next.pathname)
           )
-            throw failure('Redirection officielle non vérifiable.');
+            throw failure(
+              `Redirection officielle non vérifiable (${next.origin === ORIGIN ? next.pathname.slice(0, 120) : 'autre site'}).`,
+            );
           url = next;
           continue;
         }
