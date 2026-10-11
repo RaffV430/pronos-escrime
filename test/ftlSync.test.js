@@ -209,3 +209,16 @@ test('tied official score retains explicit advancing winner, never fabricates a 
   assert.equal(calculateMatchPoints(10, 15, 2, 2, 1, 'NORMAL'), 0);
   assert.equal(calculateMatchPoints(15, 10, 2, 2, null, 'NORMAL'), 0);
 });
+test('official classification retains verified non-medal ranks without matching homonyms', () => {
+  const c = { podiumFormat: 'TEAM', podiumRoster: ['A', 'B', 'C', 'D'].map((name) => ({ id: name, name })) };
+  const rows = ['A', 'B', 'C', 'D'].map((name, i) => ({ id: name, name, place: i + 1 }));
+  const matches = [
+    { round: 'T2', isFinished: true, player1: 'A', player2: 'B', winner: 1 },
+    { round: 'Bronze', isFinished: true, player1: 'C', player2: 'D', winner: 1 },
+  ];
+  assert.equal(podiumFromResults(rows, c, matches).classification.find((r) => r.entryId === 'D').rank, 4);
+  assert.equal(
+    podiumFromResults([...rows.slice(0, 3), { ...rows[3], name: 'Homonym' }], c, matches).classification.length,
+    3,
+  );
+});
