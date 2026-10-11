@@ -167,13 +167,25 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
     ]);
   if (identity(current) !== identity(snapshot))
     throw failure('Composition ou source modifiée pendant le contrôle.', 409);
-  if (
-    current.fencers.length !== observed.rows.length ||
-    current.fencers.some(
-      (f, i) => f.position !== observed.rows[i].position || norm(f.name) !== norm(observed.rows[i].name),
-    )
-  )
-    throw failure(`Composition officielle différente pour ${current.name}.`, 409);
+  const differs = () => failure(`Composition officielle différente pour ${current.name}.`, 409);
+  const sameOrder =
+    current.fencers.length === observed.rows.length &&
+    current.fencers.every(
+      (f, i) => f.position === observed.rows[i].position && norm(f.name) === norm(observed.rows[i].name),
+    );
+  // Feuille officielle sans les tireurs mis à part par l'administration (absent, retrait, exclu) :
+  // les autres tireurs sont rapprochés par leur nom.
+  const kept = current.fencers.filter((f) => !f.status);
+  let pairs;
+  if (sameOrder) pairs = current.fencers.map((f, i) => [f, observed.rows[i]]);
+  else if (kept.length < current.fencers.length && kept.length === observed.rows.length)
+    pairs = kept.map((f) => {
+      const hits = observed.rows.filter((r) => norm(r.name) === norm(f.name));
+      if (hits.length !== 1) throw differs();
+      return [f, hits[0]];
+    });
+  else throw differs();
+  const size = kept.length;
   if (current.isFinal && !observed.complete) throw failure(`Résultat final retiré pour ${current.name}.`, 409);
   const predictions = observed.complete
     ? await tx.poolPrediction.findMany({ where: { fencerId: { in: current.fencers.map((f) => f.id) } } })
@@ -181,9 +193,8 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
   let locks = 0,
     pointsUpdated = 0,
     changed = 0;
-  for (const [i, f] of current.fencers.entries()) {
-    const r = observed.rows[i],
-      data = {};
+  for (const [f, r] of pairs) {
+    const data = {};
     if (r.firstResult && !f.firstResultAt && followsSource(current)) {
       data.firstResultAt = checkedAt;
       locks++;
@@ -200,15 +211,24 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
       });
       if (saved.count !== 1) throw failure('Tireur modifié pendant l’import.', 409);
     }
-    if (observed.complete && !r.absent)
+    if (observed.complete && !r.absent && !f.status)
       pointsUpdated += await rescore(
         tx.poolPrediction,
         { fencerId: f.id },
         predictions.filter((p) => p.fencerId === f.id),
         ['wins', 'indicator'],
-        (p) => poolPoints(p, r, current.fencers.length).total,
+        (p) => poolPoints(p, r, size).total,
       );
   }
+  // Pronostics sur un tireur mis à part : neutralisés (0 point).
+  const aside = current.fencers.filter((f) => f.status).map((f) => f.id);
+  if (aside.length)
+    pointsUpdated += (
+      await tx.poolPrediction.updateMany({
+        where: { fencerId: { in: aside }, pointsEarned: { not: 0 } },
+        data: { pointsEarned: 0 },
+      })
+    ).count;
   // A missing reciprocal score does not refresh source freshness, but certain first-result locks persist.
   // Clôture à l'heure annoncée (épreuves en France) : suit l'heure officielle tant que la poule est ouverte.
   const lock =

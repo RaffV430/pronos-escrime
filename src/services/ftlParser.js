@@ -7,6 +7,14 @@ const clean = (s) =>
     .replace(/\s+/g, ' ')
     .trim();
 const norm = (s) => clean(s).toLowerCase();
+// Engagés portant ce nom. Inscription en double sur la source : celle écartée par l'administration
+// (active: false) est ignorée tant qu'une autre inscription du même nom reste retenue.
+function namedEntries(roster, name) {
+  const hits = (roster || []).filter((e) => norm(e.name) === norm(name));
+  if (hits.length < 2) return hits;
+  const kept = hits.filter((e) => e.active !== false);
+  return kept.length ? kept : hits;
+}
 const name = ($, cell) =>
   clean(
     $(cell)
@@ -48,7 +56,7 @@ function parseTable(
       .map((i, e) => clean($(e).text()))
       .get();
   const findEntry = (text) => {
-    const hits = roster.filter((r) => norm(r.name) === norm(text));
+    const hits = namedEntries(roster, text);
     if (hits.length !== 1) throw failure(`Nom officiel ambigu ou absent des engagés : ${text}.`);
     return hits[0];
   };
@@ -201,4 +209,4 @@ function parseTable(
     throw failure('Les derniers tours du tableau sont absents.');
   return { matches: out, rounds, ...(issues.length ? { issues } : {}) };
 }
-module.exports = { parseTable, roundName, clean, norm };
+module.exports = { parseTable, roundName, clean, norm, namedEntries };

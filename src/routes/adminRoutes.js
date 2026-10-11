@@ -335,4 +335,30 @@ router.post(
   }),
 );
 
+// Écarts mis de côté pendant une épreuve : matchs de tableau à vérifier et inscriptions en double.
+const review = require('../services/adminReview');
+router.get(
+  '/reviews/matches',
+  wrap(async (req, res) => res.json(await review.matchReviews(prisma, req.query.competitionId || null))),
+);
+router.post(
+  '/reviews/matches/:id/winner',
+  wrap(async (req, res) =>
+    res.json(await review.awardWinner(prisma, req.params.id, Number(req.body?.winner), req.user.userId)),
+  ),
+);
+router.post(
+  '/reviews/matches/:id/close',
+  wrap(async (req, res) => res.json(await review.closeWithoutPoints(prisma, req.params.id, req.user.userId))),
+);
+router.get(
+  '/reviews/duplicates/:competitionId',
+  wrap(async (req, res) => res.json(await review.duplicates(prisma, req.params.competitionId))),
+);
+router.post(
+  '/reviews/duplicates/:competitionId/keep',
+  wrap(async (req, res) =>
+    res.json(await review.keepEntry(prisma, req.params.competitionId, req.body?.entryId, req.user.userId)),
+  ),
+);
 module.exports = router;

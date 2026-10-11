@@ -193,6 +193,7 @@ model PoolFencer {
   firstResultAt DateTime?
   countryCode   String?
   ranking       Int?
+  status        String?
   predictions   PoolPrediction[]
 
   @@unique([poolId, position])

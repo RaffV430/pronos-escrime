@@ -37,7 +37,14 @@ function matchRow(p) {
     prediction: `${p.predictedScore1} – ${p.predictedScore2}`,
   };
   if (m.resultType === 'CANCELLED')
-    return { ...base, outcome: 'cancelled', result: 'Affiche annulée', points: 0, details: [] };
+    return {
+      ...base,
+      outcome: 'cancelled',
+      // Affiche corrigée après coup : le point du bon vainqueur, validé par l'administration, est conservé.
+      result: p.pointsEarned ? 'Affiche corrigée · vainqueur validé' : 'Affiche annulée',
+      points: p.pointsEarned || 0,
+      details: [],
+    };
   if (m.pointsPending)
     return { ...base, outcome: 'pending', result: 'Points en attente de validation', points: null, details: [] };
   if (!m.isFinished) return { ...base, outcome: 'pending', result: null, points: null, details: [] };
