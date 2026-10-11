@@ -8,7 +8,7 @@ const { parsePools, applyPool, pattern: poolPattern } = require('./ftlPools');
 const { localTime } = require('./localTime');
 const { captureRankings } = require('./rankingHistory');
 const { validateManifest } = require('./roundManifest');
-const { calculateMatchPoints } = require('./matchPoints');
+const { calculateMatchPoints, MATCH_KEYS } = require('./matchPoints');
 const { rescore } = require('./rescore');
 const { applyOutsiderBonus } = require('./outsider');
 const podiumRules = require('./podiumRules');
@@ -414,7 +414,7 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
         tx.prediction,
         { matchId: issue.id },
         predictions,
-        ['predictedScore1', 'predictedScore2'],
+        MATCH_KEYS,
         () => 0,
         field,
       );
@@ -524,7 +524,7 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
           tx.prediction,
           { matchId: saved.id },
           predictions,
-          ['predictedScore1', 'predictedScore2'],
+          MATCH_KEYS,
           () => 0,
           field,
         );
@@ -537,10 +537,17 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
         tx.prediction,
         { matchId: saved.id },
         predictions,
-        ['predictedScore1', 'predictedScore2'],
+        MATCH_KEYS,
         (p) =>
-          calculateMatchPoints(p.predictedScore1, p.predictedScore2, o.score1, o.score2, o.winner, o.resultType) *
-          (saved.pointsMultiplier || 1),
+          calculateMatchPoints(
+            p.predictedScore1,
+            p.predictedScore2,
+            o.score1,
+            o.score2,
+            o.winner,
+            o.resultType,
+            p.winnerOnly,
+          ) * (saved.pointsMultiplier || 1),
       );
       // Bonus outsider, calculé à la publication du résultat.
       summary.pointsUpdated += await applyOutsiderBonus(

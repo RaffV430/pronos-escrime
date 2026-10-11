@@ -187,7 +187,10 @@ function createPoolRouter(db = prisma, { sourceCheck = require('../services/pool
               : 'Les pronostics de ce tireur sont clos.',
             409,
           );
-        const data = { ...validatePrediction(req.body, pool.fencers.length), savedAt: new Date() };
+        const data = {
+          ...validatePrediction(req.body, pool.fencers.length, { optionalIndicator: true }),
+          savedAt: new Date(),
+        };
         return tx.poolPrediction.upsert({
           where: { userId_fencerId: { userId: req.user.userId, fencerId } },
           create: { userId: req.user.userId, fencerId, ...data },

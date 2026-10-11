@@ -1,8 +1,8 @@
 const router = require('express').Router(),
   db = require('../lib/prisma');
-const { id, fencerClosed, poolPoints } = require('../services/poolRules');
+const { id, fencerClosed, poolPoints, poolPredictionText } = require('../services/poolRules');
 const { matchClosed, closesAt, podiumClosed } = require('../lib/matchLock');
-const { calculateMatchPoints } = require('../services/matchPoints');
+const { calculateMatchPoints, predictionText } = require('../services/matchPoints');
 const { fields, verifiedPodium, predictionIds } = require('../services/podiumRules');
 const { timedMatches } = require('../services/roundTiming');
 const { standings } = require('../services/standings');
@@ -46,7 +46,7 @@ async function competitionPredictions(competition, userId) {
           name: `${m.player1} / ${m.player2}`,
           round: m.round,
           status: 'Annulé',
-          prediction: `${p.predictedScore1} – ${p.predictedScore2}`,
+          prediction: predictionText(p, m),
           result: 'Affiche retirée du tableau officiel',
           points: 0,
           details: ['Tableau officiel modifié : ancien pronostic annulé, sans attribution ni retrait de points.'],
@@ -70,9 +70,13 @@ async function competitionPredictions(competition, userId) {
         m.score2,
         m.winner,
         m.resultType,
+        p.winnerOnly,
       );
       const exact =
-        m.resultType !== 'MEDICAL_WITHDRAWAL' && p.predictedScore1 === m.score1 && p.predictedScore2 === m.score2;
+        m.resultType !== 'MEDICAL_WITHDRAWAL' &&
+        !p.winnerOnly &&
+        p.predictedScore1 === m.score1 &&
+        p.predictedScore2 === m.score2;
       const k = m.pointsMultiplier || 1;
       details = [`Bon vainqueur : +${(total - (exact ? 3 : 0)) * k}`, `Score exact : +${(exact ? 3 : 0) * k}`];
       if (p.bonusPoints) details.push(`Bonus outsider : +${p.bonusPoints}`);
@@ -92,7 +96,7 @@ async function competitionPredictions(competition, userId) {
             : p
               ? 'Enregistré'
               : 'À compléter',
-      prediction: p ? `${p.predictedScore1} – ${p.predictedScore2}` : null,
+      prediction: predictionText(p, m),
       result: m.pointsPending
         ? 'Points en attente de validation'
         : finished
@@ -124,7 +128,7 @@ async function competitionPredictions(competition, userId) {
         type: 'Poule',
         name: `${pool.name} · ${f.name}`,
         status: pool.isFinal ? 'Terminé' : closed ? 'Clos' : p ? 'Enregistré' : 'À compléter',
-        prediction: p ? `${p.wins} V · indice ${p.indicator}` : null,
+        prediction: poolPredictionText(p),
         result: pool.isFinal ? `${f.wins} V · indice ${f.indicator}` : null,
         points: pts ? p.pointsEarned : null,
         details: pts
@@ -362,6 +366,7 @@ router.get('/summary/:tournamentId', async (req, res) => {
     const exact = predictions.filter(
       (p) =>
         p.match.resultType !== 'MEDICAL_WITHDRAWAL' &&
+        !p.winnerOnly &&
         p.predictedScore1 === p.match.score1 &&
         p.predictedScore2 === p.match.score2,
     ).length;
@@ -374,6 +379,7 @@ router.get('/summary/:tournamentId', async (req, res) => {
           p.match.score2,
           p.match.winner,
           p.match.resultType,
+          p.winnerOnly,
         ) > 0,
     ).length;
     const progress = await require('../services/rankingHistory').rankProgress(db, tournamentId, userId);

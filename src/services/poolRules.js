@@ -8,15 +8,19 @@ function id(value) {
   if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > 2147483647) fail('Identifiant invalide.');
   return parsed;
 }
-function validatePrediction(value, size) {
-  if (!value || ![value.wins, value.losses, value.indicator].every(Number.isInteger)) {
+// optionalIndicator : pronostic simplifié, les victoires seules suffisent (l'indice ne rapporte alors rien).
+function validatePrediction(value, size, { optionalIndicator = false } = {}) {
+  const skipped = optionalIndicator && value && (value.indicator === null || value.indicator === undefined);
+  if (!value || ![value.wins, value.losses, ...(skipped ? [] : [value.indicator])].every(Number.isInteger)) {
     fail('Victoires, défaites et indice doivent être des entiers.');
   }
-  const { wins, losses, indicator } = value;
+  const { wins, losses } = value;
+  const indicator = skipped ? null : value.indicator;
   const bouts = size - 1;
   if (wins < 0 || losses < 0 || wins + losses !== bouts) {
     fail(`Victoires + défaites doivent être égales à ${bouts}.`);
   }
+  if (skipped) return { wins, losses, indicator };
   // Poules en cinq touches : chaque victoire contribue de +1 à +5,
   // chaque défaite de -5 à -1, y compris les victoires au temps.
   if (indicator < wins - 5 * losses || indicator > 5 * wins - losses) {
@@ -83,8 +87,8 @@ function comparison(prediction, fencer, final, size = null) {
     points,
     winsCorrect: compared.wins === fencer.wins,
     lossesCorrect: prediction.losses === fencer.losses,
-    indicatorCorrect: compared.indicator === fencer.indicator,
-    indicatorDifference: compared.indicator - fencer.indicator,
+    indicatorCorrect: compared.indicator != null && compared.indicator === fencer.indicator,
+    indicatorDifference: compared.indicator == null ? null : compared.indicator - fencer.indicator,
   };
 }
 function validateResults(rows, fencers) {
@@ -120,20 +124,28 @@ function adjustForAnnulled(prediction, result, size) {
     annulled = size - 1 - bouts;
   if (annulled <= 0 || bouts <= 0) return null;
   const wins = Math.min(prediction.wins, bouts);
-  const indicator = prediction.indicator + annulled * (wins * 2 >= bouts ? -5 : 5);
+  const indicator =
+    prediction.indicator == null ? null : prediction.indicator + annulled * (wins * 2 >= bouts ? -5 : 5);
   return { wins, indicator, annulled };
 }
 function poolPoints(prediction, result, size = null) {
   const adjusted = adjustForAnnulled(prediction, result, size);
   const compared = adjusted || prediction;
   const winDifference = Math.abs(compared.wins - result.wins);
-  const indicatorDifference = Math.abs(compared.indicator - result.indicator);
   const winsPoints = winDifference === 0 ? 3 : winDifference === 1 ? 1 : 0;
+  // Victoires seules (indice non saisi) : pas de points d'indice.
+  if (compared.indicator == null)
+    return { winsPoints, indicatorPoints: 0, total: winsPoints, ...(adjusted ? { adjusted } : {}) };
+  const indicatorDifference = Math.abs(compared.indicator - result.indicator);
   const indicatorPoints =
     indicatorDifference === 0 ? 5 : indicatorDifference <= 3 ? 3 : indicatorDifference <= 5 ? 1 : 0;
   return { winsPoints, indicatorPoints, total: winsPoints + indicatorPoints, ...(adjusted ? { adjusted } : {}) };
 }
+// Texte d'un pronostic de poule : « 3 V · indice +4 » ou « 3 V » (victoires seules).
+const poolPredictionText = (p) =>
+  p ? (p.indicator == null ? `${p.wins} V` : `${p.wins} V · indice ${p.indicator}`) : null;
 module.exports = {
+  poolPredictionText,
   START_LOCK,
   PROVISIONAL,
   followsSource,

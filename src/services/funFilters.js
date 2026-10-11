@@ -16,6 +16,17 @@ const side = (a, b) => (a > b ? 1 : b > a ? 2 : 0);
 
 function funTags(p, m) {
   if (!scored(p, m)) return [];
+  // Vainqueur seul : pas de score à comparer, seuls « Coup de poker » et « Sur le fil » s'appliquent.
+  if (p.winnerOnly) {
+    const won = side(m.score1, m.score2) || m.winner;
+    const picked = side(p.predictedScore1, p.predictedScore2);
+    if (picked !== won) return [];
+    const [mine, other] = picked === 1 ? [m.seed1, m.seed2] : [m.seed2, m.seed1];
+    return [
+      ...(Number.isInteger(mine) && Number.isInteger(other) && mine > other ? ['poker'] : []),
+      ...(Math.abs(m.score1 - m.score2) === 1 ? ['wire'] : []),
+    ];
+  }
   const [a, b, x, y] = [p.predictedScore1, p.predictedScore2, m.score1, m.score2];
   const picked = side(a, b),
     won = side(x, y) || ([1, 2].includes(m.winner) ? m.winner : 0);
@@ -31,6 +42,8 @@ function funTags(p, m) {
 }
 
 const scoreGap = (p, m) =>
-  scored(p, m) ? Math.abs(p.predictedScore1 - m.score1) + Math.abs(p.predictedScore2 - m.score2) : null;
+  scored(p, m) && !p.winnerOnly
+    ? Math.abs(p.predictedScore1 - m.score1) + Math.abs(p.predictedScore2 - m.score2)
+    : null;
 
 module.exports = { funTags, scoreGap };
