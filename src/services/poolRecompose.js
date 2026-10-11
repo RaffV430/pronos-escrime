@@ -116,6 +116,7 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
         const created = await tx.pool.create({
           data: {
             competitionId: c.id,
+            pointsMultiplier: require('./pointsBoost').multiplierFor(c, 'POOL'),
             name: (plan.label || ((n) => `Poule ${n}`))(observed.number),
             closesAt: new Date(`${config.date}T00:00:00Z`),
             lockMode: 'FIRST_RESULT',

@@ -38,7 +38,9 @@ function statements(sql) {
 function checkSafety(file, stmts, expected) {
   // « ON DELETE CASCADE » / « ON UPDATE … » d'une clé étrangère ne suppriment rien : ignorés.
   const referential = /\bON\s+(DELETE|UPDATE)\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)\b/gi;
-  const destructive = stmts.filter((s) => DESTRUCTIVE.test(s.replace(referential, '')));
+  // « DROP NOT NULL » rend une colonne facultative : rien n'est supprimé, compatible avec l'ancien code.
+  const relaxing = /\bALTER\s+COLUMN\s+"?\w+"?\s+DROP\s+NOT\s+NULL\b/gi;
+  const destructive = stmts.filter((s) => DESTRUCTIVE.test(s.replace(referential, '').replace(relaxing, '')));
   if (destructive.length && !file.includes('__destructif'))
     throw fail(`${file} : instruction destructive sans « __destructif » dans le nom du fichier.`);
   for (const s of destructive) {

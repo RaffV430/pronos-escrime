@@ -579,7 +579,9 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
   const { id, kind, round } = delivery;
   const cancel = () => db.pushDelivery.updateMany({ where: { id, status: 'SENDING' }, data: { status: 'CANCELLED' } });
   // Alerte personnelle (tireur de son podium hors tableau) : envoyée même sans suivre l'épreuve.
-  if (!sub?.enabled || !c || (!['PODIUM_OUT', 'FENCER_ENTRY'].includes(kind) && !follows(sub, c))) return cancel();
+  // Points ×2 : les appareils ont été choisis à l'activation (suivi de l'épreuve ou du tournoi).
+  if (!sub?.enabled || !c || (!['PODIUM_OUT', 'FENCER_ENTRY', 'BOOST'].includes(kind) && !follows(sub, c)))
+    return cancel();
   if (kind === 'PODIUM_OUT') {
     const m = /^podium-out-([A-Z]+)-(.+)$/.exec(round || '');
     const { podiumClosed } = require('../lib/matchLock');
@@ -609,6 +611,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     }
     return;
   }
+  if (kind === 'BOOST') return deliverBoost(db, delivery, sub, c, sender, cancel);
   const prefs = preferences(sub.preferences || {});
   const names = prefs.fencersOnly && kind !== 'FENCER_ENTRY' ? await namesFor(db, sub, c) : null;
   if (
@@ -849,6 +852,37 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
   } else return cancel();
   try {
     await sender(sub, content, ttl, URGENT.has(kind) ? 'high' : 'normal');
+    await db.pushDelivery.updateMany({
+      where: { id, status: 'SENDING' },
+      data: { status: 'SENT', sentAt: new Date() },
+    });
+  } catch (e) {
+    if ([404, 410].includes(e.statusCode))
+      await db.pushSubscription.update({ where: { id: sub.id }, data: { enabled: false } });
+    const retry = ![400, 401, 403, 404, 410].includes(e.statusCode) && delivery.attempts < 3;
+    await db.pushDelivery.updateMany({
+      where: { id, status: 'SENDING' },
+      data: {
+        status: retry ? 'PENDING' : 'FAILED',
+        nextAttemptAt: new Date(Date.now() + 60000 * 2 ** delivery.attempts),
+      },
+    });
+  }
+}
+// Points ×2 annoncés : envoyé aux appareils qui suivent l'épreuve, après les heures calmes s'il le faut,
+// et jamais si le doublement a été retiré entre-temps ou date de plus de 12 heures.
+async function deliverBoost(db, delivery, sub, c, sender, cancel) {
+  const { id } = delivery;
+  if (Date.now() - delivery.createdAt.getTime() > 12 * 3600000) return cancel();
+  const content = await require('./pointsBoost').boostNotification(db, c, delivery.round);
+  if (!content) return cancel();
+  if (isQuiet(preferences(sub.preferences || {})))
+    return db.pushDelivery.updateMany({
+      where: { id, status: 'SENDING' },
+      data: { status: 'PENDING', attempts: { decrement: 1 }, nextAttemptAt: new Date(Date.now() + 15 * 60000) },
+    });
+  try {
+    await sender(sub, { ...content, tag: `pronos-${id}` }, 3 * 3600, 'high');
     await db.pushDelivery.updateMany({
       where: { id, status: 'SENDING' },
       data: { status: 'SENT', sentAt: new Date() },

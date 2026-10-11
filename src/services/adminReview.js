@@ -136,7 +136,7 @@ async function awardWinner(db, matchId, winner, actorId) {
     const predictions = await tx.prediction.findMany({ where: { matchId: m.id } });
     let awarded = 0;
     for (const p of predictions) {
-      const points = predictedWinner(p) === winner ? 1 : 0;
+      const points = predictedWinner(p) === winner ? m.pointsMultiplier || 1 : 0;
       awarded += points;
       if (p.pointsEarned !== points || p.bonusPoints)
         await tx.prediction.update({ where: { id: p.id }, data: { pointsEarned: points, bonusPoints: 0 } });

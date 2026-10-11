@@ -108,7 +108,9 @@ async function resolvePodium(tx, competitionId) {
     const selected = predictionIds(competition, prediction);
     await tx.podiumPrediction.update({
       where: { id: prediction.id },
-      data: { pointsEarned: podiumPoints(competition.podiumFormat, selected, official) },
+      data: {
+        pointsEarned: podiumPoints(competition.podiumFormat, selected, official) * (competition.podiumMultiplier || 1),
+      },
     });
   }
   await tx.competition.update({

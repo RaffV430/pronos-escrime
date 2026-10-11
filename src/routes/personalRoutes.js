@@ -1,13 +1,14 @@
 const router = require('express').Router(),
   db = require('../lib/prisma');
-const { id, fencerClosed, poolPoints } = require('../services/poolRules');
+const { id, fencerClosed, poolPoints, poolPredictionText } = require('../services/poolRules');
 const { matchClosed, closesAt, podiumClosed } = require('../lib/matchLock');
-const { calculateMatchPoints } = require('../services/matchPoints');
+const { calculateMatchPoints, predictionText } = require('../services/matchPoints');
 const { fields, verifiedPodium, predictionIds } = require('../services/podiumRules');
 const { timedMatches } = require('../services/roundTiming');
 const { standings } = require('../services/standings');
 const { buildSeason } = require('../services/season');
 const { computeBadges } = require('../services/badges');
+const { funTags, scoreGap } = require('../services/funFilters');
 router.use(require('../middleware/auth'));
 const { reportError } = require('../lib/report');
 // Lignes « Mes pronostics » d'une épreuve : matchs, poules et podium, avec statut et points.
@@ -45,7 +46,7 @@ async function competitionPredictions(competition, userId) {
           name: `${m.player1} / ${m.player2}`,
           round: m.round,
           status: 'Annulé',
-          prediction: `${p.predictedScore1} – ${p.predictedScore2}`,
+          prediction: predictionText(p, m),
           result: 'Affiche retirée du tableau officiel',
           points: 0,
           details: ['Tableau officiel modifié : ancien pronostic annulé, sans attribution ni retrait de points.'],
@@ -69,11 +70,17 @@ async function competitionPredictions(competition, userId) {
         m.score2,
         m.winner,
         m.resultType,
+        p.winnerOnly,
       );
       const exact =
-        m.resultType !== 'MEDICAL_WITHDRAWAL' && p.predictedScore1 === m.score1 && p.predictedScore2 === m.score2;
-      details = [`Bon vainqueur : +${total - (exact ? 3 : 0)}`, `Score exact : +${exact ? 3 : 0}`];
+        m.resultType !== 'MEDICAL_WITHDRAWAL' &&
+        !p.winnerOnly &&
+        p.predictedScore1 === m.score1 &&
+        p.predictedScore2 === m.score2;
+      const k = m.pointsMultiplier || 1;
+      details = [`Bon vainqueur : +${(total - (exact ? 3 : 0)) * k}`, `Score exact : +${(exact ? 3 : 0) * k}`];
       if (p.bonusPoints) details.push(`Bonus outsider : +${p.bonusPoints}`);
+      if (k > 1) details.push(`Points ×${k}`);
     }
     rows.push({
       key: `match-${m.id}`,
@@ -89,7 +96,7 @@ async function competitionPredictions(competition, userId) {
             : p
               ? 'Enregistré'
               : 'À compléter',
-      prediction: p ? `${p.predictedScore1} – ${p.predictedScore2}` : null,
+      prediction: predictionText(p, m),
       result: m.pointsPending
         ? 'Points en attente de validation'
         : finished
@@ -99,6 +106,9 @@ async function competitionPredictions(competition, userId) {
           : null,
       points: p && finished ? p.pointsEarned + (p.bonusPoints || 0) : null,
       details,
+      multiplier: m.pointsMultiplier || 1,
+      tags: funTags(p, m),
+      scoreGap: scoreGap(p, m),
       startsAt: m.startsAt,
       closesAt: closesAt(m),
       manualUnlockUntil: m.manualUnlockUntil,
@@ -118,10 +128,17 @@ async function competitionPredictions(competition, userId) {
         type: 'Poule',
         name: `${pool.name} · ${f.name}`,
         status: pool.isFinal ? 'Terminé' : closed ? 'Clos' : p ? 'Enregistré' : 'À compléter',
-        prediction: p ? `${p.wins} V · indice ${p.indicator}` : null,
+        prediction: poolPredictionText(p),
         result: pool.isFinal ? `${f.wins} V · indice ${f.indicator}` : null,
         points: pts ? p.pointsEarned : null,
-        details: pts ? [`Victoires : +${pts.winsPoints}`, `Indice : +${pts.indicatorPoints}`] : [],
+        details: pts
+          ? [
+              `Victoires : +${pts.winsPoints * (pool.pointsMultiplier || 1)}`,
+              `Indice : +${pts.indicatorPoints * (pool.pointsMultiplier || 1)}`,
+              ...(pool.pointsMultiplier > 1 ? [`Points ×${pool.pointsMultiplier}`] : []),
+            ]
+          : [],
+        multiplier: pool.pointsMultiplier || 1,
         sourceCheckedAt: pool.sourceCheckedAt,
         sourceUrl: pool.sourceUrl,
       });
@@ -140,8 +157,9 @@ async function competitionPredictions(competition, userId) {
         const exact = k.startsWith('bronze')
           ? [official.bronze1, official.bronze2].includes(selected[k])
           : official[k] === selected[k];
-        return `${slotNames[k]} · ${podium[k]} : +${exact ? 15 : all.includes(selected[k]) ? 5 : 0}`;
+        return `${slotNames[k]} · ${podium[k]} : +${(exact ? 15 : all.includes(selected[k]) ? 5 : 0) * (competition.podiumMultiplier || 1)}`;
       });
+      if (competition.podiumMultiplier > 1) details.push(`Points ×${competition.podiumMultiplier}`);
     } catch {
       details = ['Ancien choix à vérifier par l’administrateur.'];
     }
@@ -169,11 +187,16 @@ async function competitionPredictions(competition, userId) {
       : null,
     points: podium && competition.podiumResolvedAt ? podium.pointsEarned : null,
     details,
+    multiplier: competition.podiumMultiplier || 1,
     sourceCheckedAt: competition.resultsVerifiedAt,
     sourceUrl: competition.resultsSourceUrl,
   });
   return {
-    competition: { id: competition.id, name: competition.name },
+    competition: {
+      id: competition.id,
+      name: competition.name,
+      pointsBoosts: require('../services/pointsBoost').publicBoosts(competition),
+    },
     rows,
     rounds: require('../services/playerExperience').roundSummaries(matches, rounds),
   };
@@ -214,7 +237,7 @@ router.get('/predictions/all', async (req, res) => {
       const active = rows.filter((r) => r.status !== 'Annulé');
       events.push({
         tournament: { id: c.tournament.id, name: c.tournament.name, archived: !!c.tournament.archivedAt },
-        competition: { id: c.id, name: c.name },
+        competition: { id: c.id, name: c.name, pointsBoosts: computed[i].competition.pointsBoosts },
         saved: active.filter((r) => r.prediction).length,
         toComplete: active.filter((r) => r.status === 'À compléter').length,
         points: rows.reduce((sum, r) => sum + (r.points || 0), 0),
@@ -247,7 +270,7 @@ async function competitionRecap(competition, userId) {
   const podium = scored.filter((r) => r.type === 'Podium');
   if (podium.length) phases.push({ phase: 'Podium', points: sum(podium), count: 1 });
   const matches = scored.filter((r) => r.type === 'Match' && r.status === 'Terminé');
-  const exact = matches.filter((r) => r.details.some((d) => d === 'Score exact : +3')).length;
+  const exact = matches.filter((r) => r.tags?.includes('exact')).length;
   const winners = matches.filter((r) => r.points > 0).length;
   const best = [...scored].sort((a, b) => b.points - a.points)[0] || null;
   const table = await standings(db, { competitionId: competition.id });
@@ -343,6 +366,7 @@ router.get('/summary/:tournamentId', async (req, res) => {
     const exact = predictions.filter(
       (p) =>
         p.match.resultType !== 'MEDICAL_WITHDRAWAL' &&
+        !p.winnerOnly &&
         p.predictedScore1 === p.match.score1 &&
         p.predictedScore2 === p.match.score2,
     ).length;
@@ -355,6 +379,7 @@ router.get('/summary/:tournamentId', async (req, res) => {
           p.match.score2,
           p.match.winner,
           p.match.resultType,
+          p.winnerOnly,
         ) > 0,
     ).length;
     const progress = await require('../services/rankingHistory').rankProgress(db, tournamentId, userId);

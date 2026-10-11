@@ -8,6 +8,11 @@ function summarizeCrowd(rows) {
     const s = byMatch.get(r.matchId) || { total: 0, winner1: 0, top: null };
     s.total += count;
     if (r.predictedScore1 > r.predictedScore2) s.winner1 += count;
+    // Pronostic « vainqueur seul » : compte pour la tendance, pas pour le score le plus pronostiqué.
+    if (r.winnerOnly) {
+      byMatch.set(r.matchId, s);
+      continue;
+    }
     if (
       !s.top ||
       count > s.top.count ||
@@ -27,7 +32,7 @@ function summarizeCrowd(rows) {
 async function crowdFor(db, matchIds) {
   if (!matchIds.length) return {};
   const rows = await db.prediction.groupBy({
-    by: ['matchId', 'predictedScore1', 'predictedScore2'],
+    by: ['matchId', 'predictedScore1', 'predictedScore2', 'winnerOnly'],
     where: { matchId: { in: matchIds } },
     _count: { _all: true },
   });

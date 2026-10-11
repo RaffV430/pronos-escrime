@@ -38,14 +38,15 @@ function crowdIsOutsider(crowd, winner, resultType) {
 }
 
 // Écrit bonusPoints pour tous les pronostics du match. Renvoie le nombre de pronostics modifiés.
-async function applyOutsiderBonus(model, matchId, predictions, winner, resultType) {
+// multiplier : points doublés (×2) sur ce match.
+async function applyOutsiderBonus(model, matchId, predictions, winner, resultType, multiplier = 1) {
   const rule = outsiderRule(predictions, winner, resultType);
   return rescore(
     model,
     { matchId },
     predictions,
-    ['predictedScore1', 'predictedScore2'],
-    (p) => (rule.eligible && predictedWinner(p) === winner ? OUTSIDER_BONUS : 0),
+    ['predictedScore1', 'predictedScore2', 'winnerOnly'],
+    (p) => (rule.eligible && predictedWinner(p) === winner ? OUTSIDER_BONUS * multiplier : 0),
     'bonusPoints',
   );
 }

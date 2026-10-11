@@ -194,8 +194,12 @@ router.get('/:id/h2h', authMiddleware, async (req, res) => {
 router.post('/:id/predict', authMiddleware, async (req, res) => {
   const matchId = Number(req.params.id);
   const userId = req.user.userId;
-  const predictedScore1 = req.body.predictedScore1;
-  const predictedScore2 = req.body.predictedScore2;
+  // Pronostic simplifié : seul le vainqueur (1 ou 2) est désigné, le score est facultatif.
+  const winnerOnly = req.body.predictedScore1 == null && req.body.predictedScore2 == null && req.body.winner != null;
+  if (winnerOnly && ![1, 2].includes(req.body.winner))
+    return res.status(400).json({ error: 'Désignez le vainqueur (1 ou 2).' });
+  const predictedScore1 = winnerOnly ? (req.body.winner === 1 ? 1 : 0) : req.body.predictedScore1;
+  const predictedScore2 = winnerOnly ? (req.body.winner === 2 ? 1 : 0) : req.body.predictedScore2;
 
   if (
     !Number.isInteger(matchId) ||
@@ -223,8 +227,8 @@ router.post('/:id/predict', authMiddleware, async (req, res) => {
         return { status: 400, body: { error: `Scores distincts entre 0 et ${maxScore} requis.` } };
       const prediction = await tx.prediction.upsert({
         where: { userId_matchId: { userId: userId, matchId: matchId } },
-        update: { predictedScore1, predictedScore2, pointsEarned: 0, bonusPoints: 0 },
-        create: { userId: userId, matchId: matchId, predictedScore1, predictedScore2 },
+        update: { predictedScore1, predictedScore2, winnerOnly, pointsEarned: 0, bonusPoints: 0 },
+        create: { userId: userId, matchId: matchId, predictedScore1, predictedScore2, winnerOnly },
       });
       return { status: 200, body: prediction };
     });
@@ -389,8 +393,21 @@ router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (re
         });
         const predictions = await tx.prediction.findMany({ where: { matchId: id } });
         const { calculateMatchPoints } = require('../services/matchPoints');
-        await rescore(tx.prediction, { matchId: id }, predictions, ['predictedScore1', 'predictedScore2'], (p) =>
-          calculateMatchPoints(p.predictedScore1, p.predictedScore2, null, null, winner, 'MEDICAL_WITHDRAWAL'),
+        await rescore(
+          tx.prediction,
+          { matchId: id },
+          predictions,
+          require('../services/matchPoints').MATCH_KEYS,
+          (p) =>
+            calculateMatchPoints(
+              p.predictedScore1,
+              p.predictedScore2,
+              null,
+              null,
+              winner,
+              'MEDICAL_WITHDRAWAL',
+              p.winnerOnly,
+            ) * (match.pointsMultiplier || 1),
         );
         // Pas de bonus outsider en cas de retrait médical.
         await applyOutsiderBonus(tx.prediction, id, predictions, winner, 'MEDICAL_WITHDRAWAL');
@@ -460,10 +477,23 @@ router.put('/:id/result', authMiddleware, adminMiddleware, async (req, res) => {
           },
         });
         const predictions = await tx.prediction.findMany({ where: { matchId: id } });
-        await rescore(tx.prediction, { matchId: id }, predictions, ['predictedScore1', 'predictedScore2'], (p) =>
-          require('../services/matchPoints').calculateMatchPoints(p.predictedScore1, p.predictedScore2, score1, score2),
+        await rescore(
+          tx.prediction,
+          { matchId: id },
+          predictions,
+          require('../services/matchPoints').MATCH_KEYS,
+          (p) =>
+            require('../services/matchPoints').calculateMatchPoints(
+              p.predictedScore1,
+              p.predictedScore2,
+              score1,
+              score2,
+              null,
+              null,
+              p.winnerOnly,
+            ) * (match.pointsMultiplier || 1),
         );
-        await applyOutsiderBonus(tx.prediction, id, predictions, winner, 'NORMAL');
+        await applyOutsiderBonus(tx.prediction, id, predictions, winner, 'NORMAL', match.pointsMultiplier || 1);
         await tx.auditLog.create({
           data: {
             actorId: req.user.userId,
