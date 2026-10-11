@@ -62,6 +62,8 @@ model Match {
   pointsPending Boolean @default(false)
   manualResultConfirmed Boolean @default(false)
   progressionConfirmedAt DateTime?
+  // Points ×2 : coefficient figé quand le match était encore ouvert aux pronostics.
+  pointsMultiplier Int @default(1)
   reactions     MatchReaction[]
   comments      MatchComment[]
 
@@ -114,6 +116,9 @@ model Competition {
   resultsSourceUrl String?
   resultsVerifiedAt DateTime?
   podiumResolvedAt DateTime?
+  // Points ×2 actifs (épreuve, phase ou tour) et coefficient figé du podium.
+  pointsBoosts Json?
+  podiumMultiplier Int @default(1)
   podiumPredictions PodiumPrediction[]
   matches           Match[]
   matchRounds       MatchRound[]
@@ -175,6 +180,7 @@ model Pool {
   isLocked      Boolean      @default(false)
   isFinal       Boolean      @default(false)
   bouts         Json?
+  pointsMultiplier Int @default(1)
   createdAt     DateTime     @default(now())
   fencers       PoolFencer[]
 

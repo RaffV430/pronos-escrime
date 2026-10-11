@@ -63,7 +63,7 @@ function matchRow(p) {
       ? Math.abs(p.predictedScore1 - m.score1) + Math.abs(p.predictedScore2 - m.score2)
       : null;
   const bonus = p.bonusPoints || 0;
-  const points = (p.pointsEarned ?? expected) + bonus;
+  const points = (p.pointsEarned ?? expected * (m.pointsMultiplier || 1)) + bonus;
   return {
     ...base,
     outcome: exact ? 'exact' : points > 0 ? 'points' : 'miss',
@@ -76,9 +76,10 @@ function matchRow(p) {
     details:
       points > 0
         ? [
-            `Bon vainqueur : +${points - bonus - (exact ? 3 : 0)}`,
-            ...(exact ? ['Score exact : +3'] : []),
+            `Bon vainqueur : +${points - bonus - (exact ? 3 * (m.pointsMultiplier || 1) : 0)}`,
+            ...(exact ? [`Score exact : +${3 * (m.pointsMultiplier || 1)}`] : []),
             ...(bonus ? [`Bonus outsider : +${bonus}`] : []),
+            ...(m.pointsMultiplier > 1 ? [`Points ×${m.pointsMultiplier}`] : []),
           ]
         : [],
   };

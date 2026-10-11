@@ -389,8 +389,14 @@ router.put('/:id/medical-withdrawal', authMiddleware, adminMiddleware, async (re
         });
         const predictions = await tx.prediction.findMany({ where: { matchId: id } });
         const { calculateMatchPoints } = require('../services/matchPoints');
-        await rescore(tx.prediction, { matchId: id }, predictions, ['predictedScore1', 'predictedScore2'], (p) =>
-          calculateMatchPoints(p.predictedScore1, p.predictedScore2, null, null, winner, 'MEDICAL_WITHDRAWAL'),
+        await rescore(
+          tx.prediction,
+          { matchId: id },
+          predictions,
+          ['predictedScore1', 'predictedScore2'],
+          (p) =>
+            calculateMatchPoints(p.predictedScore1, p.predictedScore2, null, null, winner, 'MEDICAL_WITHDRAWAL') *
+            (match.pointsMultiplier || 1),
         );
         // Pas de bonus outsider en cas de retrait médical.
         await applyOutsiderBonus(tx.prediction, id, predictions, winner, 'MEDICAL_WITHDRAWAL');
@@ -460,10 +466,20 @@ router.put('/:id/result', authMiddleware, adminMiddleware, async (req, res) => {
           },
         });
         const predictions = await tx.prediction.findMany({ where: { matchId: id } });
-        await rescore(tx.prediction, { matchId: id }, predictions, ['predictedScore1', 'predictedScore2'], (p) =>
-          require('../services/matchPoints').calculateMatchPoints(p.predictedScore1, p.predictedScore2, score1, score2),
+        await rescore(
+          tx.prediction,
+          { matchId: id },
+          predictions,
+          ['predictedScore1', 'predictedScore2'],
+          (p) =>
+            require('../services/matchPoints').calculateMatchPoints(
+              p.predictedScore1,
+              p.predictedScore2,
+              score1,
+              score2,
+            ) * (match.pointsMultiplier || 1),
         );
-        await applyOutsiderBonus(tx.prediction, id, predictions, winner, 'NORMAL');
+        await applyOutsiderBonus(tx.prediction, id, predictions, winner, 'NORMAL', match.pointsMultiplier || 1);
         await tx.auditLog.create({
           data: {
             actorId: req.user.userId,

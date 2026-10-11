@@ -361,4 +361,34 @@ router.post(
     res.json(await review.keepEntry(prisma, req.params.competitionId, req.body?.entryId, req.user.userId)),
   ),
 );
+// Points ×2 : sur une épreuve (entière, une phase ou un tour) ou sur tout un tournoi.
+const boost = require('../services/pointsBoost');
+router.get(
+  '/boosts/:competitionId',
+  wrap(async (req, res) => res.json(await boost.overview(prisma, id(req.params.competitionId)))),
+);
+router.post(
+  '/boosts/:competitionId',
+  wrap(async (req, res) =>
+    res.json(await boost.activate(prisma, id(req.params.competitionId), req.body, req.user.userId)),
+  ),
+);
+router.delete(
+  '/boosts/:competitionId/:key',
+  wrap(async (req, res) =>
+    res.json(await boost.deactivate(prisma, id(req.params.competitionId), req.params.key, req.user.userId)),
+  ),
+);
+router.post(
+  '/tournament-boost/:tournamentId',
+  wrap(async (req, res) =>
+    res.json(await boost.activateTournament(prisma, id(req.params.tournamentId), req.user.userId)),
+  ),
+);
+router.delete(
+  '/tournament-boost/:tournamentId',
+  wrap(async (req, res) =>
+    res.json(await boost.deactivateTournament(prisma, id(req.params.tournamentId), req.user.userId)),
+  ),
+);
 module.exports = router;

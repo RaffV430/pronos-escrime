@@ -18,7 +18,8 @@ function challengePoints(pick, match, bonus = 3) {
           ? 1
           : 2
         : null;
-  return winner && pick.winner === winner ? bonus : 0;
+  // Défi sur un match à points doublés : le bonus est doublé aussi.
+  return winner && pick.winner === winner ? bonus * (match.pointsMultiplier || 1) : 0;
 }
 function clubScore(members, rows) {
   return members.length

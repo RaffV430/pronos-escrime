@@ -149,10 +149,12 @@ function createPoolRouter(db = prisma, { sourceCheck = require('../services/pool
       ) {
         fail('Chaque tireur doit avoir un nom distinct, de 1 à 100 caractères.');
       }
-      if (!(await db.competition.findUnique({ where: { id: competitionId } }))) fail('Compétition introuvable.', 404);
+      const competition = await db.competition.findUnique({ where: { id: competitionId } });
+      if (!competition) fail('Compétition introuvable.', 404);
       const pool = await db.pool.create({
         data: {
           competitionId,
+          pointsMultiplier: require('../services/pointsBoost').multiplierFor(competition, 'POOL'),
           name,
           closesAt,
           lockMode,
@@ -298,7 +300,7 @@ function createPoolRouter(db = prisma, { sourceCheck = require('../services/pool
               { fencerId },
               predictions,
               ['wins', 'indicator'],
-              (p) => poolPoints(p, data, kept.length).total,
+              (p) => poolPoints(p, data, kept.length).total * (pool.pointsMultiplier || 1),
             );
           }
           const aside = pool.fencers.filter((f) => f.status).map((f) => f.id);

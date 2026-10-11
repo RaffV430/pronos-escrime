@@ -217,7 +217,7 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
         { fencerId: f.id },
         predictions.filter((p) => p.fencerId === f.id),
         ['wins', 'indicator'],
-        (p) => poolPoints(p, r, size).total,
+        (p) => poolPoints(p, r, size).total * (current.pointsMultiplier || 1),
       );
   }
   // Pronostics sur un tireur mis à part : neutralisés (0 point).

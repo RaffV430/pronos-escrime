@@ -22,7 +22,8 @@ router.get('/competitions/:tournamentId', authMiddleware, async (req, res) => {
       include: { matches: { select: { id: true } } },
       orderBy: { id: 'asc' },
     });
-    res.json(competitions);
+    const { publicBoosts } = require('../services/pointsBoost');
+    res.json(competitions.map((c) => ({ ...c, pointsBoosts: publicBoosts(c) })));
   } catch (err) {
     reportError(err, 'podium');
     res.status(500).json({ error: 'Erreur lors de la récupération des compétitions.' });

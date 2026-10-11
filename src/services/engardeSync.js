@@ -227,6 +227,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
           return tx.pool.create({
             data: {
               competitionId: c.id,
+              pointsMultiplier: require('./pointsBoost').multiplierFor(c, 'POOL'),
               name: label(observed.number),
               closesAt: new Date(config.date + 'T00:00:00Z'),
               lockMode: 'FIRST_RESULT',

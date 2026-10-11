@@ -12,6 +12,7 @@ const { calculateMatchPoints } = require('./matchPoints');
 const { rescore } = require('./rescore');
 const { applyOutsiderBonus } = require('./outsider');
 const podiumRules = require('./podiumRules');
+const { multiplierFor } = require('./pointsBoost');
 const REOPEN_ACTION = 'Horaire publié après clôture';
 const START = 'Contrôle FTL démarré',
   DONE = 'Contrôle FTL terminé',
@@ -500,7 +501,16 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       });
     const saved = m
       ? await tx.match.update({ where: { id: m.id }, data })
-      : await tx.match.create({ data: { competitionId: c.id, player1: o.player1, player2: o.player2, ...data } });
+      : await tx.match.create({
+          data: {
+            competitionId: c.id,
+            player1: o.player1,
+            player2: o.player2,
+            // Points ×2 en cours sur l'épreuve, la phase ou ce tour : la nouvelle rencontre en profite.
+            pointsMultiplier: o.isFinished || o.pointsPending ? 1 : multiplierFor(c, 'MATCH', data.round),
+            ...data,
+          },
+        });
     if (!m) {
       summary.created++;
       summary.createdIds.push(saved.id);
@@ -528,10 +538,19 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
         { matchId: saved.id },
         predictions,
         ['predictedScore1', 'predictedScore2'],
-        (p) => calculateMatchPoints(p.predictedScore1, p.predictedScore2, o.score1, o.score2, o.winner, o.resultType),
+        (p) =>
+          calculateMatchPoints(p.predictedScore1, p.predictedScore2, o.score1, o.score2, o.winner, o.resultType) *
+          (saved.pointsMultiplier || 1),
       );
       // Bonus outsider, calculé à la publication du résultat.
-      summary.pointsUpdated += await applyOutsiderBonus(tx.prediction, saved.id, predictions, o.winner, o.resultType);
+      summary.pointsUpdated += await applyOutsiderBonus(
+        tx.prediction,
+        saved.id,
+        predictions,
+        o.winner,
+        o.resultType,
+        saved.pointsMultiplier || 1,
+      );
     }
   }
   for (const { m, o } of reopened)
@@ -796,6 +815,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
               return tx.pool.create({
                 data: {
                   competitionId: c.id,
+                  pointsMultiplier: multiplierFor(current, 'POOL'),
                   name: context.label(observed.number),
                   closesAt: new Date(config.date + 'T00:00:00Z'),
                   lockMode: 'FIRST_RESULT',
