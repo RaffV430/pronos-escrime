@@ -121,6 +121,17 @@ test('published matches and moved pairs are never automatically cancelled', () =
   assert.equal(cancellable({ ...m, isFinished: true }, { sourceUrl: 's', matches: [] }), false);
   assert.equal(cancellable(m, { sourceUrl: 's', matches: [{ ...m, player1: 'B', player2: 'A' }] }), false);
 });
+test('an ambiguity elsewhere in the bracket no longer blocks following the official draw', () => {
+  const m = { sourceUrl: 's', sourceKey: 'Table of 16:8', isFinished: false, round: 'T16', player1: 'A', player2: 'B' };
+  const official = { sourceKey: 'Table of 16:8', round: 'T16', player1: 'C', player2: 'B' };
+  const elsewhere = { sourceKey: 'Table of 256:92', message: 'T256 · match 92 : nom ambigu' };
+  assert.equal(cancellable(m, { sourceUrl: 's', matches: [official], issues: [elsewhere] }), true);
+  assert.equal(
+    cancellable(m, { sourceUrl: 's', matches: [official], issues: [{ sourceKey: 'Table of 16:8', message: 'x' }] }),
+    false,
+  );
+  assert.equal(cancellable(m, { sourceUrl: 's', matches: [official], issues: [{ message: 'sans match' }] }), false);
+});
 test('cancellation is excluded from previous round completion and cannot be unlocked', () => {
   const matches = [
     { id: 1, competitionId: 1, round: 'T4', isFinished: true, resultRegisteredAt: new Date(1000) },

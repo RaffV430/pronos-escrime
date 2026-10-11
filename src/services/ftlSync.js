@@ -257,9 +257,13 @@ function planMatches(existing, observation, { allowPartial = false } = {}) {
   plan.conflicts = conflicts;
   return plan;
 }
+// Le suivi officiel fait foi : une affiche remplacée sur FTL est annulée (pronostics conservés, sans
+// points) et l'affiche officielle créée, même si d'autres rencontres du tableau sont ambiguës ; ces
+// ambiguïtés restent signalées à part sans bloquer le déroulé. Seule une ambiguïté sur cette rencontre bloque.
 function cancellable(m, observation) {
   return (
-    !observation.issues?.length &&
+    Boolean(m) &&
+    !(observation.issues || []).some((i) => !i.sourceKey || i.sourceKey === m.sourceKey) &&
     !m.isFinished &&
     m.sourceUrl === observation.sourceUrl &&
     !observation.matches.some((o) => o.round === m.round && pairKey(o) === pairKey(m))

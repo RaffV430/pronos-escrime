@@ -30,13 +30,16 @@ function roundContext(matches, rounds) {
           (m) => m.resultType !== 'CANCELLED' && m.competitionId === match.competitionId && m.round === previous.round,
         )
       : [];
+    // Une rencontre mise à part pour vérification (écart avec la source) ne bloque pas le déroulé :
+    // le tour suivant se ferme comme prévu, l'écart est traité après.
+    const settled = results.filter((m) => !m.syncIssue || Number.isFinite(time(m.progressionConfirmedAt)));
     const complete =
       previous &&
       results.length === previous.expectedMatchCount &&
-      results.every(
+      settled.every(
         (m) =>
           Number.isFinite(time(m.progressionConfirmedAt)) ||
-          (!m.syncIssue && m.isFinished && Number.isFinite(time(m.progressionConfirmedAt || m.resultRegisteredAt))),
+          (m.isFinished && Number.isFinite(time(m.progressionConfirmedAt || m.resultRegisteredAt))),
       );
     return {
       ...match,
@@ -44,9 +47,9 @@ function roundContext(matches, rounds) {
       timingUnverified: !config,
       awaitingPreviousRound: Boolean(config?.previousRound && !complete),
       previousRoundCompletedAt:
-        complete && results.length
+        complete && settled.length
           ? new Date(
-              Math.max(...results.map((m) => time(m.progressionConfirmedAt || m.resultRegisteredAt))),
+              Math.max(...settled.map((m) => time(m.progressionConfirmedAt || m.resultRegisteredAt))),
             ).toISOString()
           : null,
     };
