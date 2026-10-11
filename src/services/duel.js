@@ -1,3 +1,4 @@
+const { predictionText } = require('./matchPoints');
 // Duel entre deux membres d'une ligue : comparaison match par match sur les
 // matchs terminés du tournoi de la ligue. Rien n'est dévoilé avant la fin d'un match.
 const total = (p) => (p ? (p.pointsEarned || 0) + (p.bonusPoints || 0) : 0);
@@ -79,8 +80,8 @@ function buildDuel(matches, mine, theirs, extra = {}) {
           m.resultType === 'MEDICAL_WITHDRAWAL'
             ? `Retrait médical · ${m.winner === 1 ? m.player1 : m.player2}`
             : `${m.score1} – ${m.score2}`,
-        me: pa ? { prediction: `${pa.predictedScore1} – ${pa.predictedScore2}`, points: me } : null,
-        them: pb ? { prediction: `${pb.predictedScore1} – ${pb.predictedScore2}`, points: them } : null,
+        me: pa ? { prediction: predictionText(pa, m), points: me } : null,
+        them: pb ? { prediction: predictionText(pb, m), points: them } : null,
         winner: versus(me, them),
       };
     })

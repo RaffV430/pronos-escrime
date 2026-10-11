@@ -1,6 +1,6 @@
 // Historique d'un joueur sur une saison d'escrime (1er septembre → 31 août).
 // Fonctions pures : la route lit la base, ce module assemble et calcule.
-const { calculateMatchPoints } = require('./matchPoints');
+const { calculateMatchPoints, predictionText } = require('./matchPoints');
 const { challengePoints } = require('./communityRules');
 const { adjustForAnnulled } = require('./poolRules');
 
@@ -34,7 +34,7 @@ function matchRow(p) {
     name: `${m.player1} / ${m.player2}`,
     round: m.round || null,
     date: m.startsAt || null,
-    prediction: `${p.predictedScore1} – ${p.predictedScore2}`,
+    prediction: predictionText(p, m),
   };
   if (m.resultType === 'CANCELLED')
     return {
@@ -56,10 +56,11 @@ function matchRow(p) {
     m.score2,
     m.winner,
     m.resultType,
+    p.winnerOnly,
   );
-  const exact = !medical && p.predictedScore1 === m.score1 && p.predictedScore2 === m.score2;
+  const exact = !medical && !p.winnerOnly && p.predictedScore1 === m.score1 && p.predictedScore2 === m.score2;
   const scoreGap =
-    !medical && Number.isInteger(m.score1) && Number.isInteger(m.score2)
+    !medical && !p.winnerOnly && Number.isInteger(m.score1) && Number.isInteger(m.score2)
       ? Math.abs(p.predictedScore1 - m.score1) + Math.abs(p.predictedScore2 - m.score2)
       : null;
   const bonus = p.bonusPoints || 0;
@@ -94,7 +95,7 @@ function poolRow(p) {
     name: `${pool.name} · ${f.name}`,
     round: null,
     date: pool.closesAt || null,
-    prediction: `${p.wins} V · indice ${p.indicator}`,
+    prediction: require('./poolRules').poolPredictionText(p),
   };
   if (!pool.isFinal) return { ...base, outcome: 'pending', result: null, points: null, details: [] };
   const points = p.pointsEarned || 0;
@@ -109,10 +110,10 @@ function poolRow(p) {
     result: `${f.wins} V · indice ${f.indicator}`,
     points,
     winsExact: compared.wins === f.wins,
-    indicatorGap: Math.abs(compared.indicator - f.indicator),
+    indicatorGap: compared.indicator == null ? null : Math.abs(compared.indicator - f.indicator),
     details: adjusted
       ? [
-          `Ajusté : ${adjusted.annulled} match${adjusted.annulled > 1 ? 's' : ''} annulé${adjusted.annulled > 1 ? 's' : ''} · comparé à ${adjusted.wins} V · indice ${adjusted.indicator > 0 ? '+' : ''}${adjusted.indicator}`,
+          `Ajusté : ${adjusted.annulled} match${adjusted.annulled > 1 ? 's' : ''} annulé${adjusted.annulled > 1 ? 's' : ''} · comparé à ${adjusted.wins} V${adjusted.indicator == null ? '' : ` · indice ${adjusted.indicator > 0 ? '+' : ''}${adjusted.indicator}`}`,
         ]
       : [],
   };

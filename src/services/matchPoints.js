@@ -1,4 +1,14 @@
-function calculateMatchPoints(predictedScore1, predictedScore2, score1, score2, winner = null, resultType = null) {
+// winnerOnly : pronostic simplifié (vainqueur désigné, sans score) : 1 point si le vainqueur est le bon,
+// jamais le bonus du score exact.
+function calculateMatchPoints(
+  predictedScore1,
+  predictedScore2,
+  score1,
+  score2,
+  winner = null,
+  resultType = null,
+  winnerOnly = false,
+) {
   if (resultType === 'CANCELLED') return 0;
   const predictedWinner = predictedScore1 > predictedScore2 ? 1 : predictedScore2 > predictedScore1 ? 2 : 0;
   if (resultType === 'MEDICAL_WITHDRAWAL') return [1, 2].includes(winner) && predictedWinner === winner ? 1 : 0;
@@ -6,7 +16,20 @@ function calculateMatchPoints(predictedScore1, predictedScore2, score1, score2, 
   const actualWinner = score1 > score2 ? 1 : score2 > score1 ? 2 : [1, 2].includes(winner) ? winner : 0;
 
   if (actualWinner === 0 || predictedWinner !== actualWinner) return 0;
-  return predictedScore1 === score1 && predictedScore2 === score2 ? 4 : 1;
+  return !winnerOnly && predictedScore1 === score1 && predictedScore2 === score2 ? 4 : 1;
 }
 
-module.exports = { calculateMatchPoints };
+// Champs qui déterminent les points d'un pronostic de match (regroupement des recalculs).
+const MATCH_KEYS = ['predictedScore1', 'predictedScore2', 'winnerOnly'];
+
+// Texte du pronostic : « 15 – 12 » ou « Vainqueur : NOM » pour un pronostic simplifié.
+function predictionText(p, m) {
+  if (!p) return null;
+  if (p.winnerOnly) {
+    const side = p.predictedScore1 > p.predictedScore2 ? 1 : 2;
+    return `Vainqueur : ${m?.[`player${side}`] || (side === 1 ? 'tireur 1' : 'tireur 2')}`;
+  }
+  return `${p.predictedScore1} – ${p.predictedScore2}`;
+}
+
+module.exports = { calculateMatchPoints, MATCH_KEYS, predictionText };

@@ -45,7 +45,7 @@ async function applyOutsiderBonus(model, matchId, predictions, winner, resultTyp
     model,
     { matchId },
     predictions,
-    ['predictedScore1', 'predictedScore2'],
+    ['predictedScore1', 'predictedScore2', 'winnerOnly'],
     (p) => (rule.eligible && predictedWinner(p) === winner ? OUTSIDER_BONUS * multiplier : 0),
     'bonusPoints',
   );

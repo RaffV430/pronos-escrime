@@ -78,6 +78,8 @@ model Prediction {
   predictedScore2 Int
   pointsEarned    Int      @default(0)
   bonusPoints     Int      @default(0)
+  // Pronostic simplifié : vainqueur désigné sans score (scores 1-0 ou 0-1 conservés pour le sens).
+  winnerOnly      Boolean  @default(false)
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   match           Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
   createdAt       DateTime @default(now())
@@ -213,7 +215,8 @@ model PoolPrediction {
   fencer        PoolFencer  @relation(fields: [fencerId], references: [id], onDelete: Cascade)
   wins          Int
   losses        Int
-  indicator     Int
+  // Facultatif : pronostic simplifié sur les victoires seules.
+  indicator     Int?
   createdAt     DateTime     @default(now())
   pointsEarned  Int          @default(0)
   updatedAt     DateTime     @updatedAt
