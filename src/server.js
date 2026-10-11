@@ -23,7 +23,7 @@ app.use(
       return callback(new Error('Origine non autorisée par CORS.'));
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    ...require('./middleware/consultationCors'),
   }),
 );
 app.use(express.json({ limit: '100kb' }));
