@@ -146,10 +146,12 @@ async function requestRole(db, userId, reason) {
     });
   });
 }
-async function decideRole(db, actorId, userId, clubId, status) {
+async function decideRole(db, actorId, userId, clubId, status, comment = null, mail = require('./mailer')) {
   if (!positive(userId) || !positive(clubId) || !['APPROVED', 'REJECTED', 'REVOKED'].includes(status))
     throw failure('Décision invalide.', 400);
-  return db.$transaction(async (tx) => {
+  // Refus : un motif est obligatoire, il est envoyé par e-mail au demandeur.
+  const motive = status === 'REJECTED' ? clean(comment, 5, 1000, 'Motif du refus') : null;
+  const row = await db.$transaction(async (tx) => {
     await lock(tx);
     const admin = await tx.user.findUnique({ where: { id: actorId }, select: { isAdmin: true } });
     if (!admin?.isAdmin) throw failure('Accès administrateur requis.', 403);
@@ -183,11 +185,29 @@ async function decideRole(db, actorId, userId, clubId, status) {
         targetType: 'ClubResponsibility',
         targetId: row.id,
         before: previous || undefined,
-        after: row,
+        after: motive ? { ...row, motive } : row,
       },
     });
     return row;
   });
+  if (!motive) return row;
+  // Envoi après l'enregistrement : un e-mail impossible n'annule jamais la décision.
+  let mailSent = false;
+  try {
+    const target = await db.user.findUnique({ where: { id: userId }, select: { email: true } });
+    const club = await db.club.findUnique({ where: { id: clubId }, select: { name: true } });
+    if (target?.email && club && mail.playerMailAvailable()) {
+      await mail.sendMail({
+        to: target.email,
+        ...require('./clubRequestEmail').responsibilityRefusalMessage({ id: row.id, club: club.name, motive }),
+        idempotencyKey: `club-responsibility-refused-${row.id}-${new Date(row.reviewedAt).getTime()}`,
+      });
+      mailSent = true;
+    }
+  } catch (error) {
+    require('../lib/report').reportError(error, 'e-mail de refus de responsable', { responsibilityId: row.id });
+  }
+  return { ...row, mailSent };
 }
 
 async function updatePresentation(db, userId, description) {
