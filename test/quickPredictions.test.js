@@ -74,3 +74,58 @@ test('making a column optional is not treated as destructive', () => {
     /destructive/,
   );
 });
+
+test('an official withdrawal sets the fencer status automatically and zeroes predictions on them', async () => {
+  const { applyPool, officialStatus, recordStatuses } = require('../src/services/ftlPools');
+  assert.equal(officialStatus('Medical Withdrawal'), 'MEDICAL');
+  assert.equal(officialStatus('Failed to Appear'), 'ABSENT');
+  assert.equal(officialStatus('EXCLUSION'), 'EXCLUDED');
+  assert.equal(officialStatus('ABANDON'), 'MEDICAL');
+  assert.equal(officialStatus('Something else'), null);
+  const fencers = [
+    { id: 1, name: 'A', position: 1 },
+    { id: 2, name: 'B', position: 2 },
+    { id: 3, name: 'C', position: 3, status: 'ABSENT' },
+  ];
+  const pool = {
+    id: 9,
+    competitionId: 1,
+    sourceUrl: 'u',
+    sourcePoolNumber: 4,
+    lockMode: 'FIRST_RESULT',
+    isLocked: false,
+    isFinal: false,
+    name: 'Poule 4',
+    fencers,
+  };
+  const updates = [];
+  let zeroed = null;
+  const tx = {
+    $queryRaw: async () => [],
+    pool: { findUnique: async () => pool, update: async () => pool },
+    poolFencer: { updateMany: async ({ where, data }) => (updates.push([where.id, data]), { count: 1 }) },
+    poolPrediction: {
+      findMany: async () => [],
+      updateMany: async ({ where }) => ((zeroed = where.fencerId.in), { count: 2 }),
+    },
+  };
+  const observed = {
+    complete: false,
+    rows: [
+      { name: 'A', position: 1, hasResult: true, wins: 1, losses: 0, indicator: 3 },
+      { name: 'B', position: 2, absent: true, status: 'Medical Withdrawal', wins: null, losses: null, indicator: null },
+      // Statut déjà posé (par l'administration) : jamais remplacé.
+      { name: 'C', position: 3, absent: true, status: 'Medical Withdrawal', wins: null, losses: null, indicator: null },
+    ],
+  };
+  const out = await applyPool(tx, pool, observed, new Date());
+  assert.equal(updates.find(([id]) => id === 2)[1].status, 'MEDICAL');
+  assert.equal(updates.find(([id]) => id === 3)?.[1].status, undefined);
+  assert.deepEqual(zeroed.sort(), [2, 3]);
+  assert.deepEqual(out.statuses, [{ id: 2, name: 'B', status: 'MEDICAL', pool: 'Poule 4' }]);
+  const logs = [];
+  const summary = {};
+  await recordStatuses({ auditLog: { create: async (q) => logs.push(q.data) } }, { id: 1 }, out.statuses, 0, summary);
+  assert.match(summary.notes[0], /Poule 4 : B — Retrait médical/);
+  assert.equal(logs[0].action, 'Statut de tireur relevé sur le suivi officiel');
+});

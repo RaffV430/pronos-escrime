@@ -86,7 +86,7 @@ test('a withdrawal after a first result clears the provisional record and keeps 
     $queryRaw: async () => [],
     pool: { findUnique: async () => pool, update: async () => pool },
     poolFencer: { updateMany: async ({ where, data }) => (updates.push([where.id, data]), { count: 1 }) },
-    poolPrediction: { findMany: async () => [] },
+    poolPrediction: { findMany: async () => [], updateMany: async () => ({ count: 0 }) },
   };
   const observed = {
     complete: false,
@@ -108,6 +108,12 @@ test('a withdrawal after a first result clears the provisional record and keeps 
     ],
   };
   await applyPool(tx, pool, observed, new Date());
-  assert.deepEqual(updates.find(([id]) => id === 3)[1], { wins: null, losses: null, indicator: null });
+  // Retrait médical relevé sur la feuille officielle : statut posé automatiquement.
+  assert.deepEqual(updates.find(([id]) => id === 3)[1], {
+    status: 'MEDICAL',
+    wins: null,
+    losses: null,
+    indicator: null,
+  });
   assert.ok(!('firstResultAt' in updates.find(([id]) => id === 3)[1]), 'the individual lock stays');
 });

@@ -249,6 +249,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
       );
       summary.checked++;
       for (const k of ['locks', 'finalized', 'changed', 'pointsUpdated']) summary[k] += result[k];
+      await require('./ftlPools').recordStatuses(db, c, result.statuses, 0, summary);
       // Tireurs sortis de la compétition (forfait, abandon, exclusion) : alerte podium plus bas.
       for (const r of observed.rows.filter((x) => x.absent)) {
         const found = entryFor(c.podiumRoster, r.name, r.club);
