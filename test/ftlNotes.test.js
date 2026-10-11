@@ -32,6 +32,42 @@ test('a real warning still flags the follow-up and slows to 5 min', async () => 
   assert.equal(freshness(db.state, now.getTime()).state, 'DELAYED');
 });
 
+test('a finished event closes despite a lingering warning, but not with a match conflict', async () => {
+  const done = fakeDb();
+  await finish(
+    done,
+    1,
+    't',
+    {
+      podium: true,
+      warnings: ['Scores réciproques incohérents dans la poule 7.'],
+      syncPhase: 'TABLEAU',
+      eventDate: '2026-10-10',
+    },
+    null,
+    now,
+  );
+  assert.equal(done.state.status, 'COMPLETE');
+  assert.equal(done.state.nextAutomaticAt, null);
+  const held = fakeDb();
+  await finish(
+    held,
+    1,
+    't',
+    {
+      podium: true,
+      warnings: [],
+      conflicts: [{ id: 3, message: 'Match #3 à vérifier' }],
+      syncPhase: 'TABLEAU',
+      eventDate: '2026-10-10',
+    },
+    null,
+    now,
+  );
+  assert.equal(held.state.status, 'ATTENTION');
+  assert.notEqual(held.state.nextAutomaticAt, null);
+});
+
 test('event start follows the venue time zone, with a safe fallback', () => {
   const { eventStart } = require('../src/services/eventStart');
   assert.equal(

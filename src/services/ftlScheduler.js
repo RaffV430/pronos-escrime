@@ -41,8 +41,10 @@ async function claim(db, competitionId, { automatic = false, now = new Date() } 
 async function finish(db, competitionId, token, summary, error = null, now = new Date()) {
   const state = await db.ftlSyncState.findUnique({ where: { competitionId } });
   if (state?.leaseToken !== token) return;
-  const issues = summary?.warnings?.length || summary?.conflicts?.length;
-  const complete = Boolean(summary?.podium && !issues);
+  // Épreuve terminée (podium officiel confirmé) : clôturée même si un avertissement persiste (ex. une poule
+  // déjà finalisée que la source affiche désormais incohérente) ; seuls les vrais conflits de match la retiennent.
+  const complete = Boolean(summary?.podium && !summary?.conflicts?.length);
+  const issues = !complete && (summary?.warnings?.length || summary?.conflicts?.length);
   const failures = error ? state.failures + 1 : 0;
   // Rythme lent (15 min) jusqu'au début des poules (heure FencingTimeLive, heure locale du lieu) ;
   // le dernier contrôle lent est calé 1 min avant, pour que la saisie reste ouverte sans à-coup.
@@ -68,7 +70,7 @@ async function finish(db, competitionId, token, summary, error = null, now = new
       leaseToken: null,
       leaseUntil: null,
       lastFinishedAt: now,
-      status: error ? 'ERROR' : issues ? 'ATTENTION' : complete ? 'COMPLETE' : 'READY',
+      status: error ? 'ERROR' : complete ? 'COMPLETE' : issues ? 'ATTENTION' : 'READY',
       lastError: error || null,
       failures,
       nextAutomaticAt: complete ? null : new Date(now.getTime() + delay),
@@ -79,7 +81,7 @@ async function finish(db, competitionId, token, summary, error = null, now = new
     .alertAdmins(db, { competitionId, failures, previousFailures: state.failures || 0, error })
     .catch(() => {});
   // Import bloqué sans panne pendant l'épreuve (avertissements répétés), puis rétablissement.
-  if (!error)
+  if (!error && !complete)
     await require('./syncHealth')
       .alertAttention(db, {
         competitionId,
