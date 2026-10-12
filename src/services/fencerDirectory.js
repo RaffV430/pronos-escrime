@@ -25,6 +25,7 @@ function directory(competitions, favorites, club) {
           favoriteId: null,
         });
       const row = groups.get(key);
+      if (!row.ageCategory && entry.ageCategory) row.ageCategory = entry.ageCategory;
       if (!row.events.some((e) => e.id === c.id)) row.events.push({ id: c.id, name: c.name });
       row.favoriteId ||= links.find((l) => l.entryId === String(entry.id))?.favoriteId || null;
     }
@@ -45,12 +46,14 @@ function directory(competitions, favorites, club) {
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'fr') || a.key.localeCompare(b.key));
 }
-async function search(db, userId, { tournamentId, competitionId, query, clubOnly, clubId, offset }) {
-  const tournament = await db.tournament.findUnique({ where: { id: tournamentId }, select: { id: true } });
-  if (!tournament) throw failure('Tournoi introuvable.', 404);
+async function search(db, userId, { tournamentId, competitionId, query, clubOnly, clubId, category, offset }) {
+  if (tournamentId) {
+    const tournament = await db.tournament.findUnique({ where: { id: tournamentId }, select: { id: true } });
+    if (!tournament) throw failure('Tournoi introuvable.', 404);
+  }
   const [competitions, favorites, profile, clubs] = await Promise.all([
     db.competition.findMany({
-      where: { tournamentId },
+      where: tournamentId ? { tournamentId } : {},
       select: { id: true, name: true, podiumFormat: true, podiumRoster: true },
       orderBy: { id: 'asc' },
     }),
@@ -68,12 +71,14 @@ async function search(db, userId, { tournamentId, competitionId, query, clubOnly
   const rows = directory(decorated.competitions, decorated.favorites, selectedClub).filter(
     (row) =>
       (!competitionId || row.events.some((e) => e.id === competitionId)) &&
+      (!category || row.ageCategory === category) &&
       (!(clubOnly || clubId) || row.isClub) &&
       (!term || normalize(`${row.name} ${row.club} ${row.country}`).includes(term)),
   );
-  const eligible = term.length >= 2 || clubOnly || Boolean(clubId);
+  const eligible = term.length >= 2 || clubOnly || Boolean(clubId) || Boolean(category);
   return {
     events: competitions.filter((c) => c.podiumFormat !== 'TEAM').map(({ id, name }) => ({ id, name })),
+    categories: require('./fencerAgeCategory').categories.slice(6),
     clubName: club.name,
     clubs: clubs.map(({ id, name, shortName }) => ({ id, name, shortName })),
     missingClubData: competitions.some((c) => (c.podiumRoster || []).some((f) => !f.club)),
