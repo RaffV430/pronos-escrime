@@ -22,8 +22,8 @@ function ageCategory(birthYear, now = new Date()) {
   return categories[[5, 7, 9, 11, 13, 15, 17, 20, 39, 49, 59, 69, 125].findIndex((limit) => age <= limit)];
 }
 function verifiedCategory(profile, now) {
-  return profile?.federationVerified && profile.country === 'FRA'
-    ? ageCategory(years.get(key(profile.name)), now)
+  return profile?.federationVerified
+    ? ageCategory(profile.birthYear ?? (profile.country === 'FRA' ? years.get(key(profile.name)) : null), now)
     : null;
 }
 module.exports = { categories, ageCategory, verifiedCategory };

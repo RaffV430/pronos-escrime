@@ -32,6 +32,7 @@ function compatible(favorite, entry, competitionId) {
     (!favorite.country || !candidate.country || favorite.country === candidate.country)
   )
     return true;
+  if (favorite.affiliationId && !favorite.originCompetitionId) return false;
   for (const field of ['country', 'club'])
     if (favorite[field] && candidate[field] && normalize(favorite[field]) !== normalize(candidate[field])) return false;
   if (favorite.originCompetitionId === competitionId && favorite.originEntryId === String(entry.id)) return true;
@@ -115,15 +116,18 @@ async function locked(db, userId, fn) {
   });
 }
 async function save(tx, userId, data) {
-  if (tx.fencerAffiliationEntry) {
+  if (tx.fencerAffiliationEntry && data.originCompetitionId) {
     const link = await tx.fencerAffiliationEntry.findUnique({
       where: { competitionId_entryId: { competitionId: data.originCompetitionId, entryId: data.originEntryId } },
     });
     if (link) {
+      data.affiliationId = link.affiliationId;
       const favorites = await tx.followedFencer.findMany({ where: { userId } });
       const origins = await tx.fencerAffiliationEntry.findMany({ where: { affiliationId: link.affiliationId } });
-      const previous = favorites.find((f) =>
-        origins.some((o) => o.competitionId === f.originCompetitionId && o.entryId === f.originEntryId),
+      const previous = favorites.find(
+        (f) =>
+          f.affiliationId === link.affiliationId ||
+          origins.some((o) => o.competitionId === f.originCompetitionId && o.entryId === f.originEntryId),
       );
       if (previous) return previous;
     }
@@ -135,6 +139,29 @@ async function save(tx, userId, data) {
   if ((await tx.followedFencer.count({ where: { userId } })) >= 200)
     throw failure('Vous pouvez suivre au maximum 200 tireurs.', 409);
   return tx.followedFencer.create({ data: { ...data, userId } });
+}
+async function followProfile(db, userId, affiliationId) {
+  return locked(db, userId, async (tx) => {
+    const p = await tx.fencerAffiliation.findUnique({ where: { id: affiliationId } });
+    if (!p) throw failure('Tireur introuvable.', 404);
+    const favorites = await tx.followedFencer.findMany({ where: { userId } });
+    const origins = await tx.fencerAffiliationEntry.findMany({ where: { affiliationId } });
+    const previous = favorites.find(
+      (f) =>
+        f.affiliationId === affiliationId ||
+        origins.some((o) => o.competitionId === f.originCompetitionId && o.entryId === f.originEntryId),
+    );
+    if (previous) return previous;
+    return save(tx, userId, {
+      identityKey: 'profile:' + affiliationId,
+      affiliationId,
+      name: p.name,
+      country: p.country,
+      club: p.club,
+      originCompetitionId: null,
+      originEntryId: '',
+    });
+  });
 }
 async function follow(db, userId, competitionId, entryId) {
   return locked(db, userId, async (tx) => {
@@ -172,4 +199,15 @@ async function importLocal(db, userId, items) {
     return { imported: [...new Set(imported)], unresolved };
   });
 }
-module.exports = { normalize, identity, keyFor, compatible, resolve, list, follow, importLocal, selections };
+module.exports = {
+  normalize,
+  identity,
+  keyFor,
+  compatible,
+  resolve,
+  list,
+  follow,
+  followProfile,
+  importLocal,
+  selections,
+};

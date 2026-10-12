@@ -72,6 +72,11 @@ function createRouter(db) {
   router.post(
     '/',
     run(async (req, res) => {
+      if (req.body.affiliationId !== undefined) {
+        if (!validId(req.body.affiliationId) || req.body.competitionId !== undefined || req.body.entryId !== undefined)
+          return res.status(400).json({ error: 'Sélection de tireur invalide.' });
+        return res.json(await follows.followProfile(db, req.user.userId, Number(req.body.affiliationId)));
+      }
       if (
         !validId(req.body.competitionId) ||
         typeof req.body.entryId !== 'string' ||
