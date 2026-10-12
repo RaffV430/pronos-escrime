@@ -115,9 +115,12 @@ async function ingest(tx, c, observed = c.podiumRoster, sourceUrl = c.rosterSour
       continue;
     if (!profile && !duplicate && data.country) {
       const candidates = await tx.fencerAffiliation.findMany({
-        where: { nameKey, country: data.country, federationVerified: true },
+        where: { nameKey, country: data.country },
       });
-      if (candidates.length === 1) profile = candidates[0];
+      const verified = candidates.filter((p) => p.federationVerified);
+      if (verified.length === 1) profile = verified[0];
+      else if (!verified.length && candidates.length === 1 && data.club && key(candidates[0].club) === key(data.club))
+        profile = candidates[0];
     }
     if (!profile)
       profile = await tx.fencerAffiliation.upsert({
@@ -277,14 +280,24 @@ async function manual(db, id, input, actorId) {
 }
 async function decorate(db, competitions, favorites = []) {
   if (!db.fencerAffiliationEntry) return { competitions, favorites };
-  const ids = [...new Set([...competitions.map((c) => c.id), ...favorites.map((f) => f.originCompetitionId)])];
+  const ids = [
+    ...new Set(
+      [...competitions.map((c) => c.id), ...favorites.map((f) => f.originCompetitionId)].filter(Number.isInteger),
+    ),
+  ];
   const links = await db.fencerAffiliationEntry.findMany({
     where: { competitionId: { in: ids } },
     include: { affiliation: true },
   });
   const map = new Map(links.map((l) => [`${l.competitionId}:${l.entryId}`, l.affiliation]));
-  const extra = (id, entryId) => {
-    const p = map.get(`${id}:${entryId}`);
+  const profiles = db.fencerAffiliation
+    ? await db.fencerAffiliation.findMany({
+        where: { id: { in: favorites.map((f) => f.affiliationId).filter(Number.isInteger) } },
+      })
+    : [];
+  const byId = new Map(profiles.map((p) => [p.id, p]));
+  const extra = (id, entryId, affiliationId) => {
+    const p = byId.get(affiliationId) || map.get(`${id}:${entryId}`);
     return p
       ? {
           affiliationId: p.id,
@@ -298,7 +311,7 @@ async function decorate(db, competitions, favorites = []) {
     competitions: competitions.map((c) =>
       c.podiumFormat === 'TEAM' ? c : { ...c, podiumRoster: entriesOf(c).map((e) => ({ ...e, ...extra(c.id, e.id) })) },
     ),
-    favorites: favorites.map((f) => ({ ...f, ...extra(f.originCompetitionId, f.originEntryId) })),
+    favorites: favorites.map((f) => ({ ...f, ...extra(f.originCompetitionId, f.originEntryId, f.affiliationId) })),
   };
 }
 module.exports = {

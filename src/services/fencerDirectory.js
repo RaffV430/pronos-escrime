@@ -4,7 +4,7 @@ const { key: clubKey } = require('./accountClubs');
 
 // Réutiliser les identités des favoris : une identité incomplète ou un homonyme
 // dans une même liste officielle ne doit jamais être fusionné par son seul nom.
-function directory(competitions, favorites, club) {
+function directory(competitions, favorites, club, profiles = []) {
   const groups = new Map();
   for (const c of competitions) {
     if (c.podiumFormat === 'TEAM') continue;
@@ -12,7 +12,9 @@ function directory(competitions, favorites, club) {
     const selectable = selections(c);
     for (const entry of Array.isArray(c.podiumRoster) ? c.podiumRoster : []) {
       if (entry?.id == null || !entry.name) continue;
-      const key = selectable.get(String(entry.id))?.identityKey;
+      const key = entry.affiliationId
+        ? `profile:${entry.affiliationId}`
+        : selectable.get(String(entry.id))?.identityKey;
       if (!key) continue;
       if (!groups.has(key))
         groups.set(key, {
@@ -29,6 +31,20 @@ function directory(competitions, favorites, club) {
       if (!row.events.some((e) => e.id === c.id)) row.events.push({ id: c.id, name: c.name });
       row.favoriteId ||= links.find((l) => l.entryId === String(entry.id))?.favoriteId || null;
     }
+  }
+  for (const p of profiles) {
+    const key = `profile:${p.id}`;
+    const row = groups.get(key) || { id: null, competitionId: null, events: [], favoriteId: null };
+    groups.set(key, {
+      ...row,
+      key,
+      affiliationId: p.id,
+      name: p.name,
+      country: p.country,
+      club: p.club,
+      ageCategory: require('./fencerAgeCategory').verifiedCategory(p),
+      favoriteId: row.favoriteId || favorites.find((f) => f.affiliationId === p.id)?.id || null,
+    });
   }
   const rows = [...groups.values()];
   const nameCounts = new Map();
@@ -68,7 +84,13 @@ async function search(db, userId, { tournamentId, competitionId, query, clubOnly
   if (clubId && !selectedClub) throw failure('Club introuvable.', 404);
   const term = normalize(query);
   const decorated = await require('./fencerAffiliations').decorate(db, competitions, favorites);
-  const rows = directory(decorated.competitions, decorated.favorites, selectedClub).filter(
+  const profiles =
+    !tournamentId && db.fencerAffiliation
+      ? await db.fencerAffiliation.findMany({
+          select: { id: true, name: true, country: true, club: true, birthYear: true, federationVerified: true },
+        })
+      : [];
+  const rows = directory(decorated.competitions, decorated.favorites, selectedClub, profiles).filter(
     (row) =>
       (!competitionId || row.events.some((e) => e.id === competitionId)) &&
       (!category || row.ageCategory === category) &&
