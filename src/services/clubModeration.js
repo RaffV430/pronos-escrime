@@ -20,8 +20,8 @@ async function policy(db) {
 // ou refus de l'administration signalé comme tel. Au 3e, l'utilisateur ne peut plus proposer de club.
 const SEVERE_LIMIT = 3;
 const SEVERE_ACTIONS = ['CLUB_REQUEST_AUTO_REJECT', 'CLUB_REQUEST_SEVERE'];
-// Au plus 3 propositions de club par 24 heures et par compte.
-const DAILY_LIMIT = 3;
+// Au plus 5 propositions de club par 24 heures et par compte.
+const DAILY_LIMIT = 5;
 async function severeRefusals(db, userId) {
   const requests = await db.clubRegistrationRequest.findMany({
     where: { userId, status: 'REJECTED' },
@@ -57,7 +57,7 @@ async function submit(tx, userId, input) {
   });
   if (recent >= DAILY_LIMIT)
     throw failure(
-      'Trois propositions de club au plus par jour. Réessayez demain ou choisissez un club de la liste.',
+      'Cinq propositions de club au plus par jour. Réessayez demain ou choisissez un club de la liste.',
       429,
     );
   const data = {

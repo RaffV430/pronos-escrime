@@ -160,7 +160,7 @@ test('club requests: three severe refusals block new requests, and at most three
   state.logs.pop();
   assert.equal(await moderation.severeRefusals(tx, 7), 2);
   // Limite quotidienne.
-  state.requests.push(...[4, 5, 6].map((id) => ({ id, userId: 7, status: 'CANCELLED', createdAt: Date.now() })));
+  state.requests.push(...[4, 5, 6, 7, 8].map((id) => ({ id, userId: 7, status: 'CANCELLED', createdAt: Date.now() })));
   await assert.rejects(moderation.submit(tx, 7, { name: 'Cercle X', city: 'Paris' }), /par jour/);
   const { refusalMessage } = require('../src/services/clubRequestEmail');
   const mail = refusalMessage(
