@@ -110,12 +110,15 @@ function competitionEntry(c, name, matches, pools) {
 async function fencerProfile(db, rawName) {
   const name = String(rawName || '').trim();
   if (name.length < 2 || name.length > 120) throw failure('Nom de tireur invalide.', 400);
+  // Autres orthographes du même tireur reliées par l'administration.
+  const names = await require('./fencerAliases').expand(db, name);
+  const anyName = (n) => names.some((x) => same(x, n));
   const [matches, poolRows] = await Promise.all([
     db.match.findMany({
       where: {
         isFinished: true,
         pointsPending: false,
-        OR: [{ player1: eq(name) }, { player2: eq(name) }],
+        OR: names.flatMap((n) => [{ player1: eq(n) }, { player2: eq(n) }]),
         AND: [{ OR: [{ resultType: null }, { resultType: { not: 'CANCELLED' } }] }],
       },
       include: {
@@ -124,7 +127,7 @@ async function fencerProfile(db, rawName) {
       orderBy: [{ startsAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
     }),
     db.poolFencer.findMany({
-      where: { name: eq(name) },
+      where: { OR: names.map((n) => ({ name: eq(n) })) },
       select: {
         pool: {
           include: {
@@ -150,13 +153,13 @@ async function fencerProfile(db, rawName) {
   const { countryFor } = require('./matchCountries');
   const countries = new Set(
     competitions
-      .flatMap((c) => (c.podiumRoster || []).filter((e) => same(e.name, name)).map((e) => countryFor([e], name)))
+      .flatMap((c) => (c.podiumRoster || []).filter((e) => anyName(e.name)).map((e) => countryFor([e], e.name)))
       .filter(Boolean),
   );
   for (const row of poolRows)
     for (const f of row.pool.fencers) {
-      if (same(f.name, name)) {
-        const code = countryFor([{ name, country: f.countryCode }], name);
+      if (anyName(f.name)) {
+        const code = countryFor([{ name: f.name, country: f.countryCode }], f.name);
         if (code) countries.add(code);
       }
     }
@@ -167,12 +170,16 @@ async function fencerProfile(db, rawName) {
     );
   let country = null;
   const entries = competitions.map((c) => {
-    const entry = competitionEntry(
-      c,
-      name,
-      matches.filter((m) => m.competitionId === c.id),
-      poolRows.filter((r) => r.pool.competitionId === c.id).map((r) => r.pool),
-    );
+    const own = matches.filter((m) => m.competitionId === c.id);
+    const ownPools = poolRows.filter((r) => r.pool.competitionId === c.id).map((r) => r.pool);
+    // Orthographe utilisée dans cette épreuve.
+    const local =
+      names.find(
+        (n) =>
+          own.some((m) => same(m.player1, n) || same(m.player2, n)) ||
+          ownPools.some((p) => p.fencers.some((f) => same(f.name, n))),
+      ) || name;
+    const entry = competitionEntry(c, local, own, ownPools);
     country ||= entry.country;
     return entry.data;
   });
@@ -181,10 +188,10 @@ async function fencerProfile(db, rawName) {
   const tableau = entries.flatMap((e) => e.tableau);
   return {
     name: matches[0]
-      ? same(matches[0].player1, name)
+      ? anyName(matches[0].player1)
         ? matches[0].player1
         : matches[0].player2
-      : poolRows[0]?.pool.fencers.find((f) => same(f.name, name))?.name || name,
+      : poolRows[0]?.pool.fencers.find((f) => anyName(f.name))?.name || name,
     country,
     summary: {
       competitions: entries.length,

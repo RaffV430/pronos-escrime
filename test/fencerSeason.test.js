@@ -102,3 +102,60 @@ test('a followed fencer season lists only her own events, homonyms of another cl
   assert.equal(all.summary.tableauWins, 2);
   await assert.rejects(fencerSeason(db, 1, 5, '2026'), /Saison invalide/);
 });
+
+test('two spellings linked by the administration form one fencer history', async () => {
+  const aliases = require('../src/services/fencerAliases');
+  const store = {};
+  const logs = [];
+  const db = {
+    ...fakeDb(),
+    appSetting: {
+      findUnique: async () => (store.value ? { value: store.value } : null),
+      upsert: async ({ update }) => (store.value = update.value),
+    },
+    match: { count: async () => 1, findMany: fakeDb().match.findMany },
+    poolFencer: { count: async () => 0 },
+    auditLog: { create: async ({ data }) => logs.push(data) },
+  };
+  await assert.rejects(aliases.link(db, 1, 'MARTIN Léa', 'MARTIN Lea'), /déjà reconnues/);
+  await aliases.link(db, 1, 'MARTIN Léa', 'MARTIN-DUPONT Léa');
+  assert.deepEqual(await aliases.expand(db, 'martin léa'), ['martin léa', 'MARTIN Léa', 'MARTIN-DUPONT Léa']);
+  await aliases.link(db, 1, 'MARTIN-DUPONT Léa', 'MARTIN DUPONT Lea Marie');
+  assert.equal((await aliases.groups(db)).length, 1);
+  assert.equal((await aliases.groups(db))[0].names.length, 3);
+  await aliases.unlink(db, 1, 'MARTIN DUPONT Lea Marie');
+  assert.equal((await aliases.groups(db))[0].names.length, 2);
+  assert.equal(logs[0].action, 'Orthographes de tireur reliées');
+  // Le parcours de la saison réunit l'épreuve inscrite sous l'autre orthographe.
+  const competitions = await db.competition.findMany();
+  competitions[2].podiumRoster[0].name = 'MARTIN-DUPONT Léa';
+  const all = await fencerSeason(
+    {
+      ...db,
+      competition: { findMany: async () => competitions },
+      match: {
+        findMany: async () => [
+          {
+            id: 12,
+            competitionId: 3,
+            player1: 'MARTIN-DUPONT Léa',
+            player2: 'DURAND Chloé',
+            score1: 15,
+            score2: 14,
+            winner: 1,
+            isFinished: true,
+            round: 'T32',
+            startsAt: new Date('2026-03-10T10:00Z'),
+          },
+        ],
+      },
+    },
+    1,
+    5,
+    'all',
+  );
+  assert.deepEqual(
+    all.competitions.map((c) => c.competitionId),
+    [3],
+  );
+});
