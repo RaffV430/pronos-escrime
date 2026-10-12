@@ -291,7 +291,7 @@ async function notificationContext(db) {
             lockMode: true,
             closesAt: true,
             startsAt: true,
-            fencers: { select: { firstResultAt: true } },
+            fencers: { select: { firstResultAt: true, name: true, wins: true } },
           },
         })
       : [],
@@ -347,7 +347,58 @@ async function queueSpecial(db, id, context = null) {
       if (!sub?.enabled) return;
       const p = preferences(sub.preferences || {});
       await queueEnrollments(tx, sub, shared);
-      if ((!p.newMatches && !p.reminders && !p.roundResults && !p.poolResults) || isQuiet(p)) return;
+      const fencerResults = p.fencersOnly && (p.roundResults || p.recap);
+      if ((!p.newMatches && !p.reminders && !p.roundResults && !p.poolResults && !fencerResults) || isQuiet(p)) return;
+      // Mode « uniquement Mes tireurs » : résultat de chaque match et bilan de poule de mes tireurs,
+      // publiés depuis moins d'une heure (et après l'activation de l'option).
+      if (fencerResults) {
+        const since = Math.max(Date.now() - 3600000, new Date(sub.preferencesSince || sub.createdAt).getTime());
+        for (const x of shared.filter((y) => follows(sub, y.competition))) {
+          const names = await namesFor(tx, sub, x.competition);
+          if (!names.length) continue;
+          const queue = async (kind, key, ids) =>
+            tx.pushDelivery.upsert({
+              where: {
+                subscriptionId_competitionId_throughEventId_kind_round: {
+                  subscriptionId: id,
+                  competitionId: x.competition.id,
+                  throughEventId: 0,
+                  kind,
+                  round: key,
+                },
+              },
+              create: {
+                subscriptionId: id,
+                competitionId: x.competition.id,
+                throughEventId: 0,
+                kind,
+                round: key,
+                matchIds: ids,
+              },
+              update: {},
+            });
+          for (const m of x.matches)
+            if (
+              m.isFinished &&
+              !m.pointsPending &&
+              m.resultType !== 'CANCELLED' &&
+              concerned(m, names) &&
+              m.resultRegisteredAt &&
+              new Date(m.resultRegisteredAt).getTime() >= since
+            )
+              await queue('FENCER_RESULT', `match-${m.id}`, [m.id]);
+          for (const pool of x.pools || []) {
+            if (!pool.isFinal || !pool.fencers.some((f) => names.includes(f.name) && Number.isInteger(f.wins)))
+              continue;
+            const last = Math.max(
+              ...pool.fencers.map((f) => (f.firstResultAt ? new Date(f.firstResultAt).getTime() : 0)),
+            );
+            // Poule terminée récemment (premier résultat de moins de 3 h).
+            if (last && last >= since - 2 * 3600000) await queue('FENCER_POOL', `pool-${pool.id}`, [pool.id]);
+          }
+        }
+      }
+      if (!p.newMatches && !p.reminders && !p.roundResults && !p.poolResults && !p.recap) return;
       // Bilan des poules (au choix du joueur) : une notification par épreuve, poules toutes publiées,
       // seulement s'il y a pronostiqué et si elles ont fini après l'activation de l'option (24 h au plus).
       if (p.poolResults) {
@@ -617,7 +668,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
   if (
     prefs.fencersOnly &&
     kind !== 'FENCER_ENTRY' &&
-    !['AVAILABLE', 'REMINDER', 'REOPENED', 'POOLREMINDER', 'POOLS'].includes(kind)
+    !['AVAILABLE', 'REMINDER', 'REOPENED', 'POOLREMINDER', 'POOLS', 'FENCER_RESULT', 'FENCER_POOL'].includes(kind)
   )
     return cancel();
   if (prefs.fencersOnly && kind !== 'FENCER_ENTRY' && !names.length) return cancel();
@@ -644,7 +695,8 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     (kind === 'ROUND' && !prefs.roundResults) ||
     (kind === 'POOLRESULTS' && !prefs.poolResults) ||
     (kind === 'RECAP' && !prefs.recap && !prefs.roundResults && !prefs.poolResults) ||
-    (kind === 'REOPENED' && !prefs.newMatches)
+    (kind === 'REOPENED' && !prefs.newMatches) ||
+    (['FENCER_RESULT', 'FENCER_POOL'].includes(kind) && !prefs.roundResults && !prefs.recap)
   )
     return cancel();
   if (prefs.fencersOnly && ['POOLREMINDER', 'POOLS'].includes(kind)) {
@@ -704,7 +756,10 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     if (prefs.reminders && plan.urgent.length) return cancel();
     const deadlines = plan.missing.map(closesAt).filter(Boolean).map(Date.parse);
     ttl = Math.max(1, Math.min(900, ...deadlines.map((d) => Math.floor((d - Date.now()) / 1000))));
-    content = { ...payload(c, plan.missing, id), ...matchNotificationText(c, round, plan.missing, prefs.timezone) };
+    content = {
+      ...payload(c, plan.missing, id),
+      ...matchNotificationText(c, round, plan.missing, prefs.timezone, 'AVAILABLE', new Date(), names),
+    };
   } else if (kind === 'REMINDER') {
     const predictions = await db.prediction.findMany({
         where: { userId: sub.userId, matchId: { in: matches.map((m) => m.id) } },
@@ -723,7 +778,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     if (!missing.length || Date.now() - delivery.createdAt.getTime() > 900000) return cancel();
     ttl = Math.max(1, Math.min(900, ...missing.map((m) => Math.floor((Date.parse(closesAt(m)) - Date.now()) / 1000))));
     content = {
-      ...matchNotificationText(c, round, missing, prefs.timezone, 'REMINDER'),
+      ...matchNotificationText(c, round, missing, prefs.timezone, 'REMINDER', new Date(), names),
       tag: `pronos-${id}`,
       url: `/?tournament=${c.tournamentId}&event=${c.id}&new=1&matches=${missing
         .slice(0, 64)
@@ -744,7 +799,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
         lockMode: true,
         closesAt: true,
         startsAt: true,
-        fencers: { select: { firstResultAt: true } },
+        fencers: { select: { firstResultAt: true, name: true } },
       },
     });
     const saved = await db.poolPrediction.findMany({
@@ -752,10 +807,14 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
       select: { fencer: { select: { poolId: true } } },
     });
     const done = new Set(saved.map((r) => r.fencer.poolId));
-    const missing = pools.filter((p) => reminders.isOpen(p, Date.now()) && !done.has(p.id));
+    // Mode « uniquement Mes tireurs » : seulement les poules où figure un tireur suivi.
+    const missing = pools.filter(
+      (p) =>
+        reminders.isOpen(p, Date.now()) && !done.has(p.id) && (!names || p.fencers.some((f) => names.includes(f.name))),
+    );
     if (!missing.length) return cancel();
     ttl = Math.max(1, Math.min(900, Math.floor((Math.min(...missing.map(reminders.deadline)) - Date.now()) / 1000)));
-    content = { ...reminders.reminderText(c, missing, prefs.timezone), tag: `pronos-${id}` };
+    content = { ...reminders.reminderText(c, missing, prefs.timezone, names), tag: `pronos-${id}` };
   } else if (kind === 'ROUND') {
     if (Date.now() - delivery.createdAt.getTime() > 86400000) return cancel();
     const raw = await db.match.findMany({
@@ -817,6 +876,32 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
       tag: `pronos-${id}`,
       url: `/?tournament=${c.tournamentId}&event=${c.id}&view=mine`,
     };
+  } else if (kind === 'FENCER_RESULT') {
+    // Résultat d'un match d'un de mes tireurs, publié dans l'heure.
+    if (Date.now() - delivery.createdAt.getTime() > 3600000) return cancel();
+    const m = await db.match.findUnique({ where: { id: delivery.matchIds[0] } });
+    if (!m?.isFinished || m.pointsPending || m.resultType === 'CANCELLED' || !names || !concerned(m, names))
+      return cancel();
+    const text = require('./notificationText').fencerResultText(c, m, names);
+    if (!text.body) return cancel();
+    ttl = 3600;
+    content = { ...text, tag: `pronos-${id}`, url: `/?tournament=${c.tournamentId}&event=${c.id}&view=follow` };
+  } else if (kind === 'FENCER_POOL') {
+    // Bilan de poule d'un de mes tireurs, une fois sa poule terminée.
+    if (Date.now() - delivery.createdAt.getTime() > 3600000) return cancel();
+    const pool = await db.pool.findUnique({ where: { id: delivery.matchIds[0] }, include: { fencers: true } });
+    const own =
+      pool?.isFinal && names ? pool.fencers.filter((f) => names.includes(f.name) && Number.isInteger(f.wins)) : [];
+    if (!own.length) return cancel();
+    const { fencerPoolText } = require('./notificationText');
+    const texts = own.map((f) => fencerPoolText(c, pool, f));
+    ttl = 3600;
+    content = {
+      title: c.name,
+      body: texts.map((t) => t.body).join('\n'),
+      tag: `pronos-${id}`,
+      url: `/?tournament=${c.tournamentId}&event=${c.id}&view=follow`,
+    };
   } else if (kind === 'POOLS') {
     // Poules recomposées sur FencingTimeLive : prévenir tant que les poules concernées restent ouvertes.
     if (Date.now() - delivery.createdAt.getTime() > 86400000) return cancel();
@@ -838,10 +923,11 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
       ttl = 3600;
       content = { ...alerts.newRoundNotification(c, newRound, open), tag: `pronos-${id}` };
     } else {
-      const pools = await db.pool.findMany({
+      const all = await db.pool.findMany({
         where: { id: { in: delivery.matchIds }, competitionId: c.id, isLocked: false, isFinal: false },
-        select: { name: true, startsAt: true },
+        select: { name: true, startsAt: true, fencers: { select: { name: true } } },
       });
+      const pools = names ? all.filter((p) => p.fencers.some((f) => names.includes(f.name))) : all;
       if (delivery.matchIds.length && !pools.length) return cancel();
       ttl = 3600;
       content = {
