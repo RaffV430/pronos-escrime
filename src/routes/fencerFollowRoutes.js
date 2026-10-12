@@ -44,10 +44,11 @@ function createRouter(db) {
   router.get(
     '/directory',
     run(async (req, res) => {
-      const { tournamentId, competitionId, query = '', clubOnly, clubId, offset = '0' } = req.query;
+      const { tournamentId, competitionId, query = '', clubOnly, clubId, category, offset = '0' } = req.query;
       if (
-        !validId(tournamentId) ||
+        (tournamentId !== undefined && !validId(tournamentId)) ||
         (competitionId !== undefined && !validId(competitionId)) ||
+        (category !== undefined && (typeof category !== 'string' || !/^[A-Z0-9_-]{1,24}$/.test(category))) ||
         typeof query !== 'string' ||
         query.length > 160 ||
         (clubOnly !== undefined && clubOnly !== '1') ||
@@ -57,7 +58,8 @@ function createRouter(db) {
         return res.status(400).json({ error: 'Recherche de tireurs invalide.' });
       res.json(
         await require('../services/fencerDirectory').search(db, req.user.userId, {
-          tournamentId: Number(tournamentId),
+          tournamentId: Number(tournamentId) || null,
+          category,
           competitionId: Number(competitionId) || null,
           query,
           clubOnly: clubOnly === '1',

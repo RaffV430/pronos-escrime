@@ -285,7 +285,14 @@ async function decorate(db, competitions, favorites = []) {
   const map = new Map(links.map((l) => [`${l.competitionId}:${l.entryId}`, l.affiliation]));
   const extra = (id, entryId) => {
     const p = map.get(`${id}:${entryId}`);
-    return p ? { affiliationId: p.id, currentClub: p.club, affiliationSource: p.sourceUrl } : {};
+    return p
+      ? {
+          affiliationId: p.id,
+          currentClub: p.club,
+          affiliationSource: p.sourceUrl,
+          ageCategory: require('./fencerAgeCategory').verifiedCategory(p),
+        }
+      : {};
   };
   return {
     competitions: competitions.map((c) =>
