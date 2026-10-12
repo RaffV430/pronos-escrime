@@ -35,6 +35,8 @@ model User {
   matchReactions    MatchReaction[]
   matchComments     MatchComment[]
   createdAt         DateTime           @default(now())
+  // Réglages de notification du compte (préférences + épreuves suivies), appliqués à tous ses appareils.
+  notificationSettings Json?
 }
 
 model Match {
@@ -122,6 +124,8 @@ model Competition {
   podiumResolvedAt DateTime?
   // Points ×2 actifs (épreuve, phase ou tour) et coefficient figé du podium.
   pointsBoosts Json?
+  // Exempts du tableau lus sur FencingTimeLive : [{ round, pos, name }] (qualifiés d'office au tour suivant).
+  tableauByes Json?
   podiumMultiplier Int @default(1)
   podiumPredictions PodiumPrediction[]
   matches           Match[]

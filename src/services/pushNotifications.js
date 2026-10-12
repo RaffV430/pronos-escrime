@@ -56,32 +56,85 @@ function validateScopes(input) {
   }
   return result;
 }
-async function subscribe(db, userId, input) {
-  const subscription = validateSubscription(input.subscription),
-    scopes = validateScopes(input),
+// Réglages du compte : les mêmes sur tous les appareils du joueur (préférences + épreuves suivies).
+function settingsOf(input) {
+  const scopes = validateScopes(input),
     prefs = preferences(input.preferences);
   if (!prefs.followAll && !scopes.tournamentIds.length && !scopes.competitionIds.length)
     throw failure('Choisissez au moins un tournoi ou une épreuve, ou suivez tous les tournois.', 400);
+  return { prefs, scopes };
+}
+async function checkScopes(db, scopes) {
   const [t, c] = await Promise.all([
     db.tournament.count({ where: { id: { in: scopes.tournamentIds } } }),
     db.competition.count({ where: { id: { in: scopes.competitionIds } } }),
   ]);
   if (t !== scopes.tournamentIds.length || c !== scopes.competitionIds.length)
     throw failure('Une compétition sélectionnée n’existe plus.', 409);
+}
+const sameSettings = (row, prefs, scopes) =>
+  JSON.stringify(row.preferences) === JSON.stringify(prefs) &&
+  JSON.stringify(row.tournamentIds) === JSON.stringify(scopes.tournamentIds) &&
+  JSON.stringify(row.competitionIds) === JSON.stringify(scopes.competitionIds);
+// Applique les réglages du compte à ses autres appareils actifs (alertes en attente annulées si changement).
+async function propagate(tx, userId, prefs, scopes, exceptId = null) {
+  const others = await tx.pushSubscription.findMany({
+    where: { userId, enabled: true, ...(exceptId ? { id: { not: exceptId } } : {}) },
+    select: { id: true, preferences: true, tournamentIds: true, competitionIds: true },
+  });
+  const changed = others.filter((o) => !sameSettings(o, prefs, scopes)).map((o) => o.id);
+  if (!changed.length) return 0;
+  await tx.pushDelivery.updateMany({
+    where: { subscriptionId: { in: changed }, status: { in: ['PENDING', 'SENDING'] } },
+    data: { status: 'CANCELLED' },
+  });
+  await tx.pushSubscription.updateMany({
+    where: { id: { in: changed } },
+    data: { preferences: prefs, ...scopes, preferencesSince: new Date() },
+  });
+  return changed.length;
+}
+// Réglages enregistrés sur le compte, sinon ceux de l'appareil le plus récent, sinon les réglages par défaut.
+async function accountSettings(db, userId) {
+  const user = await db.user.findUnique({ where: { id: userId }, select: { notificationSettings: true } });
+  const stored = user?.notificationSettings;
+  const latest = stored
+    ? null
+    : await db.pushSubscription.findFirst({
+        where: { userId, enabled: true },
+        orderBy: { updatedAt: 'desc' },
+        select: { preferences: true, tournamentIds: true, competitionIds: true },
+      });
+  const source = stored || latest || {};
+  return {
+    preferences: preferences(source.preferences || {}),
+    tournamentIds: source.tournamentIds || [],
+    competitionIds: source.competitionIds || [],
+  };
+}
+// Enregistrement depuis un appareil sans notification (ordinateur) : compte + tous les appareils actifs.
+async function saveSettings(db, userId, input) {
+  const { prefs, scopes } = settingsOf(input);
+  await checkScopes(db, scopes);
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "User" WHERE id=${userId} FOR UPDATE`;
-    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184725)`;
+    await tx.user.update({ where: { id: userId }, data: { notificationSettings: { preferences: prefs, ...scopes } } });
+    const devices = await propagate(tx, userId, prefs, scopes);
+    return { preferences: prefs, ...scopes, devices };
+  });
+}
+async function subscribe(db, userId, input) {
+  const subscription = validateSubscription(input.subscription);
+  const { prefs, scopes } = settingsOf(input);
+  await checkScopes(db, scopes);
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id=${userId} FOR UPDATE`;
     const current = await tx.pushSubscription.findUnique({ where: { endpoint: subscription.endpoint } });
     if (current && current.userId !== userId)
       throw failure('Cet appareil est associé à un autre compte. Réinitialisez son abonnement.', 409);
     if (!current && (await tx.pushSubscription.count({ where: { userId, enabled: true } })) >= 10)
       throw failure('Dix appareils sont déjà activés. Désactivez un ancien appareil.', 409);
-    const changed =
-      JSON.stringify(current?.preferences) !== JSON.stringify(prefs) ||
-      !current?.enabled ||
-      JSON.stringify(current.tournamentIds) !== JSON.stringify(scopes.tournamentIds) ||
-      JSON.stringify(current.competitionIds) !== JSON.stringify(scopes.competitionIds);
-    const latest = changed ? await tx.pushEvent.findFirst({ orderBy: { id: 'desc' } }) : null;
+    const changed = !current?.enabled || !sameSettings(current, prefs, scopes);
     if (current && changed)
       await tx.pushDelivery.updateMany({
         where: { subscriptionId: current.id, status: { in: ['PENDING', 'SENDING'] } },
@@ -89,13 +142,13 @@ async function subscribe(db, userId, input) {
       });
     const row = await tx.pushSubscription.upsert({
       where: { endpoint: subscription.endpoint },
-      create: { ...subscription, ...scopes, preferences: prefs, userId, lastEventId: latest?.id || 0 },
+      create: { ...subscription, ...scopes, preferences: prefs, userId },
       update: {
         ...subscription,
         ...scopes,
         preferences: prefs,
         enabled: true,
-        ...(changed ? { lastEventId: latest?.id || 0, preferencesSince: new Date() } : {}),
+        ...(changed ? { preferencesSince: new Date() } : {}),
       },
     });
     // Même navigateur inscrit sur l'ancienne adresse : son ancienne inscription est remplacée (pas de doublon).
@@ -116,7 +169,10 @@ async function subscribe(db, userId, input) {
         replaced = ids.length;
       }
     }
-    return { id: row.id, enabled: row.enabled, preferences: prefs, ...scopes, replaced };
+    // Réglages du compte : enregistrés et appliqués aux autres appareils actifs du joueur.
+    await tx.user.update({ where: { id: userId }, data: { notificationSettings: { preferences: prefs, ...scopes } } });
+    const devices = await propagate(tx, userId, prefs, scopes, row.id);
+    return { id: row.id, enabled: row.enabled, preferences: prefs, ...scopes, replaced, devices };
   });
 }
 function follows(sub, c) {
@@ -139,26 +195,6 @@ async function followers(db, c, select = { id: true }) {
 }
 // Inscriptions faites sur l'ancienne adresse (pronos-escrime.vercel.app), avant le passage au domaine.
 const DOMAIN_SWITCH = Date.parse('2026-10-05T10:15:00Z');
-async function queueForSubscription(db, id) {
-  return db.$transaction(
-    async (tx) => {
-      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184725)`;
-      await tx.$queryRaw`SELECT id FROM "PushSubscription" WHERE id=${id} FOR UPDATE`;
-      const sub = await tx.pushSubscription.findUnique({ where: { id } });
-      if (!sub?.enabled) return;
-      const events = await tx.pushEvent.findMany({
-        where: { id: { gt: sub.lastEventId } },
-        orderBy: { id: 'asc' },
-        take: 500,
-      });
-      if (!events.length) return;
-      const throughEventId = events.at(-1).id;
-      // Event cursor retained for compatibility; round policy queues notifications below.
-      await tx.pushSubscription.update({ where: { id }, data: { lastEventId: throughEventId } });
-    },
-    { timeout: 15000 },
-  );
-}
 function payload(c, matches, id) {
   return {
     title: `${matches.length} nouveau${matches.length > 1 ? 'x' : ''} match${matches.length > 1 ? 's' : ''} à pronostiquer`,
@@ -347,9 +383,13 @@ async function queueSpecial(db, id, context = null) {
       if (!sub?.enabled) return;
       const p = preferences(sub.preferences || {});
       await queueEnrollments(tx, sub, shared);
-      const fencerResults = p.fencersOnly && (p.roundResults || p.recap);
-      if ((!p.newMatches && !p.reminders && !p.roundResults && !p.poolResults && !fencerResults) || isQuiet(p)) return;
-      // Mode « uniquement Mes tireurs » : résultat de chaque match et bilan de poule de mes tireurs,
+      const fencerResults = p.fencerResults;
+      if (
+        (!p.newMatches && !p.reminders && !p.roundResults && !p.poolResults && !p.recap && !fencerResults) ||
+        isQuiet(p)
+      )
+        return;
+      // Résultats de Mes tireurs : résultat de chaque match et bilan de poule de mes tireurs,
       // publiés depuis moins d'une heure (et après l'activation de l'option).
       if (fencerResults) {
         const since = Math.max(Date.now() - 3600000, new Date(sub.preferencesSince || sub.createdAt).getTime());
@@ -664,14 +704,11 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
   }
   if (kind === 'BOOST') return deliverBoost(db, delivery, sub, c, sender, cancel);
   const prefs = preferences(sub.preferences || {});
-  const names = prefs.fencersOnly && kind !== 'FENCER_ENTRY' ? await namesFor(db, sub, c) : null;
-  if (
-    prefs.fencersOnly &&
-    kind !== 'FENCER_ENTRY' &&
-    !['AVAILABLE', 'REMINDER', 'REOPENED', 'POOLREMINDER', 'POOLS', 'FENCER_RESULT', 'FENCER_POOL'].includes(kind)
-  )
-    return cancel();
-  if (prefs.fencersOnly && kind !== 'FENCER_ENTRY' && !names.length) return cancel();
+  // « Uniquement Mes tireurs » limite les alertes de pronostic ; les résultats de Mes tireurs ont besoin
+  // des noms ; les bilans personnels (tour, poules, récap) ne dépendent pas des tireurs suivis.
+  const scoped = prefs.fencersOnly && ['AVAILABLE', 'REMINDER', 'REOPENED', 'POOLREMINDER', 'POOLS'].includes(kind);
+  const names = scoped || ['FENCER_RESULT', 'FENCER_POOL'].includes(kind) ? await namesFor(db, sub, c) : null;
+  if (names && !names.length) return cancel();
   // Une recomposition annoncée pendant les heures calmes attend leur fin plutôt que d'être perdue.
   // Poules modifiées juste avant leur début (France) : notification prioritaire, sans attendre ni filtre.
   const urgentPools = kind === 'POOLS' && String(round || '').startsWith('pools-urgent-');
@@ -696,7 +733,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     (kind === 'POOLRESULTS' && !prefs.poolResults) ||
     (kind === 'RECAP' && !prefs.recap && !prefs.roundResults && !prefs.poolResults) ||
     (kind === 'REOPENED' && !prefs.newMatches) ||
-    (['FENCER_RESULT', 'FENCER_POOL'].includes(kind) && !prefs.roundResults && !prefs.recap)
+    (['FENCER_RESULT', 'FENCER_POOL'].includes(kind) && !prefs.fencerResults)
   )
     return cancel();
   if (prefs.fencersOnly && ['POOLREMINDER', 'POOLS'].includes(kind)) {
@@ -885,7 +922,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     const text = require('./notificationText').fencerResultText(c, m, names);
     if (!text.body) return cancel();
     ttl = 3600;
-    content = { ...text, tag: `pronos-${id}`, url: `/?tournament=${c.tournamentId}&event=${c.id}&view=follow` };
+    content = { ...text, tag: `pronos-${id}`, url: `/direct/${c.tournamentId}/${c.id}` };
   } else if (kind === 'FENCER_POOL') {
     // Bilan de poule d'un de mes tireurs, une fois sa poule terminée.
     if (Date.now() - delivery.createdAt.getTime() > 3600000) return cancel();
@@ -900,7 +937,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
       title: c.name,
       body: texts.map((t) => t.body).join('\n'),
       tag: `pronos-${id}`,
-      url: `/?tournament=${c.tournamentId}&event=${c.id}&view=follow`,
+      url: `/direct/${c.tournamentId}/${c.id}`,
     };
   } else if (kind === 'POOLS') {
     // Poules recomposées sur FencingTimeLive : prévenir tant que les poules concernées restent ouvertes.
@@ -1000,6 +1037,22 @@ async function retireLegacy(db) {
     data: { status: 'CANCELLED' },
   });
 }
+// Épreuve où une alerte peut partir : matchs, poules ou horaires rouverts, et podium officiel publié
+// depuis moins de 24 h au plus (récap).
+function active(x, now = Date.now()) {
+  const resolved = x.competition.podiumResolvedAt && new Date(x.competition.podiumResolvedAt).getTime();
+  if (resolved && now - resolved > 86400000) return false;
+  return Boolean(x.matches?.length || x.pools?.length || x.reopened?.length);
+}
+function relevant(sub, live) {
+  let p;
+  try {
+    p = preferences(sub.preferences || {});
+  } catch {
+    return true;
+  }
+  return p.fencerEntries || live.some((x) => follows(sub, x.competition));
+}
 let legacyRetired = false;
 async function dispatch(db, sender = send) {
   if (running) return;
@@ -1015,12 +1068,15 @@ async function dispatch(db, sender = send) {
       where: { status: 'SENDING', claimedAt: { lt: new Date(Date.now() - 120000) } },
       data: { status: 'PENDING' },
     });
-    const subs = await db.pushSubscription.findMany({ where: { enabled: true }, select: { id: true } });
+    const subs = await db.pushSubscription.findMany({
+      where: { enabled: true },
+      select: { id: true, tournamentIds: true, competitionIds: true, preferences: true },
+    });
     const context = subs.length ? await notificationContext(db) : [];
-    for (const sub of subs) {
-      await queueForSubscription(db, sub.id);
-      await queueSpecial(db, sub.id, context);
-    }
+    // Seuls les appareils concernés par une épreuve en cours (ou qui attendent l'engagement de leurs
+    // tireurs) sont examinés : le reste de la semaine, la tâche ne touche presque plus la base.
+    const live = context.filter((x) => active(x));
+    for (const sub of subs) if (relevant(sub, live)) await queueSpecial(db, sub.id, context);
     const pending = await db.pushDelivery.findMany({
       where: { status: 'PENDING', nextAttemptAt: { lte: new Date() } },
       select: { id: true },
@@ -1083,8 +1139,12 @@ module.exports = {
   validateSubscription,
   validateScopes,
   subscribe,
+  saveSettings,
+  accountSettings,
+  propagate,
   follows,
-  queueForSubscription,
+  active,
+  relevant,
   payload,
   deliver,
   dispatch,

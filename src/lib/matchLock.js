@@ -5,10 +5,13 @@ function closesAt(match) {
   if (match.timingUnverified || match.awaitingPreviousRound) return null;
   const start = time(match.startsAt),
     completed = time(match.previousRoundCompletedAt);
-  const deadline = Math.max(
+  let deadline = Math.max(
     Number.isFinite(start) ? start : -Infinity,
     Number.isFinite(completed) ? completed + GRACE_MS : -Infinity,
   );
+  // Un premier résultat du tour publié avant cette échéance : les assauts ont commencé, le tour ferme.
+  const begun = time(match.roundStartedAt);
+  if (Number.isFinite(begun) && (!Number.isFinite(deadline) || begun < deadline)) deadline = begun;
   return Number.isFinite(deadline) ? new Date(deadline).toISOString() : null;
 }
 function matchClosed(match, now = Date.now()) {
@@ -41,8 +44,20 @@ function roundContext(matches, rounds) {
           Number.isFinite(time(m.progressionConfirmedAt)) ||
           (m.isFinished && Number.isFinite(time(m.progressionConfirmedAt || m.resultRegisteredAt))),
       );
+    // Premier résultat officiel du même tour : les assauts de ce tour ont commencé.
+    const begun = matches
+      .filter(
+        (m) =>
+          m.competitionId === match.competitionId &&
+          m.round === match.round &&
+          m.resultType !== 'CANCELLED' &&
+          m.isFinished &&
+          Number.isFinite(time(m.resultRegisteredAt)),
+      )
+      .map((m) => time(m.resultRegisteredAt));
     return {
       ...match,
+      roundStartedAt: begun.length ? new Date(Math.min(...begun)).toISOString() : null,
       manualUnlockUntil: config?.manualUnlockUntil || null,
       timingUnverified: !config,
       awaitingPreviousRound: Boolean(config?.previousRound && !complete),

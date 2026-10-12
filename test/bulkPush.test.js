@@ -77,35 +77,24 @@ test('following a tournament includes future events but unrelated events stay ex
   assert.match(data.url, /event=5&new=1&matches=4,9/);
   assert.equal(data.tag, 'pronos-batch');
 });
-test('legacy event cursor advances without queuing per-import alerts', async () => {
-  const sub = { id: 's', enabled: true, lastEventId: 0, tournamentIds: [1], competitionIds: [] },
-    deliveries = [];
-  const events = [1, 2, 3].map((id) => ({ id, matchId: id, competitionId: 5, createdAt: new Date() }));
-  const db = {
-    $queryRaw: async () => [],
-    pushSubscription: { findUnique: async () => sub, update: async ({ data }) => Object.assign(sub, data) },
-    pushEvent: { findMany: async ({ where }) => events.filter((e) => e.id > where.id.gt) },
-    competition: { findMany: async () => [{ id: 5, tournamentId: 1 }] },
-    match: {
-      findMany: async () =>
-        events.map((e) => ({
-          id: e.id,
-          competitionId: 5,
-          round: 'T4',
-          isFinished: e.id === 3,
-          startsAt: new Date(Date.now() + 3600000),
-        })),
-    },
-    matchRound: {
-      findMany: async () => [{ competitionId: 5, round: 'T4', previousRound: null, expectedMatchCount: 3 }],
-    },
-    pushDelivery: { create: async ({ data }) => deliveries.push(data) },
+test('only devices concerned by a running event are examined', () => {
+  const now = Date.now();
+  const running = { competition: { id: 5, tournamentId: 1 }, matches: [{ id: 1 }], pools: [], reopened: [] };
+  const finished = {
+    competition: { id: 6, tournamentId: 2, podiumResolvedAt: new Date(now - 2 * 86400000) },
+    matches: [{ id: 2 }],
+    pools: [],
   };
-  db.$transaction = (f) => f(db);
-  await push.queueForSubscription(db, 's');
-  await push.queueForSubscription(db, 's');
-  assert.equal(deliveries.length, 0);
-  assert.equal(sub.lastEventId, 3);
+  const empty = { competition: { id: 7, tournamentId: 3 }, matches: [], pools: [], reopened: [] };
+  assert.ok(push.active(running, now));
+  assert.ok(!push.active(finished, now));
+  assert.ok(!push.active(empty, now));
+  const live = [running];
+  const own = (prefs, tournamentIds = []) => ({ tournamentIds, competitionIds: [], preferences: prefs });
+  assert.ok(push.relevant(own({ followAll: true }), live));
+  assert.ok(!push.relevant(own({ followAll: false }, [2]), live));
+  // Engagement de Mes tireurs : examiné même sans épreuve en cours.
+  assert.ok(push.relevant(own({ followAll: false, fencerEntries: true }, [2]), []));
 });
 test('delivery rechecks closure, disables expired endpoints and sends only once after success', async () => {
   const sub = { id: 's', enabled: true, tournamentIds: [1], competitionIds: [] };
@@ -174,7 +163,7 @@ test('réinscription sur la nouvelle adresse : l’ancienne inscription du même
   const cancelled = [];
   const tx = {
     $queryRaw: async () => [],
-    pushEvent: { findFirst: async () => ({ id: 3 }) },
+    user: { update: async () => ({}) },
     pushDelivery: { updateMany: async ({ where }) => cancelled.push(where.subscriptionId) },
     pushSubscription: {
       findUnique: async () => null,
@@ -186,7 +175,11 @@ test('réinscription sur la nouvelle adresse : l’ancienne inscription du même
       },
       findMany: async ({ where }) =>
         rows.filter(
-          (r) => r.userId === where.userId && r.enabled && r.id !== where.id.not && r.createdAt < where.createdAt.lt,
+          (r) =>
+            r.userId === where.userId &&
+            r.enabled &&
+            r.id !== where.id?.not &&
+            (!where.createdAt || r.createdAt < where.createdAt.lt),
         ),
       updateMany: async ({ where, data }) =>
         rows.filter((r) => where.id.in.includes(r.id)).forEach((r) => Object.assign(r, data)),

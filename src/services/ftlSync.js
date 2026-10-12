@@ -150,7 +150,8 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
     throw failure('Tableau principal ou petite finale non identifiable.');
   let matches = [],
     rounds = [],
-    issues = [];
+    issues = [],
+    byes = [];
   // La petite finale renumérote ses deux équipes 1 et 2 : garder les têtes de série du tableau principal.
   const entrySeeds = new Map();
   for (const t of [...main, ...(c.podiumFormat === 'TEAM' ? bronzes : [])]) {
@@ -172,6 +173,7 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
     }
     matches.push(...parsed.matches);
     rounds.push(...parsed.rounds);
+    byes.push(...(parsed.byes || []));
     issues.push(...(parsed.issues || []));
   }
   validateManifest(rounds);
@@ -206,7 +208,17 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
       warnings.push(e.status ? e.message : 'Podium non vérifiable pour le moment.');
     }
   }
-  return { sourceUrl, matches, rounds, officialPodium, resultsSourceUrl, warnings, issues, checkedAt: new Date() };
+  return {
+    sourceUrl,
+    matches,
+    rounds,
+    byes,
+    officialPodium,
+    resultsSourceUrl,
+    warnings,
+    issues,
+    checkedAt: new Date(),
+  };
 }
 function planMatches(existing, observation, { allowPartial = false } = {}) {
   existing = existing.filter((m) => m.resultType !== 'CANCELLED');
@@ -420,6 +432,12 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       );
     summary.warnings.push(issue.message);
   }
+  // Exempts du tableau (qualifiés d'office) : affichés au tour suivant dès leur publication.
+  if (
+    Array.isArray(observation.byes) &&
+    JSON.stringify(current?.tableauByes || []) !== JSON.stringify(observation.byes)
+  )
+    await tx.competition.update({ where: { id: c.id }, data: { tableauByes: observation.byes } });
   for (const observedRound of observation.rounds) {
     const old = oldRounds.find((r) => r.round === observedRound.round);
     const r =
@@ -514,8 +532,6 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
     if (!m) {
       summary.created++;
       summary.createdIds.push(saved.id);
-      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184725)`;
-      await tx.pushEvent.create({ data: { matchId: saved.id, competitionId: c.id } });
     }
     if (o.pointsPending) {
       const predictions = await tx.prediction.findMany({ where: { matchId: saved.id } });

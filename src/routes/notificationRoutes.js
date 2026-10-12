@@ -38,6 +38,15 @@ router.get(
     ),
   ),
 );
+// Réglages du compte (identiques sur tous les appareils), lisibles et modifiables sans appareil inscrit.
+router.get(
+  '/settings',
+  wrap(async (req, res) => res.json(await push.accountSettings(db, req.user.userId))),
+);
+router.put(
+  '/settings',
+  wrap(async (req, res) => res.json(await push.saveSettings(db, req.user.userId, req.body))),
+);
 router.post(
   '/status',
   wrap(async (req, res) => {
