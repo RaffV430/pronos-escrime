@@ -16,6 +16,8 @@ const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet());
+// Réponses compressées (gzip) : 5 à 10 fois moins de données à télécharger, décisif en salle mal couverte.
+app.use(require('compression')({ threshold: 1024 }));
 app.use(
   cors({
     origin(origin, callback) {
