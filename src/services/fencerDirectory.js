@@ -26,7 +26,7 @@ function directory(competitions, favorites, club) {
         });
       const row = groups.get(key);
       if (!row.ageCategory && entry.ageCategory) row.ageCategory = entry.ageCategory;
-      if (!row.events.some((e) => e.id === c.id)) row.events.push({ id: c.id, name: c.name, category: c.category });
+      if (!row.events.some((e) => e.id === c.id)) row.events.push({ id: c.id, name: c.name });
       row.favoriteId ||= links.find((l) => l.entryId === String(entry.id))?.favoriteId || null;
     }
   }
@@ -54,7 +54,7 @@ async function search(db, userId, { tournamentId, competitionId, query, clubOnly
   const [competitions, favorites, profile, clubs] = await Promise.all([
     db.competition.findMany({
       where: tournamentId ? { tournamentId } : {},
-      select: { id: true, name: true, category: true, podiumFormat: true, podiumRoster: true },
+      select: { id: true, name: true, podiumFormat: true, podiumRoster: true },
       orderBy: { id: 'asc' },
     }),
     db.followedFencer.findMany({ where: { userId }, orderBy: { id: 'asc' } }),

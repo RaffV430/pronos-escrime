@@ -46,7 +46,8 @@ test('recherche accentuée, pagination, épreuve hors tournoi refusée et lectur
   const db = {
     tournament: { findUnique: async () => ({ id: 1 }) },
     competition: {
-      findMany: async ({ where }) => {
+      findMany: async ({ where, select }) => {
+        assert.equal(select.category, undefined);
         assert.equal(where.tournamentId, 1);
         return competitions;
       },
