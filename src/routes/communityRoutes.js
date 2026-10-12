@@ -25,6 +25,7 @@ const wrap = (fn) => async (req, res) => {
   }
 };
 const groups = require('../services/groups');
+const { validateScope, scopeOfMember, scopedRow, setPreference } = require('../services/delegationScope');
 const { enroll } = groups;
 // Début d'un tournoi (premier match ou première poule) : moment où la composition des clubs est figée.
 async function startOf(tournamentId) {
@@ -133,6 +134,7 @@ router.get(
         where: groups.currentLeaguesWhere(req.user.userId),
         include: {
           registeredClub: { select: { description: true } },
+          members: { where: { userId: req.user.userId, leftAt: null }, select: { predictionScope: true } },
           _count: { select: { members: { where: { leftAt: null } } } },
         },
         orderBy: { id: 'desc' },
@@ -148,6 +150,7 @@ router.post(
     // Les clubs passent uniquement par Mon compte (demande vérifiée par l'administration).
     if (kind === 'CLUB') fail('Les clubs se choisissent ou se demandent depuis Mon compte.', 403);
     if (kind !== 'PRIVATE') fail('Type de groupe invalide.');
+    const predictionScope = validateScope(req.body.predictionScope);
     const result = await db.$transaction(async (tx) => {
       const league = await tx.league.create({
         data: {
@@ -160,9 +163,19 @@ router.post(
         },
       });
       await enroll(tx, league, req.user.userId);
+      await tx.leagueMember.update({
+        where: { leagueId_userId: { leagueId: league.id, userId: req.user.userId } },
+        data: { predictionScope },
+      });
       return league;
     });
     res.status(201).json(result);
+  }),
+);
+router.put(
+  '/leagues/:id/preferences',
+  wrap(async (req, res) => {
+    res.json(await setPreference(db, id(req.params.id), req.user.userId, req.body.predictionScope));
   }),
 );
 router.post(
@@ -197,7 +210,7 @@ router.post(
   }),
 );
 // Duel match par match sur les matchs terminés uniquement : aucun pronostic n'est dévoilé avant la fin d'un match.
-async function duel(userId, opponentId, competition) {
+async function duel(userId, opponentId, competition, scopes = ['ALL', 'ALL']) {
   const matches = await db.match.findMany({
     where: {
       isFinished: true,
@@ -234,7 +247,15 @@ async function duel(userId, opponentId, competition) {
   ]);
   return {
     opponent,
-    ...buildDuel(matches, mine, theirs, { pools, poolMine, poolTheirs, podiums, podiumMine, podiumTheirs }),
+    ...buildDuel(matches, scopes[0] === 'PODIUM' ? [] : mine, scopes[1] === 'PODIUM' ? [] : theirs, {
+      pools,
+      poolMine: scopes[0] === 'ALL' ? poolMine : [],
+      poolTheirs: scopes[1] === 'ALL' ? poolTheirs : [],
+      podiums,
+      podiumMine: scopes[0] !== 'TABLEAU' ? podiumMine : [],
+      podiumTheirs: scopes[1] !== 'TABLEAU' ? podiumTheirs : [],
+    }),
+    predictionScopes: scopes,
   };
 }
 // Duel depuis les Classements, avec n'importe quel joueur classé : épreuve, tournoi ou toute la saison.
@@ -263,7 +284,10 @@ router.get(
     const tournamentId = scopeOf(req);
     res.json({
       league: { id: league.id, name: league.name },
-      ...(await duel(req.user.userId, opponentId, tournamentId ? { tournamentId } : null)),
+      ...(await duel(req.user.userId, opponentId, tournamentId ? { tournamentId } : null, [
+        scopeOfMember(league, req.user.userId),
+        scopeOfMember(league, opponentId),
+      ])),
     });
   }),
 );
@@ -277,9 +301,18 @@ router.get(
     const counted = groups.membersFor(league, { start, tournamentId });
     const rows = await standings(db, tournamentId ? { tournamentId } : {});
     res.json({
-      league: { ...league, members: undefined, memberCount: league.members.filter(groups.active).length },
+      league: {
+        ...league,
+        members: undefined,
+        memberCount: league.members.filter(groups.active).length,
+        predictionScope: scopeOfMember(league, req.user.userId),
+      },
       tournamentId,
-      ranking: rankRows(rows.filter((r) => counted.some((m) => m.userId === r.id))),
+      ranking: rankRows(
+        rows
+          .filter((r) => counted.some((m) => m.userId === r.id))
+          .map((r) => scopedRow(r, scopeOfMember(league, r.id))),
+      ),
     });
   }),
 );

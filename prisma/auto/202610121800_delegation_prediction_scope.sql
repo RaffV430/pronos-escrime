@@ -1,0 +1,1 @@
+ALTER TABLE "LeagueMember" ADD COLUMN IF NOT EXISTS "predictionScope" TEXT NOT NULL DEFAULT 'ALL';

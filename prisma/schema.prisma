@@ -258,6 +258,7 @@ model League {
   @@index([tournamentId])
 }
 model LeagueMember {
+  predictionScope String @default("ALL")
   id Int @id @default(autoincrement())
   leagueId Int
   league League @relation(fields:[leagueId],references:[id])
