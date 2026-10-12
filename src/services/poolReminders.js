@@ -26,7 +26,8 @@ function reminderPlan(pools, predictedPoolIds, now = Date.now()) {
   }
   return [...rounds].map(([round, missing]) => ({ round, key: `${PREFIX}${round}`, missing }));
 }
-function reminderText(c, missing, timezone = 'Europe/Paris') {
+// fencers : tireurs suivis (mode « uniquement Mes tireurs ») ; la poule est nommée avec eux.
+function reminderText(c, missing, timezone = 'Europe/Paris', fencers = null) {
   const first = Math.min(...missing.map(deadline));
   const time = new Intl.DateTimeFormat('fr-FR', {
     timeZone: timezone,
@@ -35,6 +36,18 @@ function reminderText(c, missing, timezone = 'Europe/Paris') {
     hourCycle: 'h23',
   }).format(new Date(first));
   const n = missing.length;
+  if (fencers?.length) {
+    const { fencerList } = require('./notificationText');
+    const mine = missing.flatMap((p) => (p.fencers || []).map((f) => f.name).filter((x) => fencers.includes(x)));
+    return {
+      title: c.name,
+      body:
+        n === 1
+          ? `${missing[0].name} de ${fencerList(mine)} · pronostic à compléter · clôture vers ${time}`
+          : `Poules de ${fencerList(mine)} · ${n} poules à compléter · clôture vers ${time}`,
+      url: `/?tournament=${c.tournamentId}&event=${c.id}&view=pools`,
+    };
+  }
   return {
     title: c.name,
     body: `Poules · ${n} poule${n > 1 ? 's' : ''} sans pronostic · clôture vers ${time}`,

@@ -6,7 +6,7 @@ const now = new Date('2026-09-28T12:00:00Z'),
 test('short event title, readable round, count and localized deadline', () => {
   const p = matchNotificationText({ name: "Senior Women's Saber" }, 'T2', [m], 'Europe/Paris', 'AVAILABLE', now);
   assert.equal(p.title, "Senior Women's Saber");
-  assert.match(p.body, /Finale · 1 match à pronostiquer · clôture à 14:50 UTC\+2/);
+  assert.match(p.body, /Finale · 1 match à pronostiquer · clôture à 14:50$/);
   assert.match(
     matchNotificationText({ name: 'Fleuret hommes' }, 'T32', Array(8).fill(m), 'Europe/Istanbul', 'REMINDER', now).body,
     /T32 · 8 matchs à compléter · clôture à 15:50 UTC\+3/,
