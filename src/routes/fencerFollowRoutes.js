@@ -26,6 +26,21 @@ function createRouter(db) {
       res.json(await require('../services/fencerHistory').history(db, req.user.userId, Number(req.params.id)));
     }),
   );
+  // Toutes les épreuves du tireur suivi, saison par saison (?season=2026-2027 ou all).
+  router.get(
+    '/:id/season',
+    run(async (req, res) => {
+      if (!validId(req.params.id)) return res.status(400).json({ error: 'Favori invalide.' });
+      res.json(
+        await require('../services/fencerSeason').fencerSeason(
+          db,
+          req.user.userId,
+          Number(req.params.id),
+          req.query.season ?? null,
+        ),
+      );
+    }),
+  );
   router.get(
     '/directory',
     run(async (req, res) => {

@@ -73,6 +73,40 @@ function finalPlace(competition, name, tableau) {
   return null;
 }
 
+// Parcours d'un tireur (nom tel qu'inscrit) dans une épreuve : poules, tableau, place finale et date.
+function competitionEntry(c, name, matches, pools) {
+  let country = null;
+  const tableau = matches
+    .map((m) => {
+      const first = same(m.player1, name);
+      country ||= (first ? m.player1Country : m.player2Country) || null;
+      return { ...fromSide(m, name), opponentCountry: (first ? m.player2Country : m.player1Country) || null };
+    })
+    .sort((a, b) => roundSize(b.round) - roundSize(a.round));
+  const lines = pools
+    .map((p) => poolLine(p, name))
+    .filter(Boolean)
+    .sort((a, b) => String(a.pool).localeCompare(String(b.pool), 'fr', { numeric: true }));
+  country ||= olympicCodeFor(c.podiumRoster, name) || null;
+  const dates = [...lines.map((p) => p.startsAt), ...tableau.map((m) => m.date)]
+    .filter(Boolean)
+    .map((d) => new Date(d));
+  const date = dates.length ? new Date(Math.min(...dates)).toISOString() : new Date(c.createdAt).toISOString();
+  return {
+    country,
+    data: {
+      competitionId: c.id,
+      competition: c.name,
+      tournamentId: c.tournament?.id || null,
+      tournament: c.tournament?.name || null,
+      date,
+      result: finalPlace(c, name, tableau),
+      pools: lines,
+      tableau,
+    },
+  };
+}
+
 async function fencerProfile(db, rawName) {
   const name = String(rawName || '').trim();
   if (name.length < 2 || name.length > 120) throw failure('Nom de tireur invalide.', 400);
@@ -133,34 +167,14 @@ async function fencerProfile(db, rawName) {
     );
   let country = null;
   const entries = competitions.map((c) => {
-    const tableau = matches
-      .filter((m) => m.competitionId === c.id)
-      .map((m) => {
-        const first = same(m.player1, name);
-        country ||= (first ? m.player1Country : m.player2Country) || null;
-        return { ...fromSide(m, name), opponentCountry: (first ? m.player2Country : m.player1Country) || null };
-      })
-      .sort((a, b) => roundSize(b.round) - roundSize(a.round));
-    const pools = poolRows
-      .filter((r) => r.pool.competitionId === c.id)
-      .map((r) => poolLine(r.pool, name))
-      .filter(Boolean)
-      .sort((a, b) => String(a.pool).localeCompare(String(b.pool), 'fr', { numeric: true }));
-    country ||= olympicCodeFor(c.podiumRoster, name) || null;
-    const dates = [...pools.map((p) => p.startsAt), ...tableau.map((m) => m.date)]
-      .filter(Boolean)
-      .map((d) => new Date(d));
-    const date = dates.length ? new Date(Math.min(...dates)).toISOString() : new Date(c.createdAt).toISOString();
-    return {
-      competitionId: c.id,
-      competition: c.name,
-      tournamentId: c.tournament?.id || null,
-      tournament: c.tournament?.name || null,
-      date,
-      result: finalPlace(c, name, tableau),
-      pools,
-      tableau,
-    };
+    const entry = competitionEntry(
+      c,
+      name,
+      matches.filter((m) => m.competitionId === c.id),
+      poolRows.filter((r) => r.pool.competitionId === c.id).map((r) => r.pool),
+    );
+    country ||= entry.country;
+    return entry.data;
   });
   entries.sort((a, b) => b.date.localeCompare(a.date));
   const poolBouts = entries.flatMap((e) => e.pools.flatMap((p) => p.bouts));
@@ -223,4 +237,4 @@ async function poolMeetings(db, a, b, countries = {}) {
   });
 }
 
-module.exports = { fencerProfile, poolMeetings, poolLine, bout, finalPlace };
+module.exports = { competitionEntry, fencerProfile, poolMeetings, poolLine, bout, finalPlace };
