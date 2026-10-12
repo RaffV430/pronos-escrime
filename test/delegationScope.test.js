@@ -49,7 +49,7 @@ test('legacy membership and clubs retain their current full standings', () => {
 test('invalid preferences are rejected rather than broadening their scope', () => {
   for (const scope of ['TABLEAU', 'PODIUM', 'ALL']) assert.equal(validateScope(scope), scope);
   assert.equal(validateScope(), 'ALL');
-  for (const scope of [null, '', 'all', [], {}, 'POOLS']) assert.throws(() => validateScope(scope), { status: 400 });
+  for (const scope of [null, '', 'all', [], {}, 'NONE']) assert.throws(() => validateScope(scope), { status: 400 });
 });
 
 test('only an active member can update their own delegation preference', async () => {
@@ -74,4 +74,20 @@ test('only an active member can update their own delegation preference', async (
   await assert.rejects(setPreference(db, 3, 1, 'TABLEAU'), { status: 400 });
   await assert.rejects(setPreference(db, 3, 1, 'INVALID'), { status: 400 });
   assert.equal(writes.length, 1);
+});
+
+test('all nonempty section combinations sum only the selected earned points', () => {
+  const row = { poolPoints: 10, matchPoints: 20, outsiderPoints: 2, podiumPoints: 30, totalPoints: 62 };
+  for (const [scope, points] of [
+    ['POOLS', 10],
+    ['TABLEAU', 22],
+    ['PODIUM', 30],
+    ['POOLS,TABLEAU', 32],
+    ['POOLS,PODIUM', 40],
+    ['TABLEAU,PODIUM', 52],
+    ['ALL', 62],
+  ]) {
+    assert.equal(validateScope(scope), scope);
+    assert.equal(scopedRow(row, scope).totalPoints, points);
+  }
 });

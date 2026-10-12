@@ -25,7 +25,13 @@ const wrap = (fn) => async (req, res) => {
   }
 };
 const groups = require('../services/groups');
-const { validateScope, scopeOfMember, scopedRow, setPreference } = require('../services/delegationScope');
+const {
+  validateScope,
+  scopeOfMember,
+  scopedRow,
+  setPreference,
+  includesSection,
+} = require('../services/delegationScope');
 const { enroll } = groups;
 // Début d'un tournoi (premier match ou première poule) : moment où la composition des clubs est figée.
 async function startOf(tournamentId) {
@@ -247,14 +253,19 @@ async function duel(userId, opponentId, competition, scopes = ['ALL', 'ALL']) {
   ]);
   return {
     opponent,
-    ...buildDuel(matches, scopes[0] === 'PODIUM' ? [] : mine, scopes[1] === 'PODIUM' ? [] : theirs, {
-      pools,
-      poolMine: scopes[0] === 'ALL' ? poolMine : [],
-      poolTheirs: scopes[1] === 'ALL' ? poolTheirs : [],
-      podiums,
-      podiumMine: scopes[0] !== 'TABLEAU' ? podiumMine : [],
-      podiumTheirs: scopes[1] !== 'TABLEAU' ? podiumTheirs : [],
-    }),
+    ...buildDuel(
+      matches,
+      includesSection(scopes[0], 'TABLEAU') ? mine : [],
+      includesSection(scopes[1], 'TABLEAU') ? theirs : [],
+      {
+        pools,
+        poolMine: includesSection(scopes[0], 'POOLS') ? poolMine : [],
+        poolTheirs: includesSection(scopes[1], 'POOLS') ? poolTheirs : [],
+        podiums,
+        podiumMine: includesSection(scopes[0], 'PODIUM') ? podiumMine : [],
+        podiumTheirs: includesSection(scopes[1], 'PODIUM') ? podiumTheirs : [],
+      },
+    ),
     predictionScopes: scopes,
   };
 }

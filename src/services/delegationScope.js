@@ -1,7 +1,8 @@
-const SCOPES = ['ALL', 'TABLEAU', 'PODIUM'];
+const SCOPES = ['ALL', 'POOLS', 'TABLEAU', 'PODIUM', 'POOLS,TABLEAU', 'POOLS,PODIUM', 'TABLEAU,PODIUM'];
+const includesSection = (scope, section) => scope === 'ALL' || scope.split(',').includes(section);
 function validateScope(value = 'ALL') {
   if (!SCOPES.includes(value)) {
-    const error = new Error('Choisissez Tout, Tableau uniquement ou Podium uniquement.');
+    const error = new Error('Choisissez au moins une section : Poules, Tableau ou Podium.');
     error.status = 400;
     throw error;
   }
@@ -14,7 +15,11 @@ function scopeOfMember(league, userId) {
 }
 function scopedRow(row, scope) {
   if (scope === 'ALL') return { ...row, predictionScope: scope };
-  const fields = scope === 'TABLEAU' ? ['matchPoints', 'outsiderPoints'] : ['podiumPoints'];
+  const fields = [
+    ...(includesSection(scope, 'POOLS') ? ['poolPoints'] : []),
+    ...(includesSection(scope, 'TABLEAU') ? ['matchPoints', 'outsiderPoints'] : []),
+    ...(includesSection(scope, 'PODIUM') ? ['podiumPoints'] : []),
+  ];
   return { ...row, predictionScope: scope, totalPoints: fields.reduce((total, key) => total + (row[key] || 0), 0) };
 }
 async function setPreference(db, leagueId, userId, value) {
@@ -41,4 +46,4 @@ async function setPreference(db, leagueId, userId, value) {
   }
   return { predictionScope };
 }
-module.exports = { validateScope, scopeOfMember, scopedRow, setPreference };
+module.exports = { validateScope, scopeOfMember, scopedRow, setPreference, includesSection };
