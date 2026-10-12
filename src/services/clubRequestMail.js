@@ -38,7 +38,7 @@ async function deliver(db, transport = mailer, now = new Date()) {
   try {
     await transport.sendMail({
       to: row.user.email,
-      ...refusalMessage(row),
+      ...refusalMessage(row, { hideName: await require('./clubModeration').isSevere(db, row.id) }),
       idempotencyKey: `club-request-refused-${row.id}`,
     });
     await db.clubRegistrationRequest.update({
@@ -100,7 +100,7 @@ async function alertAdmins(db, notify = require('./syncHealth').notifyAdmins, no
         status: 'PENDING',
         adminAlertStatus: 'SENDING',
         adminAlertNextAt: { lte: now },
-        adminAlertAttempts: { gte: 5 },
+        adminAlertAttempts: { gte: 3 },
       },
       data: { adminAlertStatus: 'FAILED' },
     });
@@ -108,7 +108,7 @@ async function alertAdmins(db, notify = require('./syncHealth').notifyAdmins, no
       where: {
         status: 'PENDING',
         adminAlertStatus: { in: ['PENDING', 'SENDING'] },
-        adminAlertAttempts: { lt: 5 },
+        adminAlertAttempts: { lt: 3 },
         adminAlertNextAt: { lte: now },
       },
       orderBy: { id: 'asc' },
@@ -136,11 +136,13 @@ async function alertAdmins(db, notify = require('./syncHealth').notifyAdmins, no
   } catch {
     sent = {};
   }
-  const success = sent.mail > 0 && sent.push > 0 && !sent.mailFailed && !sent.pushFailed;
+  // Un e-mail et une notification par demande, jamais plus : la demande est marquée envoyée dès qu'un
+  // des deux canaux a fonctionné (un administrateur sans téléphone abonné n'entraîne plus de renvois).
+  const success = sent.mail > 0 || sent.push > 0;
   await db.clubRegistrationRequest.update({
     where: { id: row.id },
     data: {
-      adminAlertStatus: success ? 'SENT' : row.adminAlertAttempts + 1 >= 5 ? 'FAILED' : 'PENDING',
+      adminAlertStatus: success ? 'SENT' : row.adminAlertAttempts + 1 >= 3 ? 'FAILED' : 'PENDING',
       adminAlertNextAt: new Date(now.getTime() + 10 * 60000),
     },
   });

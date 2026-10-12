@@ -145,7 +145,9 @@ router.post(
   wrap(async (req, res) => {
     const name = title(req.body.name),
       kind = req.body.kind;
-    if (!['PRIVATE', 'CLUB'].includes(kind)) fail('Type de groupe invalide.');
+    // Les clubs passent uniquement par Mon compte (demande vérifiée par l'administration).
+    if (kind === 'CLUB') fail('Les clubs se choisissent ou se demandent depuis Mon compte.', 403);
+    if (kind !== 'PRIVATE') fail('Type de groupe invalide.');
     const result = await db.$transaction(async (tx) => {
       const league = await tx.league.create({
         data: {
@@ -179,10 +181,18 @@ router.post(
 router.post(
   '/leagues/:id/leave',
   wrap(async (req, res) => {
-    const league = await db.league.findUnique({ where: { id: id(req.params.id) } });
-    if (!league) fail('Groupe introuvable.', 404);
-    if (league.kind !== 'CLUB' && league.ownerId === req.user.userId) fail('Le créateur reste membre de son groupe.');
-    await groups.leave(db, league, req.user.userId);
+    const leagueId = id(req.params.id);
+    // Départ en une seule opération : club, rôle de responsable et adhésion changent ensemble ou pas du tout.
+    await db.$transaction(async (tx) => {
+      const league = await tx.league.findUnique({ where: { id: leagueId } });
+      if (!league) fail('Groupe introuvable.', 404);
+      if (league.kind !== 'CLUB' && league.ownerId === req.user.userId) fail('Le créateur reste membre de son groupe.');
+      await groups.leave(tx, league, req.user.userId);
+      await tx.user.updateMany({
+        where: { id: req.user.userId, favoriteLeagueId: leagueId },
+        data: { favoriteLeagueId: null },
+      });
+    });
     res.json({ success: true });
   }),
 );

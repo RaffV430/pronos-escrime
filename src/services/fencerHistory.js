@@ -1,5 +1,6 @@
 const { normalize, resolve } = require('./fencerFollows');
 const { failure } = require('./ftlClient');
+const RECENT_EVENTS = 40;
 async function history(db, userId, favoriteId) {
   const favorite = await db.followedFencer.findFirst({ where: { id: favoriteId, userId } });
   if (!favorite) throw failure('Favori introuvable.', 404);
@@ -18,18 +19,30 @@ async function history(db, userId, favoriteId) {
       tournament: { select: { id: true, name: true, archivedAt: true } },
     },
     orderBy: { createdAt: 'desc' },
+    // Dernière épreuve disputée : les épreuves les plus récentes suffisent (requête bornée).
+    take: RECENT_EVENTS,
   });
   const decorated = await require('./fencerAffiliations').decorate(db, competitions, [favorite]);
   const candidates = [];
   for (const competition of decorated.competitions) {
+    // Épreuves parcourues de la plus récente à la plus ancienne : trois épreuves disputées suffisent
+    // pour retrouver la dernière (l'ordre de création suit de près l'ordre des dates).
+    if (candidates.length >= 3) break;
     const linked = resolve(decorated.favorites, competition);
     const link = linked.links.find((l) => l.favoriteId === favoriteId);
     if (!link) continue;
     const entry = competition.podiumRoster.find((e) => String(e.id) === link.entryId);
     if (!linked.matchNames.includes(entry.name)) continue; // Homonyms have no name-only history.
     const [allMatches, allPools] = await Promise.all([
+      // Seulement les rencontres et les poules de ce tireur (filtrées par la base, plus tout le tableau).
       db.match.findMany({
-        where: { competitionId: competition.id },
+        where: {
+          competitionId: competition.id,
+          OR: [
+            { player1: { equals: entry.name, mode: 'insensitive' } },
+            { player2: { equals: entry.name, mode: 'insensitive' } },
+          ],
+        },
         select: {
           id: true,
           player1: true,
@@ -47,7 +60,10 @@ async function history(db, userId, favoriteId) {
         orderBy: { id: 'asc' },
       }),
       db.pool.findMany({
-        where: { competitionId: competition.id },
+        where: {
+          competitionId: competition.id,
+          fencers: { some: { name: { equals: entry.name, mode: 'insensitive' } } },
+        },
         include: { fencers: { orderBy: { position: 'asc' } } },
         orderBy: { id: 'asc' },
       }),

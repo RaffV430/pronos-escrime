@@ -16,7 +16,50 @@ async function policy(db) {
     }
   );
 }
+// Refus « graves » (nom injurieux, violent ou inapproprié) : refus automatique sur un terme interdit,
+// ou refus de l'administration signalé comme tel. Au 3e, l'utilisateur ne peut plus proposer de club.
+const SEVERE_LIMIT = 3;
+const SEVERE_ACTIONS = ['CLUB_REQUEST_AUTO_REJECT', 'CLUB_REQUEST_SEVERE'];
+// Au plus 3 propositions de club par 24 heures et par compte.
+const DAILY_LIMIT = 3;
+async function severeRefusals(db, userId) {
+  const requests = await db.clubRegistrationRequest.findMany({
+    where: { userId, status: 'REJECTED' },
+    select: { id: true },
+  });
+  if (!requests.length) return 0;
+  const logs = await db.auditLog.findMany({
+    where: {
+      targetType: 'ClubRegistrationRequest',
+      targetId: { in: requests.map((r) => r.id) },
+      action: { in: SEVERE_ACTIONS },
+    },
+    select: { targetId: true },
+  });
+  return new Set(logs.map((l) => l.targetId)).size;
+}
+async function isSevere(db, requestId) {
+  return Boolean(
+    await db.auditLog.findFirst({
+      where: { targetType: 'ClubRegistrationRequest', targetId: requestId, action: { in: SEVERE_ACTIONS } },
+      select: { id: true },
+    }),
+  );
+}
 async function submit(tx, userId, input) {
+  if ((await severeRefusals(tx, userId)) >= SEVERE_LIMIT)
+    throw failure(
+      'Vous ne pouvez plus proposer de nouveau club après plusieurs refus pour nom inapproprié. Choisissez un club de la liste ou contactez l’administration.',
+      403,
+    );
+  const recent = await tx.clubRegistrationRequest.count({
+    where: { userId, createdAt: { gte: new Date(Date.now() - 24 * 3600000) } },
+  });
+  if (recent >= DAILY_LIMIT)
+    throw failure(
+      'Trois propositions de club au plus par jour. Réessayez demain ou choisissez un club de la liste.',
+      429,
+    );
   const data = {
     userId,
     name: clubs.clean(input.name, 2, 120, 'Nom du club'),
@@ -131,6 +174,20 @@ async function decide(db, actorId, id, input) {
         after: updated,
       },
     });
+    // Refus pour nom injurieux, violent ou inapproprié : compte pour le blocage des demandes.
+    if (input.status === 'REJECTED' && input.severe === true) {
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: 'CLUB_REQUEST_SEVERE',
+          targetType: 'ClubRegistrationRequest',
+          targetId: id,
+          after: { userId: row.userId },
+        },
+      });
+      const total = await severeRefusals(tx, row.userId);
+      return { ...updated, severe: true, severeCount: total, blocked: total >= SEVERE_LIMIT };
+    }
     return updated;
   });
   require('./clubRequestMail').wake(db);
@@ -163,4 +220,7 @@ module.exports = {
   submit,
   updatePolicy,
   decide,
+  severeRefusals,
+  isSevere,
+  SEVERE_LIMIT,
 };

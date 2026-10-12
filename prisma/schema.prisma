@@ -24,6 +24,8 @@ model User {
   clubRequests ClubRegistrationRequest[]
   favoriteLeagueId  Int?
   publicListing     Boolean            @default(true)
+  // Tutoriel de l'application vu (ou passé) : ne se relance plus sur aucun appareil.
+  tutorialSeenAt    DateTime?
   followedFencers   FollowedFencer[]
   pushSubscriptions PushSubscription[]
   predictions       Prediction[]

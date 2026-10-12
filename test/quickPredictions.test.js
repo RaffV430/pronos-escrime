@@ -129,3 +129,66 @@ test('an official withdrawal sets the fencer status automatically and zeroes pre
   assert.match(summary.notes[0], /Poule 4 : B — Retrait médical/);
   assert.equal(logs[0].action, 'Statut de tireur relevé sur le suivi officiel');
 });
+
+test('club requests: three severe refusals block new requests, and at most three a day', async () => {
+  const moderation = require('../src/services/clubModeration');
+  const state = { requests: [], logs: [] };
+  const tx = {
+    clubRegistrationRequest: {
+      findMany: async ({ where }) =>
+        state.requests.filter((r) => r.userId === where.userId && r.status === where.status),
+      count: async () => state.requests.filter((r) => Date.now() - r.createdAt < 24 * 3600000).length,
+      create: async ({ data }) => (
+        state.requests.push({ id: state.requests.length + 1, createdAt: Date.now(), status: 'PENDING', ...data }),
+        state.requests.at(-1)
+      ),
+    },
+    auditLog: {
+      findMany: async ({ where }) =>
+        state.logs.filter((l) => where.targetId.in.includes(l.targetId) && where.action.in.includes(l.action)),
+      create: async ({ data }) => state.logs.push(data),
+    },
+    clubNamePolicy: { findUnique: async () => null, upsert: async () => ({ revision: 0, terms: [] }) },
+  };
+  // Trois refus graves anciens.
+  for (const id of [1, 2, 3]) {
+    state.requests.push({ id, userId: 7, status: 'REJECTED', createdAt: Date.now() - 5 * 86400000 });
+    state.logs.push({ action: 'CLUB_REQUEST_SEVERE', targetType: 'ClubRegistrationRequest', targetId: id });
+  }
+  assert.equal(await moderation.severeRefusals(tx, 7), 3);
+  await assert.rejects(moderation.submit(tx, 7, { name: 'Cercle X', city: 'Paris' }), /plus proposer/);
+  state.logs.pop();
+  assert.equal(await moderation.severeRefusals(tx, 7), 2);
+  // Limite quotidienne.
+  state.requests.push(...[4, 5, 6].map((id) => ({ id, userId: 7, status: 'CANCELLED', createdAt: Date.now() })));
+  await assert.rejects(moderation.submit(tx, 7, { name: 'Cercle X', city: 'Paris' }), /par jour/);
+  const { refusalMessage } = require('../src/services/clubRequestEmail');
+  const mail = refusalMessage(
+    { id: 9, name: 'Nom choquant', city: 'Ville', reason: 'Nom inapproprié.' },
+    { hideName: true },
+  );
+  assert.ok(
+    !mail.subject.includes('Nom choquant') &&
+      !mail.text.includes('Nom choquant') &&
+      !mail.html.includes('Nom choquant'),
+  );
+  assert.ok(refusalMessage({ id: 9, name: 'Cercle', city: 'Ville', reason: 'Doublon.' }).text.includes('Cercle'));
+  assert.ok(!refusalMessage({ id: 9, name: 'Cercle', city: 'Ville', reason: 'Doublon.' }).subject.includes('Cercle'));
+});
+
+test('one admin alert per club request: sent as soon as e-mail or push went out', async () => {
+  const { alertAdmins } = require('../src/services/clubRequestMail');
+  const row = { id: 4, status: 'PENDING', adminAlertStatus: 'PENDING', adminAlertAttempts: 0 };
+  const updates = [];
+  const db = {
+    $transaction: async (fn) =>
+      fn({
+        $queryRaw: async () => [],
+        clubRegistrationRequest: { updateMany: async () => ({}), findFirst: async () => row, update: async () => ({}) },
+      }),
+    clubRegistrationRequest: { update: async ({ data }) => updates.push(data) },
+  };
+  // E-mail parti, aucun téléphone abonné : plus de renvoi.
+  assert.equal(await alertAdmins(db, async () => ({ mail: 1, push: 0 })), 1);
+  assert.equal(updates.at(-1).adminAlertStatus, 'SENT');
+});

@@ -89,6 +89,8 @@ function createRouter(db) {
     run(async (req, res) => {
       const id = Number(req.params.id);
       if (!service.positive(id)) return res.status(400).json({ error: 'Club invalide.' });
+      if (!(await db.club.findUnique({ where: { id }, select: { id: true } })))
+        return res.status(404).json({ error: 'Club introuvable.' });
       const club = await db.club.update({ where: { id }, data: { status: 'VERIFIED' } });
       await db.auditLog.create({
         data: { actorId: req.user.userId, action: 'CLUB_VERIFIED', targetType: 'Club', targetId: id, after: club },

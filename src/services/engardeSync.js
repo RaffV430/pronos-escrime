@@ -30,7 +30,14 @@ async function refreshRoster(db, c, url, client, html = null) {
     await require('./identityReview').record(db, c, url, observed);
     throw error;
   }
-  await require('./fencerAffiliations').ingestObserved(db, c, observed, url);
+  // Clubs des engagés : identifiants de la liste fusionnée (ceux de l'épreuve), jamais ceux recalculés
+  // à la lecture (nom + club), qui changent quand un tireur change de club ou de graphie.
+  await require('./fencerAffiliations').ingestObserved(
+    db,
+    c,
+    merged.filter((e) => e.active !== false),
+    url,
+  );
   if (
     !c.identityReview &&
     c.podiumRoster &&
