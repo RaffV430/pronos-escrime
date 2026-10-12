@@ -11,13 +11,33 @@ const defaults = {
   // Récap de fin d'épreuve (points, classement), pour tous par défaut.
   recap: true,
   poolResults: false,
+  // Résultats de Mes tireurs : chaque match terminé et bilan de poule (au choix du joueur).
+  fencerResults: false,
   quietEnabled: false,
   quietStart: '22:00',
   quietEnd: '08:00',
   timezone: 'Europe/Paris',
+  // Version des réglages : 2 = « Mes tireurs » ne filtre plus que les alertes de pronostic.
+  v: 2,
 };
+// Réglages enregistrés avant la version 2 : mêmes envois qu'avant. « Uniquement Mes tireurs » bloquait
+// les bilans personnels et envoyait les résultats de mes tireurs avec « bilan après chaque tour » ou « récap ».
+function upgrade(input = {}) {
+  if (!input || input.v === 2) return input || {};
+  const old = { ...defaults, ...input };
+  if (!old.fencersOnly) return { ...input, fencerResults: input.fencerResults ?? false, v: 2 };
+  return {
+    ...input,
+    fencerResults: input.fencerResults ?? Boolean(old.roundResults || old.recap),
+    roundResults: false,
+    poolResults: false,
+    recap: false,
+    v: 2,
+  };
+}
 function preferences(input = {}) {
-  const p = { ...defaults, ...input };
+  const p = { ...defaults, ...upgrade(input) };
+  p.v = 2;
   for (const k of [
     'fencersOnly',
     'fencerEntries',
@@ -27,6 +47,7 @@ function preferences(input = {}) {
     'roundResults',
     'poolResults',
     'recap',
+    'fencerResults',
     'quietEnabled',
   ])
     if (typeof p[k] !== 'boolean') throw failure('Préférence de notification invalide.', 400);

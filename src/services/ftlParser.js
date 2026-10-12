@@ -64,6 +64,7 @@ function parseTable(
   const out = [],
     rounds = [],
     issues = [],
+    byes = [],
     seeds = entrySeeds;
   for (let c = 0; c < headers.length - 1; c++) {
     const label = headers[c],
@@ -99,6 +100,10 @@ function parseTable(
         for (const s of [a, b]) if (s.name && s.name !== '- BYE -') findEntry(s.name);
         if (!a.name || !b.name || a.name === '- BYE -' || b.name === '- BYE -') {
           if (score) throw failure('Résultat publié sans deux adversaires connus.');
+          // Exempt : un seul tireur face à « - BYE - » ; il est qualifié d'office pour le tour suivant.
+          const alone = [a, b].filter((s) => s.name && s.name !== '- BYE -');
+          if (!bronze && alone.length === 1 && [a, b].some((s) => s.name === '- BYE -'))
+            byes.push({ round, pos: i / 2 + 1, name: findEntry(alone[0].name).name });
           continue;
         }
         const player1 = findEntry(a.name).name,
@@ -207,6 +212,6 @@ function parseTable(
   }
   if (requireComplete && !rounds.some((r) => r.round === (bronze ? 'Bronze' : 'T2')))
     throw failure('Les derniers tours du tableau sont absents.');
-  return { matches: out, rounds, ...(issues.length ? { issues } : {}) };
+  return { matches: out, rounds, byes, ...(issues.length ? { issues } : {}) };
 }
 module.exports = { parseTable, roundName, clean, norm, namedEntries };
