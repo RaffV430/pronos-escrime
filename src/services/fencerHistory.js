@@ -23,12 +23,13 @@ async function history(db, userId, favoriteId) {
     take: RECENT_EVENTS,
   });
   const decorated = await require('./fencerAffiliations').decorate(db, competitions, [favorite]);
+  const variants = await require('./fencerSeason').withAliases(db, decorated.favorites);
   const candidates = [];
   for (const competition of decorated.competitions) {
     // Épreuves parcourues de la plus récente à la plus ancienne : trois épreuves disputées suffisent
     // pour retrouver la dernière (l'ordre de création suit de près l'ordre des dates).
     if (candidates.length >= 3) break;
-    const linked = resolve(decorated.favorites, competition);
+    const linked = resolve(variants, competition);
     const link = linked.links.find((l) => l.favoriteId === favoriteId);
     if (!link) continue;
     const entry = competition.podiumRoster.find((e) => String(e.id) === link.entryId);

@@ -4,6 +4,15 @@
 const { failure } = require('./ftlClient');
 const { normalize, resolve } = require('./fencerFollows');
 const { competitionEntry } = require('./fencerProfile');
+const aliases = require('./fencerAliases');
+
+// Le tireur suivi et ses autres orthographes (mêmes nation, club et affiliation).
+async function withAliases(db, favorites) {
+  const list = await aliases.groups(db);
+  return favorites.flatMap((f) =>
+    aliases.expandWith(list, f.name).map((name) => (aliases.norm(name) === aliases.norm(f.name) ? f : { ...f, name })),
+  );
+}
 
 // Saison sportive : du 1er septembre au 31 août (« 2026-2027 »).
 function seasonOf(date) {
@@ -56,10 +65,12 @@ async function fencerSeason(db, userId, favoriteId, season = null) {
     orderBy: { createdAt: 'desc' },
   });
   const decorated = await require('./fencerAffiliations').decorate(db, competitions, [favorite]);
+  // Orthographes reliées par l'administration : même tireur, autres noms d'inscription.
+  const variants = await withAliases(db, decorated.favorites);
   // Nom d'inscription du tireur dans chaque épreuve où il est reconnu sans ambiguïté.
   const linked = [];
   for (const c of decorated.competitions) {
-    const r = resolve(decorated.favorites, c);
+    const r = resolve(variants, c);
     const link = r.links.find((l) => l.favoriteId === favoriteId);
     const entry = link && (c.podiumRoster || []).find((e) => String(e.id) === link.entryId);
     if (entry && r.matchNames.includes(entry.name)) linked.push({ c, name: entry.name });
@@ -123,4 +134,4 @@ async function fencerSeason(db, userId, favoriteId, season = null) {
   };
 }
 
-module.exports = { fencerSeason, seasonOf, summarize };
+module.exports = { fencerSeason, seasonOf, summarize, withAliases };

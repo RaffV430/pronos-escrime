@@ -391,4 +391,18 @@ router.delete(
     res.json(await boost.deactivateTournament(prisma, id(req.params.tournamentId), req.user.userId)),
   ),
 );
+// Orthographes d'un même tireur : réunies dans son historique.
+const aliases = require('../services/fencerAliases');
+router.get(
+  '/fencer-aliases',
+  wrap(async (req, res) => res.json(await aliases.groups(prisma))),
+);
+router.post(
+  '/fencer-aliases',
+  wrap(async (req, res) => res.json(await aliases.link(prisma, req.user.userId, req.body?.a, req.body?.b))),
+);
+router.delete(
+  '/fencer-aliases',
+  wrap(async (req, res) => res.json(await aliases.unlink(prisma, req.user.userId, req.query.name))),
+);
 module.exports = router;
