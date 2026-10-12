@@ -256,6 +256,7 @@ model League {
   startsAt DateTime
   code String @unique
   members LeagueMember[]
+  invitations LeagueInvitation[]
   createdAt DateTime @default(now())
   // Ancienne ligue du club fusionnée dans la ligue permanente.
   archivedAt DateTime?
@@ -271,6 +272,17 @@ model LeagueMember {
   // Départ : la ligne est gardée pour les classements des clubs des tournois déjà commencés.
   leftAt DateTime?
   membershipPeriods Json? // Périodes closes conservées lors d’un retour au club.
+  @@unique([leagueId,userId])
+  @@index([userId])
+}
+// Invitation par nom d'utilisateur dans une délégation d'amis : la personne invitée accepte ou refuse.
+model LeagueInvitation {
+  id Int @id @default(autoincrement())
+  leagueId Int
+  league League @relation(fields:[leagueId],references:[id], onDelete: Cascade)
+  userId Int
+  invitedById Int
+  createdAt DateTime @default(now())
   @@unique([leagueId,userId])
   @@index([userId])
 }

@@ -33,6 +33,7 @@ const {
   includesSection,
 } = require('../services/delegationScope');
 const { enroll } = groups;
+const invites = require('../services/delegationInvites');
 // Début d'un tournoi (premier match ou première poule) : moment où la composition des clubs est figée.
 async function startOf(tournamentId) {
   if (!tournamentId) return null;
@@ -193,8 +194,38 @@ router.post(
     if (!/^[A-F0-9]{24}$/.test(code)) fail('Code d’invitation invalide.');
     const league = await db.league.findUnique({ where: { code } });
     if (!league) fail('Invitation introuvable.', 404);
-    await db.$transaction((tx) => enroll(tx, league, req.user.userId));
+    await db.$transaction(async (tx) => {
+      await enroll(tx, league, req.user.userId);
+      await invites.clear(tx, league.id, req.user.userId);
+    });
     res.json({ success: true, league });
+  }),
+);
+// Invitations par nom d'utilisateur : tout membre d'une délégation d'amis invite, l'invité accepte ou refuse.
+router.post(
+  '/leagues/:id/invitations',
+  wrap(async (req, res) => {
+    const leagueId = id(req.params.id);
+    const { name } = await db.$transaction((tx) => invites.invite(tx, leagueId, req.user.userId, req.body.username));
+    res.status(201).json({ message: `Invitation envoyée à ${name}. Elle apparaîtra dans ses délégations.` });
+  }),
+);
+router.get(
+  '/invitations',
+  wrap(async (req, res) => res.json(await invites.received(db, req.user.userId))),
+);
+router.post(
+  '/invitations/:id/accept',
+  wrap(async (req, res) => {
+    const league = await db.$transaction((tx) => invites.accept(tx, id(req.params.id), req.user.userId));
+    res.json({ league, message: `Bienvenue dans « ${league.name} ».` });
+  }),
+);
+router.post(
+  '/invitations/:id/decline',
+  wrap(async (req, res) => {
+    await db.$transaction((tx) => invites.decline(tx, id(req.params.id), req.user.userId));
+    res.json({ success: true });
   }),
 );
 router.post(
