@@ -45,7 +45,15 @@ router.get('/me', authMiddleware, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      select: { id: true, name: true, email: true, isAdmin: true, totpEnabledAt: true, publicListing: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        isAdmin: true,
+        totpEnabledAt: true,
+        publicListing: true,
+        tutorialSeenAt: true,
+      },
     });
     if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
@@ -55,6 +63,21 @@ router.get('/me', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Erreur /me:', err);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Tutoriel vu ou passé : retenu dans le compte (plus seulement sur l'appareil).
+router.put('/me/tutorial', authMiddleware, async (req, res) => {
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.user.userId },
+      data: { tutorialSeenAt: new Date() },
+      select: { tutorialSeenAt: true },
+    });
+    res.json(user);
+  } catch (err) {
+    require('../lib/report').reportError(err, 'tutoriel');
+    res.status(500).json({ error: 'Préférence non enregistrée.' });
   }
 });
 

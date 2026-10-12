@@ -124,7 +124,14 @@ async function start() {
     const { tables } = await require('./services/schemaCheck').checkSchema(prisma);
     console.log(`Schéma de la base vérifié (${tables} tables).`);
   }
-  await require('./services/ffeRankingImport').run(prisma);
+  // Import ponctuel du classement FFE (fichier du dépôt, appliqué une seule fois) : un échec ne doit
+  // jamais empêcher le site de démarrer ; il sera retenté au prochain démarrage.
+  try {
+    await require('./services/ffeRankingImport').run(prisma);
+  } catch (error) {
+    console.error('Import du classement FFE reporté :', error.message);
+    require('./lib/report').reportError(error, 'import classement FFE');
+  }
   const port = Number(process.env.PORT) || 5000;
   const server = app.listen(port, () => console.log(`Serveur démarré sur le port ${port}`));
 

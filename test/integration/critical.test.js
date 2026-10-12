@@ -443,11 +443,9 @@ test('invitation par lien et duel depuis les classements', opts, async () => {
   assert.equal((await call('POST', '/api/community/join', friend.token, { code })).status, 200);
   const mine = await call('GET', '/api/community/leagues', friend.token);
   assert.equal(mine.body.find((l) => l.id === league)._count.members, 2);
-  // Un seul club à la fois.
+  // Les clubs ne se créent plus depuis les délégations (demande vérifiée dans Mon compte).
   const clubA = await call('POST', '/api/community/leagues', owner.token, { name: 'Club A', kind: 'CLUB' });
-  assert.equal(clubA.status, 201);
-  const clubB = await call('POST', '/api/community/leagues', owner.token, { name: 'Club B', kind: 'CLUB' });
-  assert.equal(clubB.status, 409);
+  assert.equal(clubA.status, 403);
   const clubs = await call('GET', `/api/community/clubs/${c.tournamentId}`, owner.token);
   assert.equal(clubs.status, 200);
 });

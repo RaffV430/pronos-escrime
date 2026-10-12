@@ -120,9 +120,14 @@ async function profile(db, userId) {
       : null,
   };
 }
+// Annuaire des clubs (choix du club dans Mon compte) : clubs de la liste fédérale ou validés par
+// l'administration ; un ancien club non encore vérifié n'apparaît que s'il a déjà des membres.
 async function directory(db, query = '') {
   const term = key(query);
-  const clubs = await db.club.findMany({ orderBy: { name: 'asc' } });
+  const clubs = await db.club.findMany({
+    where: { OR: [{ status: { in: ['LISTED', 'VERIFIED'] } }, { status: 'PENDING', users: { some: {} } }] },
+    orderBy: { name: 'asc' },
+  });
   return clubs
     .filter((c) => !term || key(`${c.name} ${c.shortName} ${c.city}`).includes(term))
     .map(({ id, name, shortName, city, status, leagueId }) => ({ id, name, shortName, city, status, leagueId }));

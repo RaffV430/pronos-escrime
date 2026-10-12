@@ -58,7 +58,7 @@ test('expired final lease is marked failed after a worker restart', async () => 
       status: 'PENDING',
       adminAlertStatus: 'SENDING',
       adminAlertNextAt: { lte: now },
-      adminAlertAttempts: { gte: 5 },
+      adminAlertAttempts: { gte: 3 },
     },
     data: { adminAlertStatus: 'FAILED' },
   });
@@ -69,14 +69,15 @@ test('no configured recipient does not falsely mark alert sent', async () => {
   assert.equal(updates[1].adminAlertStatus, 'PENDING');
 });
 
-test('mail alone or push alone keeps the other channel pending', async () => {
+// Une seule alerte par demande : un e-mail ou une notification suffit, jamais de renvoi en boucle.
+test('mail alone or push alone marks the alert sent (no repeated e-mails)', async () => {
   for (const result of [
     { mail: 1, push: 0 },
     { mail: 0, push: 1 },
   ]) {
     const { db, updates } = fixture({ id: 9, adminAlertAttempts: 0 });
-    assert.equal(await alertAdmins(db, async () => result), 0);
-    assert.equal(updates[1].adminAlertStatus, 'PENDING');
+    assert.equal(await alertAdmins(db, async () => result), 1);
+    assert.equal(updates[1].adminAlertStatus, 'SENT');
   }
 });
 test('administrator delivery targets every admin and every enabled admin subscription', async () => {

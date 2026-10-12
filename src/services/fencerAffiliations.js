@@ -17,6 +17,13 @@ const hash = (s) => createHash('sha256').update(s).digest('hex');
 async function lock(tx) {
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(72610409)::text`;
 }
+const engardeSource = (url) => {
+  try {
+    return /(^|\.)engarde-service\.com$/.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
 function source(value) {
   if (typeof value === 'string' && /^FFE_RANKING:[a-f0-9]{64}:[1-9][0-9]*$/.test(value)) return value;
   try {
@@ -93,6 +100,8 @@ async function ingest(tx, c, observed = c.podiumRoster, sourceUrl = c.rosterSour
     const entryId = String(entry.id),
       data = identity(entry),
       nameKey = key(data.name);
+    // Liste engarde d'une épreuve nationale : la colonne lue est le club, la nation est la France.
+    if (!data.country && data.club && engardeSource(sourceUrl)) data.country = 'FRA';
     const duplicate = observed.filter((e) => key(e.name) === nameKey).length !== 1;
     let link = await tx.fencerAffiliationEntry.findUnique({
       where: { competitionId_entryId: { competitionId: c.id, entryId } },
