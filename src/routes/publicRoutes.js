@@ -302,6 +302,54 @@ router.get('/competitions/:competitionId/matches', async (req, res) => {
     res.status(500).json({ error: 'Tableau indisponible.' });
   }
 });
+// Scores en direct d'une épreuve, poussés à chaque touche (Server-Sent Events). Données publiques des
+// pistes FencingTimeLive, sans pronostic ; au plus une diffusion toutes les 150 ms par écran.
+router.get('/competitions/:competitionId/live/stream', async (req, res) => {
+  let competitionId;
+  try {
+    competitionId = id(req.params.competitionId);
+  } catch {
+    return res.status(400).end();
+  }
+  const live = require('../services/ftlLiveScores');
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders?.();
+  let closed = false,
+    timer = null,
+    last = '';
+  const send = async () => {
+    timer = null;
+    if (closed) return;
+    try {
+      const body = JSON.stringify(await live.liveFor(db, competitionId));
+      if (body === last) return;
+      last = body;
+      res.write(`data: ${body}\n\n`);
+      res.flush?.(); // compression : envoyer tout de suite, sans attendre d'autres données
+    } catch (error) {
+      reportError(error, 'direct des pistes');
+    }
+  };
+  const unsubscribe = await live.subscribe(db, competitionId, () => {
+    if (!timer) timer = setTimeout(send, 150);
+  });
+  const ping = setInterval(() => {
+    res.write(': ping\n\n');
+    res.flush?.();
+  }, 25000);
+  send();
+  req.on('close', () => {
+    closed = true;
+    clearTimeout(timer);
+    clearInterval(ping);
+    unsubscribe();
+  });
+});
 router.get('/competitions/:competitionId/pools', async (req, res) => {
   try {
     const competitionId = id(req.params.competitionId);
