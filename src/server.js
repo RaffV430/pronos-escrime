@@ -143,6 +143,7 @@ async function start() {
   const stopMaintenance = require('./services/maintenance').startWorker(prisma);
   const stopWatchdog = require('./services/workerHealth').startWatchdog();
   const stopCalendar = require('./services/calendarWatch').startWorker(prisma);
+  const stopLive = require('./services/ftlLiveScores').startWorker(prisma);
   // Arrêt propre (redéploiement Render) : plus de nouvelles requêtes ni de nouveaux passages,
   // on attend la fin des passages en cours (25 s au plus), puis on ferme la base.
   let stopping = false;
@@ -153,7 +154,14 @@ async function start() {
     force.unref();
     server.close();
     stopWatchdog();
-    await Promise.allSettled([stopFtl(), stopNotifications(), stopMaintenance(), stopCalendar(), stopClubMail()]);
+    await Promise.allSettled([
+      stopFtl(),
+      stopNotifications(),
+      stopMaintenance(),
+      stopCalendar(),
+      stopClubMail(),
+      stopLive(),
+    ]);
     await prisma.$disconnect().catch(() => {});
     process.exit(0);
   };

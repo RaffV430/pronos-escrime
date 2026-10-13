@@ -182,6 +182,15 @@ router.get('/fencer', authMiddleware, async (req, res) => {
   }
 });
 
+// Scores en direct (pistes FencingTimeLive) des rencontres non terminées d'une épreuve : affichage seulement.
+router.get('/live/:competitionId', authMiddleware, async (req, res) => {
+  try {
+    res.json(await require('../services/ftlLiveScores').liveFor(prisma, Number(req.params.competitionId)));
+  } catch (error) {
+    reportError(error, 'scores en direct');
+    res.status(500).json({ error: 'Scores en direct indisponibles.' });
+  }
+});
 router.get('/:id/h2h', authMiddleware, async (req, res) => {
   try {
     res.json(await require('../services/headToHead').headToHead(prisma, Number(req.params.id)));
