@@ -44,3 +44,23 @@ test('une piste muette depuis plus de 3 minutes n’est plus en cours', () => {
   assert.equal(live.matchLive(m, [s], live.FRESH_MS).length, 1);
   assert.equal(live.matchLive(m, [s], live.FRESH_MS + 1).length, 0);
 });
+
+test('déroulé touche par touche : point de départ, touches, coup double, ordre de la rencontre', () => {
+  const guids = new Set([GUID]);
+  const at = Date.now();
+  live.record(msg('9', 'ALPHA Anne', 'BRAVO Bea', 2, 1), at, guids);
+  live.record(msg('9', 'ALPHA Anne', 'BRAVO Bea', 3, 1), at + 1, guids);
+  live.record(msg('9', 'ALPHA Anne', 'BRAVO Bea', 3, 2), at + 2, guids);
+  const s = live.record(msg('9', 'ALPHA Anne', 'BRAVO Bea', 4, 3), at + 3, guids);
+  // La rencontre est enregistrée dans l'autre sens : BRAVO est player1.
+  const [x] = live.matchLive([{ id: 5, player1: 'BRAVO Bea', player2: 'ALPHA Anne', isFinished: false }], [s], at + 4);
+  assert.deepEqual(
+    x.history.map((t) => [t.by, t.score1, t.score2]),
+    [
+      ['start', 1, 2],
+      [2, 1, 3],
+      [1, 2, 3],
+      ['double', 3, 4],
+    ],
+  );
+});

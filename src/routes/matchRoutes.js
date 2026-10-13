@@ -7,6 +7,7 @@ const router = express.Router();
 require('../middleware/validateIds').validateIdParams(router, ['id', 'competitionId']);
 const prisma = require('../lib/prisma');
 const { matchClosed, closesAt } = require('../lib/matchLock');
+const { boutMax } = require('../lib/boutRules');
 const { timedMatches, timedMatch, reopenRound } = require('../services/roundTiming');
 const { rescore } = require('../services/rescore');
 const { applyOutsiderBonus, crowdIsOutsider } = require('../services/outsider');
@@ -96,7 +97,7 @@ router.get('/', authMiddleware, async (req, res) => {
       timed.map(({ match, isClosed }) => ({
         ...withCountries(match),
         social: social.get(match.id) || { reactions: 0, comments: 0 },
-        maxScore: match.competition?.podiumFormat === 'TEAM' ? 45 : 15,
+        maxScore: boutMax(match.competition),
         isClosed,
         closesAt: closesAt(match),
         winnerName: match.winner === 1 ? match.player1 : match.winner === 2 ? match.player2 : null,
@@ -231,7 +232,7 @@ router.post('/:id/predict', authMiddleware, async (req, res) => {
         return { status: 409, body: { error: 'Les pronostics sont clos ou la vérification du match est en attente.' } };
 
       const competition = await tx.competition.findUnique({ where: { id: match.competitionId } });
-      const maxScore = competition?.podiumFormat === 'TEAM' ? 45 : 15;
+      const maxScore = boutMax(competition);
       if (predictedScore1 > maxScore || predictedScore2 > maxScore || predictedScore1 === predictedScore2)
         return { status: 400, body: { error: `Scores distincts entre 0 et ${maxScore} requis.` } };
       const prediction = await tx.prediction.upsert({
