@@ -87,3 +87,20 @@ Issues des essais locaux (refonte, suivi en direct de l'épreuve Vet-50 des cham
 | --- | --- | --- |
 | P1 | Tableau des médailles par nation des tireurs | À faire en premier : podiums déjà importés avec le pays ; par épreuve, tournoi et saison ; athlètes neutres affichés « AIN ». |
 | P2 | Coupe des nations des pronostiqueurs | Nation facultative dans le profil (jamais devinée) ; moyenne des 5 ou 10 meilleurs joueurs de chaque nation, avec un minimum de joueurs ; saison, tournoi, épreuve. À lancer avec la version anglaise. |
+
+### Expérience utilisateur (validées sur le principe le 13/10/2026)
+
+| Réf. | Idée | Notes |
+| --- | --- | --- |
+| U1 | Option « couleurs adaptées » (daltonisme) | Dans Mon compte : rouge / vert remplacés par bleu / orange (fil des touches, lampes, tendances). Les couleurs actuelles restent par défaut. |
+| U2 | Détail des points sur chaque match | Après le résultat : « +4 = bon vainqueur (+1) + score exact (+3) », avec le bonus outsider et le ×2 s'ils s'appliquent. Barème inchangé. |
+| U3 | « Prochain assaut de mon tireur » | Piste, heure prévue et adversaire (ou « vainqueur de X / Y ») pour les tireurs suivis : pratique pour les parents et entraîneurs sur place. |
+| U4 | Défier un ami sur un match | « Je mise sur X 10–6, et toi ? » partagé (WhatsApp…) avec un lien qui ouvre directement ce match. |
+| U5 | Pronostiquer tout un tour en 30 secondes | Liste compacte : un toucher par vainqueur, « Tout enregistrer », scores à affiner ensuite. Prototype local demandé. |
+| U6 | « Annuler » juste après un enregistrement | Message « Pronostic enregistré · Annuler » pendant 5 secondes. |
+| U7 | Bandeau « connexion lente » plus discret | Petite icône dans l'en-tête et détection moins sensible (fausses alertes constatées). |
+| U8 | Courbe de ma saison | Évolution du rang au fil des épreuves dans « Ma saison », partageable. |
+| U9 | Recherche globale et fiche tireur | Une barre pour tireurs, épreuves, joueurs, délégations ; toucher un nom ouvre la fiche du tireur, avec un bouton « Ajouter à mes tireurs ». |
+| U10 | Proposer l'installation au bon moment | Après le premier pronostic enregistré (indispensable sur iPhone pour les notifications). À discuter ensuite : publication sur Google Play et l'App Store. |
+| U11 | Notifications par profil | En haut des réglages : « Je suis mes tireurs » (résultats, engagements, en piste, prochain assaut), « Je pronostique » (nouveaux matchs, rappel de clôture, bilans des tours et des poules, bilan d'épreuve, gros gains), « Les deux », ou « Personnaliser » (les cases actuelles). Choix proposé à l'inscription, modifiable ensuite. |
+| U12 | Notification des gros gains | Seulement pour les gains marquants : +6 ou +8 en poule, +4 en tableau (score exact), +30 et plus pour le podium. |
