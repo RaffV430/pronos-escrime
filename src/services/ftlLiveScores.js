@@ -43,6 +43,13 @@ function track(state) {
   let bout = bouts.get(key);
   if (!bout) {
     // Rencontre découverte en cours de route : le score déjà atteint sert de point de départ.
+    // Chrono plein en 1re période : la rencontre n'a pas commencé, le score affiché est celui de la
+    // rencontre précédente sur la piste (FencingTimeLive change les noms avant de remettre le score à zéro).
+    const notStarted = state.clock >= 180 && (state.period || 1) <= 1;
+    if (notStarted) {
+      bouts.set(key, { last: { l: 0, r: 0 }, touches: [] });
+      return;
+    }
     const start = state.left.score || state.right.score;
     bout = {
       last: { l: state.left.score, r: state.right.score },
@@ -66,6 +73,12 @@ function track(state) {
     nl = state.left.score,
     nr = state.right.score;
   if (nl === l && nr === r) return;
+  // Retour à 0–0 : nouvelle rencontre sur la piste (ou remise à zéro) — le fil repart de zéro.
+  if (nl === 0 && nr === 0) {
+    bout.touches = [];
+    bout.last = { l: 0, r: 0 };
+    return;
+  }
   const by = nl < l || nr < r ? 'correction' : nl > l && nr > r ? 'double' : nl > l ? 'left' : 'right';
   bout.touches.push({ l: nl, r: nr, by, clock: state.clock, period: state.period, at: state.at });
   if (bout.touches.length > MAX_TOUCHES) bout.touches.shift();

@@ -64,3 +64,18 @@ test('déroulé touche par touche : point de départ, touches, coup double, ordr
     ],
   );
 });
+
+test('le score de la rencontre précédente sur la piste ne sert pas de point de départ', () => {
+  const guids = new Set([GUID]);
+  const at = Date.now();
+  const fresh = (l, r, extra = {}) =>
+    msg('Green', 'ISHI Take', 'SUAR Rica', l, r, { Clock: 180, PeriodNum: 1, ...extra });
+  live.record(fresh(10, 7), at, guids); // noms changés, ancien score encore affiché
+  live.record(fresh(0, 0), at + 1, guids); // remise à zéro
+  const s = live.record(fresh(1, 0, { Clock: 170 }), at + 2, guids);
+  const [x] = live.matchLive([{ id: 8, player1: 'ISHI Take', player2: 'SUAR Rica', isFinished: false }], [s], at + 3);
+  assert.deepEqual(
+    x.history.map((t) => [t.by, t.score1, t.score2]),
+    [[1, 1, 0]],
+  );
+});
