@@ -18,7 +18,7 @@ function scheduleUrl(value) {
   u.pathname = u.pathname.replace(/[a-f0-9]{32}$/i, (id) => id.toUpperCase());
   return u.href;
 }
-function parseSchedule(html, sourceUrl, timezone, city = null) {
+function parseSchedule(html, sourceUrl, timezone, city = null, { allowUnknownTime = false } = {}) {
   try {
     if (!timezone) throw Error();
     new Intl.DateTimeFormat('en', { timeZone: timezone });
@@ -47,8 +47,9 @@ function parseSchedule(html, sourceUrl, timezone, city = null) {
           link.length !== 1
         )
           throw failure('Une épreuve du calendrier est ambiguë.');
-        const time = clean($(row).children('td').first().text());
-        if (!/^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(time)) throw failure('Horaire local non vérifiable.');
+        const rawTime = clean($(row).children('td').first().text());
+        const time = /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(rawTime) ? rawTime : null;
+        if (!time && !allowUnknownTime) throw failure('Horaire local non vérifiable.');
         events.push({
           eventId,
           eventSourceUrl,
@@ -83,7 +84,9 @@ function parseSchedule(html, sourceUrl, timezone, city = null) {
     )
       throw failure('Liste des épreuves absente ou incohérente.');
     const { eventStart } = require('./eventStart');
-    const ordered = group.toSorted((a, b) => eventStart(a) - eventStart(b));
+    const ordered = group.toSorted((a, b) =>
+      allowUnknownTime ? a.date.localeCompare(b.date) : eventStart(a) - eventStart(b),
+    );
     return {
       ...ordered[0],
       event: clean(labels[0][1]),

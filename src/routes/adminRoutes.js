@@ -26,6 +26,30 @@ router.get(
     );
   }),
 );
+const discovery = require('../services/ftlEventDiscovery');
+router.post(
+  '/ftl/discovered-events/:tournamentId/check',
+  require('express-rate-limit').rateLimit({
+    windowMs: 60000,
+    limit: 3,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    message: { error: 'Patientez une minute avant un nouveau contrôle.' },
+  }),
+  wrap(async (req, res) => res.json(await discovery.checkNow(prisma, id(req.params.tournamentId)))),
+);
+router.get(
+  '/ftl/discovered-events',
+  wrap(async (req, res) => res.json(await discovery.list(prisma))),
+);
+router.post(
+  '/ftl/discovered-events/:tournamentId/:eventId/ignore',
+  wrap(async (req, res) => {
+    const eventId = String(req.params.eventId).toUpperCase();
+    if (!/^[A-F0-9]{32}$/.test(eventId)) throw Object.assign(new Error('Épreuve invalide.'), { status: 400 });
+    res.json(await discovery.dismiss(prisma, id(req.params.tournamentId), eventId, req.user.userId));
+  }),
+);
 const announcements = require('../services/generalAnnouncements');
 router.get(
   '/announcements',

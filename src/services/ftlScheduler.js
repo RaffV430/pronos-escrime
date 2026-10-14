@@ -219,7 +219,10 @@ function startWorker(db) {
   let current = null;
   const run = () =>
     (current = tick(db)
-      .then(() => require('../lib/heartbeat').beat('ftl'))
+      .then(async () => {
+        require('../lib/heartbeat').beat('ftl');
+        await require('./ftlEventDiscovery').watch(db);
+      })
       .catch((error) => {
         console.warn('Contrôles automatiques temporairement indisponibles.');
         reportError(error, 'tâche FencingTimeLive');

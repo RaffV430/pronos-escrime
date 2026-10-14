@@ -8,6 +8,8 @@ test('badge counts all pending clubs and unresolved active event failures, then 
       { competitionId: 11, status: 'ATTENTION' },
     ];
   const db = {
+    appSetting: { findMany: async () => [] },
+    tournament: { findMany: async () => [] },
     clubRegistrationRequest: {
       count: async ({ where }) => {
         assert.deepEqual(where, { status: 'PENDING' });
@@ -16,13 +18,14 @@ test('badge counts all pending clubs and unresolved active event failures, then 
     },
     competition: {
       findMany: async ({ where }) => {
+        if (where.ftlEventId) return [];
         assert.deepEqual(where.tournament, { archivedAt: null });
         return [{ id: 10 }, { id: 11 }];
       },
     },
     ftlSyncState: { findMany: async () => states },
   };
-  assert.deepEqual(await summary(db), { clubs: 2, problems: 2, total: 4 });
+  assert.deepEqual(await summary(db), { clubs: 2, problems: 2, events: 0, total: 4 });
   pending = 0;
   states = [
     { competitionId: 10, status: 'OK' },
