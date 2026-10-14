@@ -349,6 +349,19 @@ async function upcoming(db, now = Date.now()) {
         select: { targetId: true, after: true },
       })
     : [];
+  const candidates = [...new Map(configs.map((c) => [c.targetId, c.after])).entries()]
+    .filter(([, config]) => config?.scheduleSessions?.length > 1)
+    .map(([id]) => id);
+  const pools = candidates.length
+    ? await db.pool.findMany({
+        where: { competitionId: { in: candidates } },
+        select: { competitionId: true, isFinal: true },
+      })
+    : [];
+  const poolsFinished = (id) => {
+    const mine = pools.filter((p) => p.competitionId === id);
+    return mine.length > 0 && mine.every((p) => p.isFinal);
+  };
   const dates = new Map();
   for (const c of configs) if (/^\d{4}-\d{2}-\d{2}$/.test(c.after?.date || '')) dates.set(c.targetId, c.after.date);
   const listed = events().map((e) => {
@@ -390,7 +403,9 @@ async function upcoming(db, now = Date.now()) {
           id: `prepared:${c.id}:${session.date}`,
           ...(sessionDates.length === 2 && session.date === sessionDates[1]
             ? { predictionView: 'tableau', tableauPhase: 'main' }
-            : {}),
+            : sessionDates.length === 2 && session.date === sessionDates[0] && poolsFinished(c.id)
+              ? { predictionView: 'tableau', tableauPhase: 'preliminary' }
+              : {}),
           start: session.date,
           end: session.date,
           city: config.city || '',
