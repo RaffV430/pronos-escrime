@@ -79,3 +79,76 @@ test('le score de la rencontre précédente sur la piste ne sert pas de point de
     [[1, 1, 0]],
   );
 });
+
+test('équipes : pays et piste rattachent les scores cumulés malgré le changement de relayeur', () => {
+  const now = 90000;
+  const m = {
+    id: 901,
+    player1: 'TEAM A',
+    player2: 'TEAM B',
+    player1Country: 'FRA',
+    player2Country: 'ITA',
+    podiumFormat: 'TEAM',
+    strip: '19',
+    isFinished: false,
+  };
+  const state = live.record(
+    {
+      ...msg('19', 'RELAY A', 'RELAY B', 31, 29),
+      Left: { Name: 'RELAY A', Country: 'ITA', Score: 31 },
+      Right: { Name: 'RELAY B', Country: 'FRA', Score: 29 },
+    },
+    now,
+    new Set([GUID]),
+  );
+  const snapshot = structuredClone(m);
+  const [result] = live.matchLive([m], [state], now);
+  assert.deepEqual([result.matchId, result.score1, result.score2], [901, 29, 31]);
+  const relay = { ...state, left: { ...state.left, name: 'NEXT RELAY' } };
+  assert.equal(live.matchLive([m], [relay], now)[0].matchId, 901);
+  assert.deepEqual(m, snapshot);
+  assert.equal(live.matchLive([{ ...m, podiumFormat: 'INDIVIDUAL' }], [state], now).length, 0);
+  for (const match of [
+    { ...m, strip: '20' },
+    { ...m, strip: null },
+    { ...m, player1Country: null },
+    { ...m, player2Country: 'FRA' },
+  ])
+    assert.equal(live.matchLive([match], [state], now).length, 0);
+  assert.equal(live.matchLive([m, { ...m, id: 902 }], [state], now).length, 0);
+  assert.equal(live.matchLive([m], [state, { ...state }], now).length, 0);
+  assert.equal(live.matchLive([m], [state], now + live.FRESH_MS + 1).length, 0);
+});
+
+test('liveFor utilise le format, les pays officiels et la piste de la base sans écrire de résultat', async () => {
+  const now = 200000;
+  const match = { id: 950, player1: 'TEAM ONE', player2: 'TEAM TWO', strip: '42', isFinished: false };
+  const db = {
+    competition: {
+      findUnique: async () => ({
+        podiumFormat: 'TEAM',
+        podiumRoster: [
+          { name: 'TEAM ONE', country: 'GER' },
+          { name: 'TEAM TWO', country: 'ITA' },
+        ],
+        tournament: { ftlSourceUrl: `https://www.fencingtimelive.com/tournaments/eventSchedule/${GUID}` },
+      }),
+    },
+    match: { findMany: async () => [match] },
+  };
+  live.record(
+    {
+      ...msg('42', 'FIRST RELAY', 'SECOND RELAY', 35, 32),
+      Left: { Name: 'FIRST RELAY', Country: 'GER', Score: 35 },
+      Right: { Name: 'SECOND RELAY', Country: 'ITA', Score: 32 },
+    },
+    now,
+    new Set([GUID]),
+  );
+  const result = await live.liveFor(db, 950, now);
+  assert.deepEqual(
+    result.map((x) => [x.matchId, x.score1, x.score2]),
+    [[950, 35, 32]],
+  );
+  assert.deepEqual(match, { id: 950, player1: 'TEAM ONE', player2: 'TEAM TWO', strip: '42', isFinished: false });
+});

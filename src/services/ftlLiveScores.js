@@ -3,6 +3,7 @@
 const { EventEmitter } = require('node:events');
 const { ORIGIN } = require('./ftlClient');
 const { norm } = require('./ftlParser');
+const { countryFor } = require('./matchCountries');
 
 const FRESH_MS = 3 * 60000; // une piste muette depuis 3 min n'est plus « en cours »
 const REFRESH_MS = 5 * 60000; // relecture des tournois suivis
@@ -127,16 +128,42 @@ function matchLive(matches, states, now = Date.now()) {
     }
     const a = fold(m.player1),
       b = fold(m.player2);
-    const s = states.find(
-      (x) =>
-        now - x.at <= FRESH_MS &&
-        x.left.name &&
-        x.right.name &&
-        ((fold(x.left.name) === a && fold(x.right.name) === b) ||
-          (fold(x.left.name) === b && fold(x.right.name) === a)),
-    );
-    if (!s) continue;
-    const swap = fold(s.left.name) !== a;
+    // Par équipes, FTL transmet les tireurs du relais, pas le nom des équipes.
+    // La piste ET les deux pays officiels doivent correspondre sans ambiguïté.
+    const team = m.podiumFormat === 'TEAM';
+    const c1 = m.player1Country,
+      c2 = m.player2Country;
+    const candidates = states.filter((x) => {
+      if (now - x.at > FRESH_MS || !x.left.name || !x.right.name) return false;
+      if (!team)
+        return (
+          (fold(x.left.name) === a && fold(x.right.name) === b) || (fold(x.left.name) === b && fold(x.right.name) === a)
+        );
+      if (!m.strip || fold(m.strip) !== fold(x.strip) || !c1 || !c2 || c1 === c2) return false;
+      return (
+        (countryFor([{ name: x.left.name, country: x.left.country }], x.left.name) === c1 &&
+          countryFor([{ name: x.right.name, country: x.right.country }], x.right.name) === c2) ||
+        (countryFor([{ name: x.left.name, country: x.left.country }], x.left.name) === c2 &&
+          countryFor([{ name: x.right.name, country: x.right.country }], x.right.name) === c1)
+      );
+    });
+    if (candidates.length !== 1) continue;
+    const s = candidates[0];
+    if (
+      team &&
+      matches.filter(
+        (other) =>
+          !other.isFinished &&
+          other.podiumFormat === 'TEAM' &&
+          fold(other.strip) === fold(m.strip) &&
+          ((other.player1Country === c1 && other.player2Country === c2) ||
+            (other.player1Country === c2 && other.player2Country === c1)),
+      ).length !== 1
+    )
+      continue;
+    const swap = team
+      ? countryFor([{ name: s.left.name, country: s.left.country }], s.left.name) !== c1
+      : fold(s.left.name) !== a;
     const [p1, p2] = swap ? [s.right, s.left] : [s.left, s.right];
     const history = oriented(bouts.get(boutKey(s))?.touches || [], swap);
     if (history.length) finishedHistory.set(m.id, history);
@@ -171,16 +198,22 @@ async function competitionContext(db, competitionId, now = Date.now()) {
   if (cached && now - cached.at < MATCHES_MS) return cached;
   const competition = await db.competition.findUnique({
     where: { id: competitionId },
-    select: { tournament: { select: { ftlSourceUrl: true } } },
+    select: { podiumFormat: true, podiumRoster: true, tournament: { select: { ftlSourceUrl: true } } },
   });
   const guid = GUID.exec(competition?.tournament?.ftlSourceUrl || '')?.[1]?.toUpperCase() || null;
   const matches = guid
     ? await db.match.findMany({
         where: { competitionId },
-        select: { id: true, player1: true, player2: true, isFinished: true },
+        select: { id: true, player1: true, player2: true, isFinished: true, strip: true },
       })
     : [];
-  const context = { at: now, guid, matches };
+  const enriched = matches.map((match) => ({
+    ...match,
+    podiumFormat: competition?.podiumFormat,
+    player1Country: countryFor(competition?.podiumRoster, match.player1),
+    player2Country: countryFor(competition?.podiumRoster, match.player2),
+  }));
+  const context = { at: now, guid, matches: enriched };
   matchesCache.set(competitionId, context);
   return context;
 }
