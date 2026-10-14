@@ -206,3 +206,55 @@ test('calendrier public : chaque entrée garde ses propres épreuves et leurs vr
   assert.deepEqual([m20.competitionIds, m20.start, m20.end], [[3], '2026-10-11', '2026-10-11']);
   assert.ok(list.indexOf(m17) < list.indexOf(m20));
 });
+
+test('calendrier : tournoi préparé hors sélection FFE, sessions exactes et configuration récente', async () => {
+  const db = {
+    tournament: {
+      findMany: async ({ where }) => {
+        assert.deepEqual(where, { archivedAt: null });
+        return [
+          {
+            id: 70,
+            name: 'TEST CUP',
+            competitions: [
+              { id: 200, name: "Senior Men's Foil" },
+              { id: 201, name: 'Sans date' },
+            ],
+          },
+        ];
+      },
+    },
+    auditLog: {
+      findMany: async ({ where }) =>
+        where.action === 'Calendrier : tournoi relié'
+          ? []
+          : [
+              { targetId: 200, after: { date: '2026-10-14' } },
+              {
+                targetId: 200,
+                after: {
+                  date: '2026-10-15',
+                  timezone: 'Asia/Tokyo',
+                  format: 'INDIVIDUAL',
+                  scheduleSessions: [{ date: '2026-10-15' }, { date: '2026-10-17' }, { date: '2026-10-17' }],
+                },
+              },
+              { targetId: 201, after: { date: 'invalide' } },
+            ],
+    },
+  };
+  const list = await C.upcoming(db, Date.parse('2026-10-14T00:00:00Z'));
+  const mine = list.filter((e) => e.tournamentId === 70);
+  assert.deepEqual(
+    mine.map((e) => [e.start, e.end, e.competitionIds, e.weapon, e.categories]),
+    [
+      ['2026-10-15', '2026-10-15', [200], 'Fleuret', ['SENIOR']],
+      ['2026-10-17', '2026-10-17', [200], 'Fleuret', ['SENIOR']],
+    ],
+  );
+  const later = await C.upcoming(db, Date.parse('2026-10-16T00:00:00Z'));
+  assert.deepEqual(
+    later.filter((e) => e.tournamentId === 70).map((e) => e.start),
+    ['2026-10-17'],
+  );
+});
