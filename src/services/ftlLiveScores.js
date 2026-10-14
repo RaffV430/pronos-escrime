@@ -169,6 +169,7 @@ function matchLive(matches, states, now = Date.now()) {
     if (history.length) finishedHistory.set(m.id, history);
     out.push({
       matchId: m.id,
+      ftlLeftPlayer: swap ? 2 : 1,
       finished: false,
       strip: s.strip,
       clock: s.clock,

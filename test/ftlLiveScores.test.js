@@ -35,12 +35,14 @@ test('le score est rattaché au bon match, dans l’ordre player1 / player2, acc
   ];
   const out = live.matchLive(matches, states, now);
   assert.equal(out.length, 1);
+  assert.equal(out[0].ftlLeftPlayer, 2);
   assert.deepEqual([out[0].matchId, out[0].score1, out[0].score2, out[0].strip], [1, 3, 4, '5']);
 });
 
 test('une piste muette depuis plus de 3 minutes n’est plus en cours', () => {
   const s = live.record(msg('7', 'A B', 'C D', 1, 0), 0, new Set([GUID]));
   const m = [{ id: 9, player1: 'A B', player2: 'C D', isFinished: false }];
+  assert.equal(live.matchLive(m, [s], live.FRESH_MS)[0].ftlLeftPlayer, 1);
   assert.equal(live.matchLive(m, [s], live.FRESH_MS).length, 1);
   assert.equal(live.matchLive(m, [s], live.FRESH_MS + 1).length, 0);
 });
