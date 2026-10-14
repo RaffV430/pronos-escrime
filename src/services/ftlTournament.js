@@ -63,9 +63,34 @@ function parseSchedule(html, sourceUrl, timezone, city = null) {
         });
       });
   });
-  if (!events.length || events.length > 128 || new Set(events.map((e) => e.eventId)).size !== events.length)
-    throw failure('Liste des épreuves absente ou incohérente.');
-  return { sourceUrl, tournament, timezone, ...(city ? { city } : {}), events };
+  if (!events.length || events.length > 128) throw failure('Liste des épreuves absente ou incohérente.');
+  // FTL répète le même identifiant pour « Day 1 », « Day 2 » : une seule épreuve,
+  // dont le début reste la première session. Les autres doublons restent refusés.
+  const grouped = new Map();
+  for (const entry of events) {
+    const group = grouped.get(entry.eventId) || [];
+    group.push(entry);
+    grouped.set(entry.eventId, group);
+  }
+  const unique = [...grouped.values()].map((group) => {
+    if (group.length === 1) return group[0];
+    const labels = group.map((entry) => /^(.*?)\s*\(Day\s+(\d+)\)$/i.exec(entry.event));
+    if (
+      labels.some((label) => !label) ||
+      new Set(labels.map((label) => norm(label[1]))).size !== 1 ||
+      new Set(labels.map((label) => Number(label[2]))).size !== group.length ||
+      new Set(group.map((entry) => entry.date)).size !== group.length
+    )
+      throw failure('Liste des épreuves absente ou incohérente.');
+    const { eventStart } = require('./eventStart');
+    const ordered = group.toSorted((a, b) => eventStart(a) - eventStart(b));
+    return {
+      ...ordered[0],
+      event: clean(labels[0][1]),
+      scheduleSessions: ordered.map(({ date, time, event }) => ({ date, time, event })),
+    };
+  });
+  return { sourceUrl, tournament, timezone, ...(city ? { city } : {}), events: unique };
 }
 function linksOf($) {
   return $('a[href]')
