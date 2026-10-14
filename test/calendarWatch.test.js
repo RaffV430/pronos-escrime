@@ -208,7 +208,9 @@ test('calendrier public : chaque entrée garde ses propres épreuves et leurs vr
 });
 
 test('calendrier : tournoi préparé hors sélection FFE, sessions exactes et configuration récente', async () => {
+  let poolRows = [];
   const db = {
+    pool: { findMany: async () => poolRows },
     tournament: {
       findMany: async ({ where }) => {
         assert.deepEqual(where, { archivedAt: null });
@@ -255,6 +257,18 @@ test('calendrier : tournoi préparé hors sélection FFE, sessions exactes et co
   assert.equal(mine[0].predictionView, undefined);
   assert.equal(mine[1].predictionView, 'tableau');
   assert.equal(mine[1].tableauPhase, 'main');
+  poolRows = [
+    { competitionId: 200, isFinal: true },
+    { competitionId: 200, isFinal: false },
+  ];
+  assert.equal(
+    (await C.upcoming(db, Date.parse('2026-10-14'))).find((e) => e.id === mine[0].id).predictionView,
+    undefined,
+  );
+  poolRows[1].isFinal = true;
+  const afterPools = (await C.upcoming(db, Date.parse('2026-10-14'))).filter((e) => e.tournamentId === 70);
+  assert.equal(afterPools[0].tableauPhase, 'preliminary');
+  assert.equal(afterPools[1].tableauPhase, 'main');
   const later = await C.upcoming(db, Date.parse('2026-10-16T00:00:00Z'));
   assert.deepEqual(
     later.filter((e) => e.tournamentId === 70).map((e) => e.start),
