@@ -26,6 +26,44 @@ router.get(
     );
   }),
 );
+const announcements = require('../services/generalAnnouncements');
+router.get(
+  '/announcements',
+  wrap(async (req, res) => {
+    const rows = await prisma.appSetting.findMany({
+      where: { key: { startsWith: announcements.PREFIX } },
+      orderBy: { updatedAt: 'desc' },
+      take: 20,
+    });
+    res.json({
+      available: require('../services/pushNotifications').configured(),
+      announcements: rows
+        .map((r) => announcements.summary(r.value))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 20),
+    });
+  }),
+);
+router.post(
+  '/announcements/prepare',
+  require('express-rate-limit').rateLimit({
+    windowMs: 60000,
+    limit: 3,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    message: { error: 'Attendez une minute avant de préparer une nouvelle annonce.' },
+  }),
+  wrap(async (req, res) => res.json(await announcements.prepare(prisma, req.user.userId, req.body))),
+);
+router.post(
+  '/announcements/:id/send',
+  wrap(async (req, res) => {
+    if (req.body.confirm !== true) throw Object.assign(new Error('Confirmez cet envoi.'), { status: 400 });
+    if (!require('../services/pushNotifications').configured())
+      return res.status(503).json({ error: 'Notifications non configurées sur cet environnement.' });
+    res.json(await announcements.dispatch(prisma, req.user.userId, req.params.id));
+  }),
+);
 // Conflicts are read and confirmed under the same competition lock as official imports.
 router.get(
   '/identity-review/:competitionId',
