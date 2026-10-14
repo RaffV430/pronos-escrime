@@ -1,6 +1,9 @@
 const { isWalkover } = require('./resultTypes');
 const { closesAt } = require('../lib/matchLock');
-const roundLabel = (round) => ({ T4: 'Semi-finales', T2: 'Finale' })[round] || round;
+const roundLabel = (round) =>
+  round?.startsWith('J1:')
+    ? `${round.slice(3)} préliminaire (J1)`
+    : { T4: 'Semi-finales', T2: 'Finale' }[round] || round;
 function closingText(matches, timezone = 'Europe/Paris', now = new Date()) {
   const stamps = matches.map(closesAt),
     valid = stamps.filter(Boolean).map(Date.parse).filter(Number.isFinite);
@@ -81,6 +84,8 @@ function fencerResultText(competition, m, fencers) {
   let body;
   if (mineWon && m.round === 'T2') body = `🏆 ${w} remporte l’épreuve (${score} en finale contre ${l})`;
   else if (mineWon && m.round === 'Bronze') body = `🥉 ${w} prend le bronze ${versus}`;
+  else if (mineWon && m.round === 'J1:T64') body = `✅ ${w} se qualifie pour le tableau principal du J2 ${versus}`;
+  else if (mineWon && m.round?.startsWith('J1:')) body = `✅ ${w} gagne en ${roundLabel(m.round)} ${versus}`;
   else if (mineWon && nextRound(m.round)) body = `✅ ${w} passe en ${roundIn(nextRound(m.round))} ${versus}`;
   else if (mineWon) body = `✅ ${w} gagne ${versus}`;
   else if (mineLost)

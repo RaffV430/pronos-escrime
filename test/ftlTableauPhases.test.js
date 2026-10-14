@@ -87,3 +87,10 @@ test('la fin du J1 ne ferme ni le T64 principal du J2 ni le podium', () => {
   assert.equal(timed[1].previousRoundCompletedAt, null);
   assert.equal(podiumClosed({}, timed, Date.parse('2026-10-16T00:00:00Z')), false);
 });
+
+test('une victoire du T64 préliminaire annonce le J2, pas un T32 du J1', () => {
+  const { fencerResultText } = require('../src/services/notificationText');
+  const result = fencerResultText({ name: 'TEST' }, { ...match, round: 'J1:T64' }, ['TEST A']);
+  assert.match(result.body, /tableau principal du J2/);
+  assert.doesNotMatch(result.body, /T32/);
+});

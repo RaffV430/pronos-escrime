@@ -12,7 +12,14 @@ const same = (a, b) =>
     .trim()
     .toLowerCase();
 const eq = (value) => ({ equals: value, mode: 'insensitive' });
-const roundSize = (round) => (/^T\d+$/.test(round || '') ? Number(round.slice(1)) : round === 'Bronze' ? 3 : 999);
+const roundSize = (round) =>
+  round?.startsWith('J1:')
+    ? 10000 + Number(round.slice(4))
+    : /^T\d+$/.test(round || '')
+      ? Number(round.slice(1))
+      : round === 'Bronze'
+        ? 3
+        : 999;
 
 // Assaut lu dans la matrice : « V5 » / « V » / « D3 » de la ligne du tireur, touches reçues dans la
 // case réciproque. null si l'assaut n'est pas tiré ou annulé.
