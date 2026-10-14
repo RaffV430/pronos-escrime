@@ -381,12 +381,16 @@ async function upcoming(db, now = Date.now()) {
       if (!config) continue;
       const category = classify(c.name);
       const sessions = config.scheduleSessions?.length ? config.scheduleSessions : [{ date: config.date }];
+      const sessionDates = [...new Set(sessions.map((s) => s.date))].sort();
       const seen = new Set();
       for (const session of sessions) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(session.date || '') || seen.has(session.date)) continue;
         seen.add(session.date);
         listed.push({
           id: `prepared:${c.id}:${session.date}`,
+          ...(sessionDates.length === 2 && session.date === sessionDates[1]
+            ? { predictionView: 'tableau', tableauPhase: 'main' }
+            : {}),
           start: session.date,
           end: session.date,
           city: config.city || '',

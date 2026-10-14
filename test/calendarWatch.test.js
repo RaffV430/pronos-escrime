@@ -252,6 +252,9 @@ test('calendrier : tournoi préparé hors sélection FFE, sessions exactes et co
       ['2026-10-17', '2026-10-17', [200], 'Fleuret', ['SENIOR']],
     ],
   );
+  assert.equal(mine[0].predictionView, undefined);
+  assert.equal(mine[1].predictionView, 'tableau');
+  assert.equal(mine[1].tableauPhase, 'main');
   const later = await C.upcoming(db, Date.parse('2026-10-16T00:00:00Z'));
   assert.deepEqual(
     later.filter((e) => e.tournamentId === 70).map((e) => e.start),
