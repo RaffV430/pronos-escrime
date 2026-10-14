@@ -336,13 +336,10 @@ async function watch(db, deps = {}) {
 // Calendrier public : épreuves à venir, avec le tournoi de l'application quand il existe déjà.
 async function upcoming(db, now = Date.now()) {
   const known = await links(db);
-  const ids = [...new Set([...known.values()].map((l) => l.tournamentId))];
-  const tournaments = ids.length
-    ? await db.tournament.findMany({
-        where: { id: { in: ids } },
-        select: { id: true, name: true, competitions: { select: { id: true, name: true } } },
-      })
-    : [];
+  const tournaments = await db.tournament.findMany({
+    where: { archivedAt: null },
+    select: { id: true, name: true, competitions: { select: { id: true, name: true } } },
+  });
   // Jour officiel de chaque épreuve (configuration FencingTimeLive / engarde-service).
   const competitionIds = tournaments.flatMap((t) => t.competitions.map((c) => c.id));
   const configs = competitionIds.length
@@ -354,26 +351,58 @@ async function upcoming(db, now = Date.now()) {
     : [];
   const dates = new Map();
   for (const c of configs) if (/^\d{4}-\d{2}-\d{2}$/.test(c.after?.date || '')) dates.set(c.targetId, c.after.date);
-  return events()
-    .map((e) => {
-      const link = known.get(e.id);
-      const t = link && tournaments.find((x) => x.id === link.tournamentId);
-      if (!t) return { ...e, tournamentId: null, competitionIds: [] };
-      // Seules les épreuves de cette entrée (ex. M17 le samedi, M20 le dimanche dans le même tournoi).
-      const mine = t.competitions.filter((c) => wanted(e, c.name));
-      const days = mine
-        .map((c) => dates.get(c.id))
-        .filter(Boolean)
-        .sort();
-      return {
-        ...e,
-        ...(days.length ? { start: days[0], end: days.at(-1) } : {}),
-        tournamentId: t.id,
-        tournamentName: t.name,
-        competitionIds: mine.map((c) => c.id),
-        competitions: mine.map((c) => ({ id: c.id, name: c.name })),
-      };
-    })
+  const listed = events().map((e) => {
+    const link = known.get(e.id);
+    const t = link && tournaments.find((x) => x.id === link.tournamentId);
+    if (!t) return { ...e, tournamentId: null, competitionIds: [] };
+    // Seules les épreuves de cette entrée (ex. M17 le samedi, M20 le dimanche dans le même tournoi).
+    const mine = t.competitions.filter((c) => wanted(e, c.name));
+    const days = mine
+      .map((c) => dates.get(c.id))
+      .filter(Boolean)
+      .sort();
+    return {
+      ...e,
+      ...(days.length ? { start: days[0], end: days.at(-1) } : {}),
+      tournamentId: t.id,
+      tournamentName: t.name,
+      competitionIds: mine.map((c) => c.id),
+      competitions: mine.map((c) => ({ id: c.id, name: c.name })),
+    };
+  });
+  // Les tournois préparés manuellement ont également leur place dans le calendrier.
+  // Chaque session officielle est affichée à sa date, sans inventer un jour intermédiaire.
+  const covered = new Set(listed.flatMap((e) => e.competitionIds));
+  const latest = new Map(configs.map((c) => [c.targetId, c.after]));
+  for (const t of tournaments)
+    for (const c of t.competitions) {
+      if (covered.has(c.id)) continue;
+      const config = latest.get(c.id);
+      if (!config) continue;
+      const category = classify(c.name);
+      const sessions = config.scheduleSessions?.length ? config.scheduleSessions : [{ date: config.date }];
+      const seen = new Set();
+      for (const session of sessions) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(session.date || '') || seen.has(session.date)) continue;
+        seen.add(session.date);
+        listed.push({
+          id: `prepared:${c.id}:${session.date}`,
+          start: session.date,
+          end: session.date,
+          city: config.city || '',
+          label: t.name,
+          weapon: category.weapon || '',
+          gender: category.gender || '',
+          categories: category.category ? [category.category] : [],
+          format: config.format,
+          tournamentId: t.id,
+          tournamentName: t.name,
+          competitionIds: [c.id],
+          competitions: [{ id: c.id, name: c.name }],
+        });
+      }
+    }
+  return listed
     .filter((e) => day(e.end) + DAY > now)
     .sort((x, y) => x.start.localeCompare(y.start) || x.id.localeCompare(y.id));
 }
