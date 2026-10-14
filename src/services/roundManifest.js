@@ -1,5 +1,5 @@
 // Import the complete official round manifest, including rounds with no known pairs yet.
-function validateManifest(rounds) {
+function validateManifest(rounds, { terminal = 'T2' } = {}) {
   if (!Array.isArray(rounds) || !rounds.length || rounds.length > 12)
     throw new Error('Tableau officiel complet requis.');
   const names = new Set(rounds.map((r) => r.round));
@@ -21,7 +21,8 @@ function validateManifest(rounds) {
     } else if (!names.has(r.previousRound) || r.previousRound !== (r.round === 'Bronze' ? 'T4' : `T${n * 2}`))
       throw new Error('Tour précédent manquant ou incohérent.');
   }
-  if (roots !== 1 || !names.has('T2')) throw new Error('Le tableau doit relier un premier tour unique à la finale.');
+  if (roots !== 1 || !names.has(terminal))
+    throw new Error('Le tableau doit relier un premier tour unique à la finale.');
   return rounds.map(({ round, previousRound, expectedMatchCount }) => ({ round, previousRound, expectedMatchCount }));
 }
 module.exports = { validateManifest };

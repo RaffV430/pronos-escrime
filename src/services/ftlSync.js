@@ -117,6 +117,33 @@ function podiumFromResults(rows, c, matches) {
   };
 }
 async function observe(c, existing, client, configured = null, loggedIn = false) {
+  if (configured?.scheduleSessions?.length > 1) {
+    const urls = [
+      ...new Set(
+        [...(configured.tableauSources || []), configured.sourceUrl, ...existing.map((m) => m.sourceUrl)].filter(
+          Boolean,
+        ),
+      ),
+    ];
+    if (!urls.length || urls.length > 2 || urls.some((u) => !sourcePattern.test(u)))
+      throw failure('Phases officielles non identifiables.');
+    if (!loggedIn) await client.login();
+    const observations = [];
+    for (const url of urls)
+      observations.push(
+        await observeSingle(
+          c,
+          existing.filter((m) => m.sourceUrl === url),
+          client,
+          { ...configured, sourceUrl: url, allowPreliminary: true },
+          true,
+        ),
+      );
+    return require('./ftlTableauPhases').combine(observations);
+  }
+  return observeSingle(c, existing, client, configured, loggedIn);
+}
+async function observeSingle(c, existing, client, configured = null, loggedIn = false) {
   const urls = [...new Set([...existing.map((m) => m.sourceUrl), configured?.sourceUrl].filter(Boolean))];
   if (urls.length !== 1 || !sourcePattern.test(urls[0]))
     throw failure('Un tableau FencingTimeLive officiel doit être relié à cette épreuve.', 409);
@@ -156,7 +183,7 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
   // La petite finale renumérote ses deux équipes 1 et 2 : garder les têtes de série du tableau principal.
   const entrySeeds = new Map();
   for (const t of [...main, ...(c.podiumFormat === 'TEAM' ? bronzes : [])]) {
-    if (!/^[a-f0-9]{32}$/i.test(t.guid) || !Number.isSafeInteger(t.numTables) || t.numTables < 1 || t.numTables > 10)
+    if (!/^[a-f0-9]{31,32}$/i.test(t.guid) || !Number.isSafeInteger(t.numTables) || t.numTables < 1 || t.numTables > 10)
       throw failure('Structure officielle inattendue.');
     const html = await client.get(`${sourceUrl}/trees/${t.guid}/tables/0/${t.numTables + 1}`);
     const parsed = parseTable(html, {
@@ -166,10 +193,13 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
       bronze: t !== main[0],
       entrySeeds,
       allowPartial: true,
+      requireComplete: !config.allowPreliminary,
     });
     const schedule = require('./schedule');
     for (const m of parsed.matches) {
-      const forced = schedule.phaseDay(config, m.round);
+      const mainPhase = config.allowPreliminary && parsed.rounds.some((r) => r.round === 'T2');
+      const session = mainPhase ? config.scheduleSessions?.at(-1) : config.scheduleSessions?.[0];
+      const forced = schedule.phaseDay(config, m.round) || session?.date;
       if (forced && m.startsAt) m.startsAt = schedule.onDay(m.startsAt, forced, config.timezone);
     }
     matches.push(...parsed.matches);
@@ -177,7 +207,8 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
     byes.push(...(parsed.byes || []));
     issues.push(...(parsed.issues || []));
   }
-  validateManifest(rounds);
+  const isPreliminary = config.allowPreliminary && !rounds.some((r) => r.round === 'T2');
+  validateManifest(rounds, { terminal: isPreliminary ? 'T64' : 'T2' });
   if (new Set(matches.map((m) => m.sourceKey)).size !== matches.length) throw failure('Clés de rencontres dupliquées.');
   let officialPodium = null,
     resultsSourceUrl = null;
@@ -209,7 +240,7 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
       warnings.push(e.status ? e.message : 'Podium non vérifiable pour le moment.');
     }
   }
-  return {
+  const observation = {
     sourceUrl,
     matches,
     rounds,
@@ -220,6 +251,7 @@ async function observe(c, existing, client, configured = null, loggedIn = false)
     issues,
     checkedAt: new Date(),
   };
+  return isPreliminary ? require('./ftlTableauPhases').preliminary(observation) : observation;
 }
 function planMatches(existing, observation, { allowPartial = false } = {}) {
   existing = existing.filter((m) => m.resultType !== 'CANCELLED');
@@ -239,6 +271,10 @@ function planMatches(existing, observation, { allowPartial = false } = {}) {
   const plan = observation.matches
     .map((m) => {
       let current = existing.find((e) => e.sourceKey === m.sourceKey);
+      if (!current && m.round?.startsWith('J1:'))
+        current = existing.find(
+          (e) => e.sourceUrl === m.sourceUrl && e.sourceKey === m.sourceKey.slice(3) && samePair(e, m),
+        );
       if (!current) {
         const pair = existing.filter((e) => !e.sourceUrl && !e.sourceKey && pairKey(e) === pairKey(m));
         if (pair.length > 1) throw failure('Plusieurs rencontres non sourcées correspondent à la même paire.', 409);
@@ -248,8 +284,10 @@ function planMatches(existing, observation, { allowPartial = false } = {}) {
         seen.add(current.id);
         if (
           !samePair(current, m) ||
-          (current.round && current.round !== m.round) ||
-          (current.sourceUrl && current.sourceUrl !== observation.sourceUrl)
+          (current.round &&
+            current.round !== m.round &&
+            !(m.round?.startsWith('J1:') && current.round === m.round.slice(3) && current.sourceUrl === m.sourceUrl)) ||
+          (current.sourceUrl && current.sourceUrl !== (m.sourceUrl || observation.sourceUrl))
         )
           return conflict(
             current,
@@ -279,7 +317,7 @@ function cancellable(m, observation) {
     Boolean(m) &&
     !(observation.issues || []).some((i) => !i.sourceKey || i.sourceKey === m.sourceKey) &&
     !m.isFinished &&
-    m.sourceUrl === observation.sourceUrl &&
+    (observation.sourceUrls || [observation.sourceUrl]).includes(m.sourceUrl) &&
     !observation.matches.some((o) => o.round === m.round && pairKey(o) === pairKey(m))
   );
 }
@@ -375,6 +413,22 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       plan = planMatches(existing, observation, { allowPartial: true });
     }
   }
+  const legacyRounds = await tx.matchRound.findMany({ where: { competitionId: c.id } });
+  for (const observed of observation.rounds.filter((r) => r.round.startsWith('J1:'))) {
+    const legacy = legacyRounds.find((r) => r.round === observed.round.slice(3) && r.sourceUrl === observed.sourceUrl);
+    if (legacy) {
+      await tx.matchRound.upsert({
+        where: { competitionId_round: { competitionId: c.id, round: observed.round } },
+        create: {
+          ...legacy,
+          round: observed.round,
+          previousRound: legacy.previousRound ? 'J1:' + legacy.previousRound : null,
+        },
+        update: { manualUnlockUntil: legacy.manualUnlockUntil },
+      });
+      await tx.matchRound.delete({ where: { competitionId_round: { competitionId: c.id, round: legacy.round } } });
+    }
+  }
   const oldRounds = await tx.matchRound.findMany({ where: { competitionId: c.id } });
   const imported = new Set(observation.matches.map((m) => m.sourceKey));
   const matchIssues = new Set(
@@ -447,8 +501,13 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
         : observedRound;
     await tx.matchRound.upsert({
       where: { competitionId_round: { competitionId: c.id, round: r.round } },
-      create: { competitionId: c.id, ...r, sourceUrl: observation.sourceUrl, verifiedAt: observation.checkedAt },
-      update: { ...r, sourceUrl: observation.sourceUrl, verifiedAt: observation.checkedAt },
+      create: {
+        competitionId: c.id,
+        ...r,
+        sourceUrl: r.sourceUrl || observation.sourceUrl,
+        verifiedAt: observation.checkedAt,
+      },
+      update: { ...r, sourceUrl: r.sourceUrl || observation.sourceUrl, verifiedAt: observation.checkedAt },
     });
   }
   // Match clos faute d'horaire (10 min après le tour précédent) dont FTL publie maintenant une heure
@@ -488,7 +547,7 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
         previousWinner !== o.winner ||
         (isWalkover(m.resultType) ? m.resultType : null) !== (isWalkover(o.resultType) ? o.resultType : null));
     const data = {
-      sourceUrl: observation.sourceUrl,
+      sourceUrl: o.sourceUrl || observation.sourceUrl,
       sourceKey: o.sourceKey,
       round: o.round,
       syncIssue: o.syncIssue || null,

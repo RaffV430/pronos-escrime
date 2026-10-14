@@ -18,7 +18,7 @@ const SCOPES = {
   PODIUM: 'Le podium',
 };
 const KIND = 'BOOST';
-const ROUND = /^T(?:[2-9]|[1-9]\d{1,3})$/;
+const ROUND = /^(?:J1:)?T(?:[2-9]|[1-9]\d{1,3})$/;
 
 const boostsOf = (c) => (Array.isArray(c?.pointsBoosts) ? c.pointsBoosts.filter((b) => b && SCOPES[b.scope]) : []);
 const keyOf = (scope, round = null) => (scope === 'ROUND' ? `ROUND:${round}` : scope);
@@ -44,7 +44,8 @@ const multiplierFor = (c, kind, round = null) => (boostsOf(c).some((b) => covers
 
 // Libellé court pour l'affichage et les notifications.
 const roundName = (round) =>
-  ({ T2: 'finale', T4: 'demi-finales', T8: 'quarts de finale' })[round] || `tableau de ${round.slice(1)}`;
+  ({ T2: 'finale', T4: 'demi-finales', T8: 'quarts de finale' })[round] ||
+  (round.startsWith('J1:') ? `tableau préliminaire de ${round.slice(4)} (J1)` : `tableau de ${round.slice(1)}`);
 function boostLabel(boost) {
   if (boost.scope === 'ROUND') return `ce tour (${roundName(boost.round)})`;
   return { EVENT: 'toute l’épreuve', POOLS: 'les poules', TABLEAU: 'le tableau', PODIUM: 'le podium' }[boost.scope];

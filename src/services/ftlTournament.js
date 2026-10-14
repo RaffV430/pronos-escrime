@@ -120,7 +120,8 @@ async function readEvent(event, client) {
     ...new Set(links.filter((u) => SOURCE.test(u) && SOURCE.exec(u)[2].toUpperCase() === event.eventId)),
   ];
   const tableaus = related.filter((u) => u.includes('/tableaus/'));
-  if (tableaus.length > 1) throw failure('Plusieurs tableaux principaux : vérification individuelle nécessaire.');
+  if (tableaus.length > 1 && !(event.scheduleSessions?.length > 1))
+    throw failure('Plusieurs tableaux principaux : vérification individuelle nécessaire.');
   let roster = null;
   if (rosterSourceUrl) {
     const rosterPage = load(await client.get(rosterSourceUrl));
@@ -142,6 +143,7 @@ async function readEvent(event, client) {
       eventTime,
       rosterSourceUrl: rosterSourceUrl || null,
       sourceUrl: tableaus[0] || null,
+      ...(event.scheduleSessions?.length > 1 ? { tableauSources: tableaus } : {}),
       poolSources: related.filter((u) => u.includes('/pools/')),
     },
     roster,
@@ -367,7 +369,11 @@ async function applyEvent(tx, c, { config, roster }, actorId, allowWithdrawals =
 // mémorisée) : à chaque contrôle, le tableau est recherché sur la page officielle de l'épreuve, puis
 // enregistré dans la configuration. Aucun tableau deviné : un seul lien, de la même épreuve.
 async function discoverTableau(db, c, config, actorId, client) {
-  if (config.sourceUrl || config.eventSourceUrl || !/^[a-f0-9]{32}$/i.test(config.eventId || '')) return config;
+  if (
+    (!(config.scheduleSessions?.length > 1) && (config.sourceUrl || config.eventSourceUrl)) ||
+    !/^[a-f0-9]{32}$/i.test(config.eventId || '')
+  )
+    return config;
   const eventId = config.eventId.toUpperCase();
   const page = await client.eventPage(`${ORIGIN}/events/view/${eventId}`);
   const $ = load(page.html);
@@ -384,13 +390,25 @@ async function discoverTableau(db, c, config, actorId, client) {
         .filter((u) => u.includes('/tableaus/') && SOURCE.test(u) && SOURCE.exec(u)[2].toUpperCase() === eventId),
     ),
   ];
-  if (tableaus.length > 1) throw failure('Plusieurs tableaux publiés : sélection manuelle nécessaire.');
+  if (tableaus.length > 1 && !(config.scheduleSessions?.length > 1))
+    throw failure('Plusieurs tableaux publiés : sélection manuelle nécessaire.');
   if (!tableaus.length) return config;
-  const next = { ...config, sourceUrl: tableaus[0] };
+  const next = {
+    ...config,
+    sourceUrl: config.sourceUrl || tableaus[0],
+    ...(config.scheduleSessions?.length > 1
+      ? { tableauSources: [...new Set([...(config.tableauSources || []), ...tableaus])] }
+      : {}),
+  };
+  if (JSON.stringify(next) === JSON.stringify(config)) return config;
   await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
     const previous = await configuration(tx, c.id);
-    if (!previous || previous.sourceUrl || String(previous.eventId).toUpperCase() !== eventId)
+    if (
+      !previous ||
+      (previous.sourceUrl && !previous.scheduleSessions?.length) ||
+      String(previous.eventId).toUpperCase() !== eventId
+    )
       throw failure('Configuration modifiée pendant le contrôle.', 409);
     await tx.auditLog.create({
       data: { actorId, action: CONFIG, targetType: 'Competition', targetId: c.id, after: { ...next, name: c.name } },

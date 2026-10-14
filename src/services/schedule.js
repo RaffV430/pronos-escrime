@@ -122,11 +122,13 @@ async function phases(db, competitionId, config) {
   }
   for (const [r, dates] of [...poolRounds].sort(([a], [b]) => a - b))
     out.push({ key: `pools-${r}`, label: poolRounds.size > 1 ? `Poules · tour ${r}` : 'Poules', at: first(dates) });
-  const size = (r) => (r === 'Bronze' ? 1.5 : Number(r.slice(1)));
+  const size = (r) => (r.startsWith('J1:') ? 10000 + Number(r.slice(4)) : r === 'Bronze' ? 1.5 : Number(r.slice(1)));
   for (const { round } of [...rounds].sort((a, b) => size(b.round) - size(a.round)))
     out.push({
       key: round,
-      label: LABELS[round] || `Tableau de ${round.slice(1)}`,
+      label: round.startsWith('J1:')
+        ? `J1 · Tableau préliminaire de ${round.slice(4)}`
+        : LABELS[round] || `Tableau de ${round.slice(1)}`,
       at: first(matches.filter((m) => m.round === round).map((m) => m.startsAt)),
     });
   return out.map((p) => ({
