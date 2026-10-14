@@ -1,3 +1,4 @@
+const { isWalkover } = require('./resultTypes');
 // Historique d'un joueur sur une saison d'escrime (1er septembre → 31 août).
 // Fonctions pures : la route lit la base, ce module assemble et calcule.
 const { calculateMatchPoints, predictionText } = require('./matchPoints');
@@ -48,7 +49,7 @@ function matchRow(p) {
   if (m.pointsPending)
     return { ...base, outcome: 'pending', result: 'Points en attente de validation', points: null, details: [] };
   if (!m.isFinished) return { ...base, outcome: 'pending', result: null, points: null, details: [] };
-  const medical = m.resultType === 'MEDICAL_WITHDRAWAL';
+  const medical = isWalkover(m.resultType);
   const expected = calculateMatchPoints(
     p.predictedScore1,
     p.predictedScore2,

@@ -1,3 +1,4 @@
+const { isWalkover, walkoverLabel } = require('../services/resultTypes');
 const router = require('express').Router(),
   db = require('../lib/prisma');
 const { id, fencerClosed, poolPoints, poolPredictionText } = require('../services/poolRules');
@@ -73,10 +74,7 @@ async function competitionPredictions(competition, userId) {
         p.winnerOnly,
       );
       const exact =
-        m.resultType !== 'MEDICAL_WITHDRAWAL' &&
-        !p.winnerOnly &&
-        p.predictedScore1 === m.score1 &&
-        p.predictedScore2 === m.score2;
+        !isWalkover(m.resultType) && !p.winnerOnly && p.predictedScore1 === m.score1 && p.predictedScore2 === m.score2;
       const k = m.pointsMultiplier || 1;
       details = [`Bon vainqueur : +${(total - (exact ? 3 : 0)) * k}`, `Score exact : +${(exact ? 3 : 0) * k}`];
       if (p.bonusPoints) details.push(`Bonus outsider : +${p.bonusPoints}`);
@@ -100,8 +98,8 @@ async function competitionPredictions(competition, userId) {
       result: m.pointsPending
         ? 'Points en attente de validation'
         : finished
-          ? m.resultType === 'MEDICAL_WITHDRAWAL'
-            ? `Retrait médical · ${m.winner === 1 ? m.player1 : m.player2} qualifié(e)`
+          ? isWalkover(m.resultType)
+            ? `${walkoverLabel(m.resultType)} · ${m.winner === 1 ? m.player1 : m.player2} qualifié(e)`
             : `${m.score1} – ${m.score2}`
           : null,
       points: p && finished ? p.pointsEarned + (p.bonusPoints || 0) : null,
@@ -365,7 +363,7 @@ router.get('/summary/:tournamentId', async (req, res) => {
     });
     const exact = predictions.filter(
       (p) =>
-        p.match.resultType !== 'MEDICAL_WITHDRAWAL' &&
+        !isWalkover(p.match.resultType) &&
         !p.winnerOnly &&
         p.predictedScore1 === p.match.score1 &&
         p.predictedScore2 === p.match.score2,

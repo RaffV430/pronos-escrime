@@ -1,3 +1,4 @@
+const { isWalkover } = require('./resultTypes');
 // Bonus « outsider » : +1 point pour chaque joueur ayant désigné le bon vainqueur
 // quand moins d'un quart des pronostics du match l'avaient choisi.
 // Calculé au moment où le résultat est publié (import officiel ou correction
@@ -20,7 +21,7 @@ function outsiderRule(predictions, winner, resultType) {
   const backers = valid.filter((p) => predictedWinner(p) === winner).length;
   const share = total ? backers / total : 0;
   const eligible =
-    resultType !== 'MEDICAL_WITHDRAWAL' &&
+    !isWalkover(resultType) &&
     resultType !== 'CANCELLED' &&
     [1, 2].includes(winner) &&
     total >= OUTSIDER_MIN_PREDICTIONS &&
@@ -31,8 +32,7 @@ function outsiderRule(predictions, winner, resultType) {
 
 // Même règle à partir des tendances agrégées (pour l'affichage).
 function crowdIsOutsider(crowd, winner, resultType) {
-  if (!crowd || resultType === 'MEDICAL_WITHDRAWAL' || resultType === 'CANCELLED' || ![1, 2].includes(winner))
-    return false;
+  if (!crowd || isWalkover(resultType) || resultType === 'CANCELLED' || ![1, 2].includes(winner)) return false;
   const backers = Math.round(((winner === 1 ? crowd.player1Pct : crowd.player2Pct) * crowd.total) / 100);
   return crowd.total >= OUTSIDER_MIN_PREDICTIONS && backers > 0 && backers / crowd.total < OUTSIDER_MAX_SHARE;
 }

@@ -1,3 +1,4 @@
+const { isWalkover } = require('./resultTypes');
 const { reportError } = require('../lib/report');
 const { load } = require('cheerio');
 const { createClient, failure, ORIGIN } = require('./ftlClient');
@@ -485,7 +486,7 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       (m.score1 !== o.score1 ||
         m.score2 !== o.score2 ||
         previousWinner !== o.winner ||
-        (m.resultType === 'MEDICAL_WITHDRAWAL') !== (o.resultType === 'MEDICAL_WITHDRAWAL'));
+        (isWalkover(m.resultType) ? m.resultType : null) !== (isWalkover(o.resultType) ? o.resultType : null));
     const data = {
       sourceUrl: observation.sourceUrl,
       sourceKey: o.sourceKey,

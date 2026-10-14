@@ -1,3 +1,4 @@
+const { isWalkover } = require('./resultTypes');
 // Filtres « pour rire » de « Mes pronostics », calculés sur les matchs terminés avec un score officiel :
 // exact (Dans le mille), near (À deux doigts : chaque score à une touche près), oops (score exactement
 // inversé), poker (bon vainqueur alors qu'il était le moins bien classé), wire (bon vainqueur d'un match
@@ -7,7 +8,8 @@ function scored(p, m) {
     p &&
     m?.isFinished &&
     !m.pointsPending &&
-    !['CANCELLED', 'MEDICAL_WITHDRAWAL'].includes(m.resultType) &&
+    m.resultType !== 'CANCELLED' &&
+    !isWalkover(m.resultType) &&
     Number.isInteger(m.score1) &&
     Number.isInteger(m.score2),
   );
