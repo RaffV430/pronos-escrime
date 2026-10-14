@@ -1,3 +1,4 @@
+const { isWalkover } = require('./resultTypes');
 const { fail } = require('./poolRules');
 function integer(value, label = 'Valeur') {
   if (!Number.isSafeInteger(value) || value < 1) fail(`${label} invalide.`);
@@ -10,14 +11,13 @@ function title(value) {
 }
 function challengePoints(pick, match, bonus = 3) {
   if (!match?.isFinished || match.pointsPending) return 0;
-  const winner =
-    match.resultType === 'MEDICAL_WITHDRAWAL'
-      ? match.winner
-      : Number.isInteger(match.score1) && Number.isInteger(match.score2) && match.score1 !== match.score2
-        ? match.score1 > match.score2
-          ? 1
-          : 2
-        : null;
+  const winner = isWalkover(match.resultType)
+    ? match.winner
+    : Number.isInteger(match.score1) && Number.isInteger(match.score2) && match.score1 !== match.score2
+      ? match.score1 > match.score2
+        ? 1
+        : 2
+      : null;
   // Défi sur un match à points doublés : le bonus est doublé aussi.
   return winner && pick.winner === winner ? bonus * (match.pointsMultiplier || 1) : 0;
 }

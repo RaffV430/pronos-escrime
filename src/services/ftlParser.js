@@ -120,6 +120,10 @@ function parseTable(
           if (score === 'Opponent withdrew (medical)') {
             resultType = 'MEDICAL_WITHDRAWAL';
             isFinished = true;
+          } else if (/^opponent (failed to appear|did not appear|did not show|no show|forfeit(ed)?)$/i.test(score)) {
+            // Adversaire absent (forfait) : victoire sans assaut, comme un DNS.
+            resultType = 'NO_SHOW';
+            isFinished = true;
           } else if (/^\d+\s*-\s*\d+$/.test(score)) {
             const [w, l] = score.split('-').map(Number);
             if (w < l || w > maxScore || l < 0) throw failure('Score final incohérent.');

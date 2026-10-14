@@ -1,3 +1,4 @@
+const { isWalkover } = require('./resultTypes');
 const { closesAt } = require('../lib/matchLock');
 const roundLabel = (round) => ({ T4: 'Semi-finales', T2: 'Finale' })[round] || round;
 function closingText(matches, timezone = 'Europe/Paris', now = new Date()) {
@@ -69,10 +70,12 @@ function fencerResultText(competition, m, fencers) {
   const winner = m.winner === 1 || (m.winner == null && m.score1 > m.score2) ? 1 : 2;
   const [w, l] = winner === 1 ? [m.player1, m.player2] : [m.player2, m.player1];
   const score =
-    m.resultType === 'MEDICAL_WITHDRAWAL'
-      ? `abandon de ${l}`
-      : `${Math.max(m.score1, m.score2)}–${Math.min(m.score1, m.score2)}`;
-  const versus = m.resultType === 'MEDICAL_WITHDRAWAL' ? `(${score})` : `(${score} contre ${l})`;
+    m.resultType === 'NO_SHOW'
+      ? `forfait de ${l}`
+      : m.resultType === 'MEDICAL_WITHDRAWAL'
+        ? `abandon de ${l}`
+        : `${Math.max(m.score1, m.score2)}–${Math.min(m.score1, m.score2)}`;
+  const versus = isWalkover(m.resultType) ? `(${score})` : `(${score} contre ${l})`;
   const mineWon = fencers.includes(w),
     mineLost = fencers.includes(l);
   let body;

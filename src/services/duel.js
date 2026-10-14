@@ -1,3 +1,4 @@
+const { isWalkover, walkoverLabel } = require('./resultTypes');
 const { predictionText } = require('./matchPoints');
 // Duel entre deux membres d'une ligue : comparaison match par match sur les
 // matchs terminés du tournoi de la ligue. Rien n'est dévoilé avant la fin d'un match.
@@ -76,10 +77,9 @@ function buildDuel(matches, mine, theirs, extra = {}) {
         name: `${m.player1} / ${m.player2}`,
         competition: m.competition?.name || null,
         round: m.round || null,
-        result:
-          m.resultType === 'MEDICAL_WITHDRAWAL'
-            ? `Retrait médical · ${m.winner === 1 ? m.player1 : m.player2}`
-            : `${m.score1} – ${m.score2}`,
+        result: isWalkover(m.resultType)
+          ? `${walkoverLabel(m.resultType)} · ${m.winner === 1 ? m.player1 : m.player2}`
+          : `${m.score1} – ${m.score2}`,
         me: pa ? { prediction: predictionText(pa, m), points: me } : null,
         them: pb ? { prediction: predictionText(pb, m), points: them } : null,
         winner: versus(me, them),

@@ -1,3 +1,4 @@
+const { isWalkover } = require('./resultTypes');
 // Contrôle d'une épreuve engarde-service : engagés, poules puis tableau, importés par le même moteur que
 // FencingTimeLive (mêmes verrous, mêmes calculs de points, mêmes notifications). Une épreuve encore vide
 // est simplement notée « en attente » : le suivi automatique reviendra jusqu'à la publication.
@@ -322,7 +323,7 @@ async function observeTableau(c, config, pages, client, prev = null) {
   const matches = parsed.matches.flatMap((m) => {
     try {
       // Forfait (DNS) au tableau : le perdant peut ne plus figurer dans la liste des présents.
-      const walkoverLoser = m.isFinished && m.resultType === 'MEDICAL_WITHDRAWAL' ? 3 - m.winner : null;
+      const walkoverLoser = m.isFinished && isWalkover(m.resultType) ? 3 - m.winner : null;
       if (walkoverLoser !== 1) entry(m.player1, m.club1);
       if (walkoverLoser !== 2) entry(m.player2, m.club2);
       return {

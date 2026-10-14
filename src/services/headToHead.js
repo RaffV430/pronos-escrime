@@ -1,3 +1,4 @@
+const { isWalkover } = require('./resultTypes');
 // Face-à-face et forme récente, tirés de toutes les épreuves déjà suivies par l'application
 // (le tableau d'élimination directe ; l'historique s'enrichit à chaque tournoi).
 const { countryFor } = require('./matchCountries');
@@ -15,7 +16,7 @@ const include = { competition: { select: { name: true, podiumRoster: true, tourn
 // Résultat vu du côté de `name` : victoire/défaite, score dans le bon ordre, adversaire.
 function fromSide(m, name) {
   const first = m.player1.trim().toLowerCase() === name.trim().toLowerCase();
-  const medical = m.resultType === 'MEDICAL_WITHDRAWAL';
+  const medical = isWalkover(m.resultType);
   return {
     matchId: m.id,
     date: m.startsAt || m.resultRegisteredAt || null,
