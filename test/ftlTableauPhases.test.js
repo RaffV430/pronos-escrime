@@ -62,6 +62,16 @@ test('un ancien match du J1 conserve son identifiant lors de sa distinction de p
   const plan = planMatches([old], combine([prelim()]), { allowPartial: true });
   assert.equal(plan.conflicts.length, 0);
   assert.equal(plan[0].current.id, 7);
+  const main = {
+    sourceUrl: 'j2',
+    rounds: [round('T2', null, 1)],
+    matches: [{ ...match, player2: 'TEST C', isFinished: false }],
+    warnings: [],
+  };
+  const both = planMatches([old], combine([prelim(), main]), { allowPartial: true });
+  assert.equal(both.conflicts.length, 0);
+  assert.equal(both[0].current.id, 7);
+  assert.equal(both[1].current, undefined);
 });
 test('la fin du J1 ne ferme ni le T64 principal du J2 ni le podium', () => {
   const start = new Date('2026-10-17T00:00:00Z');

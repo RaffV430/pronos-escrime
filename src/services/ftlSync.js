@@ -270,7 +270,17 @@ function planMatches(existing, observation, { allowPartial = false } = {}) {
   };
   const plan = observation.matches
     .map((m) => {
-      let current = existing.find((e) => e.sourceKey === m.sourceKey);
+      let current = existing.find(
+        (e) =>
+          e.sourceKey === m.sourceKey &&
+          !observation.matches.some(
+            (candidate) =>
+              candidate.round?.startsWith('J1:') &&
+              candidate.sourceUrl === e.sourceUrl &&
+              candidate.sourceKey.slice(3) === e.sourceKey &&
+              samePair(e, candidate),
+          ),
+      );
       if (!current && m.round?.startsWith('J1:'))
         current = existing.find(
           (e) => e.sourceUrl === m.sourceUrl && e.sourceKey === m.sourceKey.slice(3) && samePair(e, m),
