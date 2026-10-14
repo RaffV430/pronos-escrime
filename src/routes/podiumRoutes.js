@@ -6,6 +6,7 @@ const authMiddleware = require('../middleware/auth');
 const adminMiddleware = require('../middleware/admin');
 const { roster, validateSelection, verifiedPodium, resolvePodium } = require('../services/podiumRules');
 const { podiumClosed } = require('../lib/matchLock');
+const podiumAvailability = require('../services/podiumAvailability');
 const { reportError } = require('../lib/report');
 async function isClosed(tx, competition) {
   return podiumClosed(competition, await tx.match.findMany({ where: { competitionId: competition.id } }));
@@ -39,7 +40,15 @@ router.get('/competition-status/:competitionId', authMiddleware, async (req, res
     const competition = await prisma.competition.findUnique({
       where: { id: compId },
     });
-    res.json({ isLocked: competition ? await isClosed(prisma, competition) : false });
+    const availability = competition
+      ? await podiumAvailability.forCompetition(prisma, competition)
+      : { notYetOpen: false };
+    const closed = competition ? await isClosed(prisma, competition) : false;
+    res.json({
+      isLocked: closed || availability.notYetOpen,
+      ...(closed ? { notYetOpen: false } : availability),
+      isClosed: closed,
+    });
   } catch (err) {
     reportError(err, 'podium');
     res.status(500).json({ error: 'Erreur lors de la récupération du statut.' });
@@ -226,6 +235,8 @@ router.post('/', authMiddleware, async (req, res) => {
       const competition = await tx.competition.findUnique({ where: { id: compId } });
       if (!competition) return { status: 404, body: { error: 'Compétition introuvable.' } };
       if (await isClosed(tx, competition)) return { status: 403, body: { error: 'Les pronostics sont verrouillés.' } };
+      const availability = await podiumAvailability.forCompetition(tx, competition);
+      if (availability.notYetOpen) return { status: 403, body: { error: availability.reason, notYetOpen: true } };
       const selection = validateSelection(competition, req.body.selectionIds);
       const data = { ...selection.names, selectionIds: selection.ids };
       const prediction = await tx.podiumPrediction.upsert({
