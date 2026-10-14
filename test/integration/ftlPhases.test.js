@@ -91,7 +91,7 @@ test(
     assert.equal(first.length, 2);
     assert.equal(first[0].id, old.id);
     assert.equal(first[0].round, 'J1:T64');
-    assert.equal(first[0].resultRegisteredAt.toISOString(), when.toISOString());
+    assert.equal(first[0].resultRegisteredAt.toISOString(), old.resultRegisteredAt.toISOString());
     assert.deepEqual(await db.prediction.findUnique({ where: { id: prediction.id } }), prediction);
     await db.$transaction((tx) => applyObservation(tx, c, observed, user.id));
     const again = await db.match.findMany({ where: { competitionId: c.id }, orderBy: { id: 'asc' } });
