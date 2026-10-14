@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const jwt = require('jsonwebtoken');
 process.env.JWT_SECRET = 'local-test-secret-not-for-production';
 let locked = false;
+let multiDayConfig = null;
+let podiumWrites = 0;
 const match = {
   id: 1,
   competitionId: 1,
@@ -52,6 +54,7 @@ const db = {
   },
   podiumPrediction: {
     upsert: async ({ create }) => {
+      podiumWrites++;
       assert.ok(locked);
       return create;
     },
@@ -95,7 +98,10 @@ const db = {
       throw { code: 'P2002' };
     },
   },
-  auditLog: { create: async ({ data }) => data },
+  auditLog: {
+    create: async ({ data }) => data,
+    findFirst: async ({ where }) => (where.action === 'Configuration FTL validée' ? multiDayConfig : null),
+  },
   pointAdjustment: { findUnique: async () => null, create: async ({ data }) => data },
 };
 db.$transaction = async (fn) => {
@@ -161,6 +167,26 @@ test('HTTP admin reopen, podium persistence, medical closure, registration confl
   assert.equal((await request('/podium/competition/1/toggle-lock', 'PUT', { isLocked: 'false' }, true)).status, 400);
   assert.equal((await request('/podium/competition/1/toggle-lock', 'PUT', { isLocked: false }, true)).status, 200);
   assert.equal((await (await request('/podium/competition-status/1')).json()).isLocked, false);
+  const writesBefore = podiumWrites;
+  multiDayConfig = {
+    after: { timezone: 'Asia/Tokyo', scheduleSessions: [{ date: '2099-01-01' }, { date: '2099-01-02' }] },
+  };
+  const waiting = await (await request('/podium/competition-status/1')).json();
+  assert.equal(waiting.notYetOpen, true);
+  assert.equal(waiting.isClosed, false);
+  assert.equal(
+    (
+      await request('/podium', 'POST', {
+        competitionId: 1,
+        selectionIds: { gold: 'A', silver: 'B', bronze1: 'C', bronze2: 'D' },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(podiumWrites, writesBefore);
+  assert.equal((await request('/podium/all/competition/1')).status, 403);
+  multiDayConfig = null;
+
   assert.equal(
     (
       await request('/podium', 'POST', {
