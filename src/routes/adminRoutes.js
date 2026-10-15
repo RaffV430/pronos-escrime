@@ -88,6 +88,24 @@ router.post(
     res.json(await announcements.dispatch(prisma, req.user.userId, req.params.id));
   }),
 );
+// Correction explicite des noms refusés, sous le verrou de l’épreuve.
+const nameReview = require('../services/ftlNameReview');
+router.get(
+  '/ftl-name-review/:competitionId',
+  wrap(async (req, res) => res.json(await nameReview.review(prisma, id(req.params.competitionId)))),
+);
+router.post(
+  '/ftl-name-review/:competitionId',
+  wrap(async (req, res) =>
+    res.json(await nameReview.confirm(prisma, id(req.params.competitionId), req.body, req.user.userId)),
+  ),
+);
+router.delete(
+  '/ftl-name-review/:competitionId',
+  wrap(async (req, res) =>
+    res.json(await nameReview.remove(prisma, id(req.params.competitionId), req.body, req.user.userId)),
+  ),
+);
 // Conflicts are read and confirmed under the same competition lock as official imports.
 router.get(
   '/identity-review/:competitionId',

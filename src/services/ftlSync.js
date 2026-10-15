@@ -192,6 +192,7 @@ async function observeSingle(c, existing, client, configured = null, loggedIn = 
       maxScore: c.podiumFormat === 'TEAM' ? 45 : 15,
       bronze: t !== main[0],
       entrySeeds,
+      nameAliases: config.nameAliases || [],
       allowPartial: true,
       requireComplete: !config.allowPreliminary,
     });
@@ -1028,6 +1029,7 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
         warnings: [],
       };
       if (existing.some((m) => m.sourceUrl) || config.sourceUrl) {
+        config = { ...config, nameAliases: await require('./ftlNameReview').aliases(db, c.id) };
         try {
           let observation = await observe(
             c,
