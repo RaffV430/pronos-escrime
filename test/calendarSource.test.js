@@ -1,0 +1,20 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const S = require('../src/services/calendarSource');
+const id = require('../src/data/calendar.json').events.find((e) => e.city === 'Ankara').id;
+test('source du calendrier : contrôle strict, liaison idempotente et refus avant remplacement', async () => {
+  const logs = [];
+  const tx = { auditLog: { findMany: async () => logs, create: async ({ data }) => logs.push(data) } };
+  const p = await S.check(tx, id, 'ftl');
+  assert.equal(p, null);
+  await S.bind(tx, id, 'ftl', 8, 1, p);
+  assert.equal(logs.length, 1);
+  const same = await S.check(tx, id, 'ftl');
+  await S.bind(tx, id, 'ftl', 8, 1, same);
+  assert.equal(logs.length, 1);
+  await assert.rejects(S.check(tx, id, 'engarde'), (e) => e.status === 409);
+  await assert.rejects(S.bind(tx, id, 'ftl', 9, 1, same), (e) => e.status === 409);
+  await assert.rejects(S.check(tx, 'inconnu', 'ftl'), (e) => e.status === 400);
+  assert.equal(logs[0].data, undefined);
+  assert.equal(logs[0].after.tournamentId, 8);
+});

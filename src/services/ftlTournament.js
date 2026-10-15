@@ -221,12 +221,13 @@ async function preview(db, input, actorId, client = createClient()) {
     previewId: saved.id,
   };
 }
-async function save(db, input, actorId, client = createClient()) {
+async function save(db, input, actorId, client = createClient(), calendarId = null) {
   // Aperçu engarde-service : enregistrement par son module.
   const preview = Number.isSafeInteger(Number(input.previewId))
     ? await db.auditLog.findUnique({ where: { id: Number(input.previewId) } })
     : null;
-  if (preview?.targetType === 'EngardePreview') return require('./engardeTournament').save(db, input, actorId);
+  if (preview?.targetType === 'EngardePreview')
+    return require('./engardeTournament').save(db, input, actorId, undefined, calendarId);
   const previewId = Number(input.previewId),
     ids = input.eventIds;
   if (
@@ -269,6 +270,7 @@ async function save(db, input, actorId, client = createClient()) {
   return db.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184722)`;
+      const calendarLink = await require('./calendarSource').check(tx, calendarId, fresh.sourceUrl);
       const all = await tx.competition.findMany({ select: linkedSelection });
       const existing = ids.map((id) => matching(all, id)).filter(Boolean);
       const targetIds = [...new Set(existing.map((c) => c.tournamentId))];
@@ -317,6 +319,7 @@ async function save(db, input, actorId, client = createClient()) {
           after: { sourceUrl: fresh.sourceUrl, events: results },
         },
       });
+      await require('./calendarSource').bind(tx, calendarId, fresh.sourceUrl, tournament.id, actorId, calendarLink);
       return { tournamentId: tournament.id, name: tournament.name, events: results };
     },
     { timeout: 30000 },
