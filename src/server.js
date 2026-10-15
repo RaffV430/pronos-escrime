@@ -87,6 +87,7 @@ app.get('/api/tournaments', authMiddleware, async (req, res) => {
 });
 
 app.get('/', (req, res) => res.json({ message: '🤺 API MPP Escrime opérationnelle !' }));
+app.use('/api/staging/live-demo', require('./services/stagingLiveDemo').router());
 app.get('/health', async (req, res) => {
   const workers = require('./services/workerHealth').workerHealth();
   const uptime = Math.round(process.uptime());
@@ -144,6 +145,7 @@ async function start() {
   const stopWatchdog = require('./services/workerHealth').startWatchdog();
   const stopCalendar = require('./services/calendarWatch').startWorker(prisma);
   const stopLive = require('./services/ftlLiveScores').startWorker(prisma);
+  const stopDemo = await require('./services/stagingLiveDemo').start(prisma);
   // Arrêt propre (redéploiement Render) : plus de nouvelles requêtes ni de nouveaux passages,
   // on attend la fin des passages en cours (25 s au plus), puis on ferme la base.
   let stopping = false;
@@ -161,6 +163,7 @@ async function start() {
       stopCalendar(),
       stopClubMail(),
       stopLive(),
+      stopDemo(),
     ]);
     await prisma.$disconnect().catch(() => {});
     process.exit(0);
