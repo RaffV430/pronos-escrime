@@ -13,7 +13,7 @@ const MAX_TOUCHES = 150;
 const GUID = /\/tournaments\/eventSchedule\/([a-f0-9]{32})$/i;
 const strips = new Map(); // `${guid}:${strip}` → dernier état reçu
 const bouts = new Map(); // `${guid}:${strip}:${noms}` → déroulé touche par touche
-const finishedHistory = new Map(); // matchId → déroulé conservé après la fin (tant que le serveur tourne)
+const finishedHistory = new Map(); // matchId → identités et déroulé conservés après la fin
 const matchesCache = new Map(); // competitionId → { at, guid, matches }
 const events = new EventEmitter();
 events.setMaxListeners(500);
@@ -118,14 +118,53 @@ const oriented = (touches, swap) =>
     at: new Date(t.at).toISOString(),
   }));
 
+// Le cache garde les identités : un changement d’ordre ne doit jamais réattribuer les touches.
+function retainedHistory(match) {
+  const saved = finishedHistory.get(match.id);
+  if (!saved?.history?.length) return null;
+  const same = fold(saved.player1) === fold(match.player1) && fold(saved.player2) === fold(match.player2);
+  const reversed = fold(saved.player1) === fold(match.player2) && fold(saved.player2) === fold(match.player1);
+  if (!same && !reversed)
+    return {
+      matchId: match.id,
+      finished: true,
+      history: [],
+      historyIssue: 'Les tireurs du déroulé live ne correspondent plus à cette rencontre.',
+    };
+  const history = reversed
+    ? saved.history.map((t) => ({
+        ...t,
+        score1: t.score2,
+        score2: t.score1,
+        by: t.by === 1 ? 2 : t.by === 2 ? 1 : t.by,
+      }))
+    : saved.history;
+  const last = history.at(-1);
+  // Une diffusion live peut être partielle ou corrigée. Ne jamais déduire une inversion des seuls scores.
+  if (
+    Number.isInteger(match.score1) &&
+    Number.isInteger(match.score2) &&
+    (last.score1 > match.score1 || last.score2 > match.score2)
+  ) {
+    return {
+      matchId: match.id,
+      finished: true,
+      history: [],
+      historyIssue:
+        'Le déroulé live ne correspond pas au résultat officiel ; il est masqué pour éviter une attribution erronée des touches.',
+    };
+  }
+  return { matchId: match.id, finished: true, history };
+}
+
 // Associe les pistes actives aux rencontres non terminées, par les deux noms (ordre indifférent),
 // et remet le score dans l'ordre player1 / player2. Les rencontres terminées gardent leur déroulé.
 function matchLive(matches, states, now = Date.now()) {
   const out = [];
   for (const m of matches) {
     if (m.isFinished) {
-      const history = finishedHistory.get(m.id);
-      if (history?.length) out.push({ matchId: m.id, finished: true, history });
+      const saved = retainedHistory(m);
+      if (saved) out.push(saved);
       continue;
     }
     const a = fold(m.player1),
@@ -181,7 +220,7 @@ function matchLive(matches, states, now = Date.now()) {
     rememberLive(m, s.at);
     const [p1, p2] = swap ? [s.right, s.left] : [s.left, s.right];
     const history = oriented(bouts.get(boutKey(s))?.touches || [], swap);
-    if (history.length) finishedHistory.set(m.id, history);
+    if (history.length) finishedHistory.set(m.id, { player1: m.player1, player2: m.player2, history });
     out.push({
       matchId: m.id,
       ftlLeftPlayer: swap ? 2 : 1,
@@ -223,7 +262,16 @@ async function competitionContext(db, competitionId, now = Date.now()) {
   const matches = guid
     ? await db.match.findMany({
         where: { competitionId },
-        select: { id: true, player1: true, player2: true, isFinished: true, strip: true, liveDetectedAt: true },
+        select: {
+          id: true,
+          player1: true,
+          player2: true,
+          isFinished: true,
+          strip: true,
+          liveDetectedAt: true,
+          score1: true,
+          score2: true,
+        },
       })
     : [];
   const enriched = matches.map((match) => ({
