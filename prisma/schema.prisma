@@ -52,6 +52,7 @@ model Match {
   isFinished    Boolean      @default(false)
   predictions   Prediction[]
   isLocked      Boolean      @default(false)
+  liveDetectedAt DateTime?
   startsAt      DateTime?
   strip         String?
   sourceUrl     String?

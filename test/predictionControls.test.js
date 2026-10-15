@@ -283,3 +283,35 @@ test('HTTP admin reopen, podium persistence, medical closure, registration confl
     400,
   );
 });
+
+test('HTTP : live détecté refuse création, modification et suppression même pendant une réouverture', async (t) => {
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((r) => server.once('listening', r));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  Object.assign(match, {
+    isFinished: false,
+    isLocked: false,
+    syncIssue: null,
+    progressionConfirmedAt: null,
+    startsAt: new Date(Date.now() + 86400000),
+  });
+  config.manualUnlockUntil = new Date(Date.now() + 600000);
+  const before = structuredClone(picks);
+  require('../src/lib/liveDetection').rememberLive(match, Date.now());
+  const request = (method, body) =>
+    fetch(`http://127.0.0.1:${server.address().port}/api/matches/1/predict`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${jwt.sign({ userId: 1, isAdmin: false, sv: 0 }, process.env.JWT_SECRET)}`,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  assert.equal((await request('POST', { predictedScore1: 15, predictedScore2: 8 })).status, 409);
+  assert.equal((await request('POST', { winner: 2 })).status, 409);
+  assert.equal((await request('DELETE')).status, 409);
+  assert.deepEqual(picks, before);
+});

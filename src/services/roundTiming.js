@@ -1,8 +1,9 @@
+const { liveDetectedAt } = require('../lib/liveDetection');
 const { roundContext, GRACE_MS } = require('../lib/matchLock');
 async function timedMatches(tx, matches) {
   const competitionIds = [...new Set(matches.map((m) => m.competitionId))];
   const rounds = await tx.matchRound.findMany({ where: { competitionId: { in: competitionIds } } });
-  return roundContext(matches, rounds);
+  return roundContext(matches, rounds).map((match) => ({ ...match, liveDetectedAt: liveDetectedAt(match) }));
 }
 async function timedMatch(tx, match) {
   const matches = await tx.match.findMany({ where: { competitionId: match.competitionId } });
