@@ -39,13 +39,29 @@ async function syncHealth(db, now = Date.now()) {
     orderBy: { id: 'asc' },
   });
   const states = await db.ftlSyncState.findMany({ where: { competitionId: { in: competitions.map((c) => c.id) } } });
-  const rows = competitions.map((c) =>
-    health(
+  // Les avertissements ne sont pas des erreurs réseau : ils restent dans le dernier contrôle terminé.
+  const controls = await db.auditLog.findMany({
+    where: {
+      action: 'Contrôle FTL terminé',
+      targetType: 'Competition',
+      targetId: { in: competitions.map((c) => c.id) },
+    },
+    orderBy: { id: 'desc' },
+    distinct: ['targetId'],
+    select: { targetId: true, after: true },
+  });
+  const rows = competitions.map((c) => ({
+    ...health(
       states.find((s) => s.competitionId === c.id),
       c,
       now,
     ),
-  );
+    warnings: [
+      ...new Set(
+        (controls.find((a) => a.targetId === c.id)?.after?.warnings || []).filter((w) => typeof w === 'string'),
+      ),
+    ],
+  }));
   return {
     workerEnabled: process.env.FTL_AUTO_SYNC === 'true',
     // Canaux d'alerte des administrateurs : sans e-mail, seules les notifications arrivent.
