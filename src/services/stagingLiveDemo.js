@@ -135,6 +135,13 @@ async function start(db) {
 function router() {
   const r = express.Router();
   r.use((req, res, next) => (enabled() ? next() : res.sendStatus(404)));
+  r.get('/calendar-checks', async (req, res) => {
+    try {
+      res.json(await require('./stagingCalendarChecks')());
+    } catch {
+      res.status(500).json({ error: 'Scénario de maquette indisponible.' });
+    }
+  });
   r.use(auth);
   r.get('/', (req, res) => res.json(fixture ? { ...fixture, matches: undefined, secondStarted } : {}));
   r.post('/start-second', (req, res) => {
