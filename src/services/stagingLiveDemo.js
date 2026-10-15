@@ -108,8 +108,17 @@ async function start(db) {
     busy = true;
     try {
       step++;
-      F.record(frame(fixture.matches[0], 2 + (step % 5), 3 + (step % 5), true), Date.now(), guids);
-      if (secondStarted) F.record(frame(fixture.matches[1], step % 6, 2 + (step % 6)), Date.now(), guids);
+      F.record(
+        frame(fixture.matches[0], Math.min(12, Math.floor(step / 2)), Math.min(13, Math.floor((step + 1) / 2)), true),
+        Date.now(),
+        guids,
+      );
+      if (secondStarted)
+        F.record(
+          frame(fixture.matches[1], Math.min(12, Math.floor(step / 2)), Math.min(13, Math.floor((step + 1) / 2))),
+          Date.now(),
+          guids,
+        );
       await F.persistLiveLocks(db, fixture.competitionId);
     } catch (e) {
       console.error('Simulation maquette:', e.message);
