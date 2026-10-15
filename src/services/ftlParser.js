@@ -45,6 +45,7 @@ function parseTable(
     requireComplete = true,
     allowPartial = false,
     entrySeeds = new Map(),
+    nameAliases = [],
   },
 ) {
   const $ = load(html),
@@ -56,7 +57,15 @@ function parseTable(
       .map((i, e) => clean($(e).text()))
       .get();
   const findEntry = (text) => {
-    const hits = namedEntries(roster, text);
+    let hits = namedEntries(roster, text);
+    if (!hits.length) {
+      const mapped = nameAliases.filter((a) => norm(a.sourceName) === norm(text));
+      if (mapped.length === 1)
+        hits = namedEntries(roster, mapped[0].entryName).filter(
+          (e, _, all) =>
+            all.length === 1 && e.active !== false && e.id === mapped[0].entryId && e.name === mapped[0].entryName,
+        );
+    }
     if (hits.length !== 1) throw failure(`Nom officiel ambigu ou absent des engagés : ${text}.`);
     return hits[0];
   };
@@ -115,7 +124,12 @@ function parseTable(
           resultType = null,
           isFinished = false;
         if (winnerName) {
-          winner = norm(winnerName) === norm(player1) ? 1 : norm(winnerName) === norm(player2) ? 2 : null;
+          winner =
+            norm(findEntry(winnerName).name) === norm(player1)
+              ? 1
+              : norm(findEntry(winnerName).name) === norm(player2)
+                ? 2
+                : null;
           if (!winner) throw failure('Le vainqueur ne correspond pas aux adversaires.');
           if (score === 'Opponent withdrew (medical)') {
             resultType = 'MEDICAL_WITHDRAWAL';
@@ -190,7 +204,13 @@ function parseTable(
           const player1 = findEntry(a.name).name,
             player2 = findEntry(b.name).name;
           if (norm(player1) === norm(player2)) continue;
-          const winner = norm(winnerName) === norm(player1) ? 1 : norm(winnerName) === norm(player2) ? 2 : null;
+          const winner = !winnerName
+            ? null
+            : norm(findEntry(winnerName).name) === norm(player1)
+              ? 1
+              : norm(findEntry(winnerName).name) === norm(player2)
+                ? 2
+                : null;
           out.push({
             sourceKey,
             round,
