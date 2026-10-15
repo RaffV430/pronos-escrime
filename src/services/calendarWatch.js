@@ -81,19 +81,21 @@ function classify(text) {
       : /mixte|mixed/.test(t)
         ? 'X'
         : null;
-  const category = /veteran|\bv[1-4]\b|\bv ?cat/.test(t)
-    ? 'V'
-    : /senior/.test(t)
-      ? 'SENIOR'
-      : /junior|\bm ?20\b|\bu ?20\b/.test(t)
-        ? 'M20'
-        : /cadet|\bm ?17\b|\bu ?17\b/.test(t)
-          ? 'M17'
-          : /minime|\bm ?15\b|\bu ?15\b/.test(t)
-            ? 'M15'
-            : /benjamin|\bm ?13\b|\bu ?13\b/.test(t)
-              ? 'M13'
-              : null;
+  const category = /\b[um]\s*-?\s*23\b|under[ -]?23|moins de 23/.test(t)
+    ? 'U23'
+    : /veteran|\bv[1-4]\b|\bv ?cat/.test(t)
+      ? 'V'
+      : /senior/.test(t)
+        ? 'SENIOR'
+        : /junior|\bm ?20\b|\bu ?20\b/.test(t)
+          ? 'M20'
+          : /cadet|\bm ?17\b|\bu ?17\b/.test(t)
+            ? 'M17'
+            : /minime|\bm ?15\b|\bu ?15\b/.test(t)
+              ? 'M15'
+              : /benjamin|\bm ?13\b|\bu ?13\b/.test(t)
+                ? 'M13'
+                : null;
   const team = /equipe|team|squadra|mannschaft/.test(t);
   return { weapon, gender, category, team };
 }
@@ -101,7 +103,7 @@ function classify(text) {
 // L'épreuve officielle fait-elle partie de l'entrée du calendrier ?
 function wanted(entry, officialName) {
   const c = classify(officialName);
-  if (c.weapon !== 'Fleuret' || !c.gender || !c.category) return false;
+  if (!(entry.weapons || [entry.weapon]).includes(c.weapon) || !c.gender || !c.category) return false;
   const genders = entry.gender === 'H' ? ['H'] : entry.gender === 'F' ? ['F'] : ['H', 'F', 'X'];
   if (!genders.includes(c.gender)) return false;
   const categories = entry.categories.map((x) => (x.startsWith('V') ? 'V' : x));
@@ -376,7 +378,7 @@ async function upcoming(db, now = Date.now()) {
       .sort();
     return {
       ...e,
-      ...(days.length ? { start: days[0], end: days.at(-1) } : {}),
+      ...(days.length && !e.globalDates ? { start: days[0], end: days.at(-1) } : {}),
       tournamentId: t.id,
       tournamentName: t.name,
       competitionIds: mine.map((c) => c.id),

@@ -15,9 +15,9 @@ const entry = (extra = {}) => ({
   ...extra,
 });
 
-test('calendrier : 54 épreuves validées, Hénin-Beaumont les 17 et 18 octobre', () => {
+test('calendrier : 108 rendez-vous validés, Hénin-Beaumont les 17 et 18 octobre', () => {
   const all = C.events();
-  assert.equal(all.length, 54);
+  assert.equal(all.length, 108);
   const henin = all.find((e) => e.city === 'Hénin-Beaumont');
   assert.deepEqual([henin.start, henin.end, henin.gender], ['2026-10-17', '2026-10-18', 'HD']);
   assert.ok(all.every((e) => ['HD', 'H', 'F'].includes(e.gender) && e.start <= e.end));
@@ -274,4 +274,44 @@ test('calendrier : tournoi préparé hors sélection FFE, sessions exactes et co
     later.filter((e) => e.tournamentId === 70).map((e) => e.start),
     ['2026-10-17'],
   );
+});
+
+test('épée et U23 : arme et catégorie strictes, pas de confusion avec juniors/seniors', () => {
+  const e = entry({ weapon: 'Épée', categories: ['U23'] });
+  assert.ok(C.wanted(e, "U23 Men's Epee"));
+  assert.ok(C.wanted(e, "Senior U23 Men's Epee"));
+  assert.ok(!C.wanted(e, "Junior Men's Epee"));
+  assert.ok(!C.wanted(e, "Senior Men's Epee"));
+  assert.ok(!C.wanted(e, "U23 Men's Foil"));
+});
+test('60 choix conservés, regroupements uniques et dates globales non inventées', () => {
+  const all = C.events();
+  assert.equal(all.flatMap((e) => e.selectionIds || []).length, 60);
+  assert.equal(new Set(all.flatMap((e) => e.selectionIds || [])).size, 60);
+  const ankara = all.filter((e) => e.city === 'Ankara');
+  assert.equal(ankara.length, 1);
+  assert.deepEqual(ankara[0].weapons, ['Fleuret', 'Épée', 'Sabre']);
+  assert.equal(ankara[0].format, 'BOTH');
+  assert.ok(C.wanted(ankara[0], "Junior Women's Sabre Team"));
+  assert.ok(!C.wanted(ankara[0], "Senior Women's Sabre Team"));
+  assert.equal(all.find((e) => e.selectionIds?.includes(4)).categories[0], 'U23');
+});
+
+test('un championnat lié conserve sa plage globale malgré une seule épreuve datée', async () => {
+  const e = C.events().find((e) => e.city === 'Ankara');
+  const db = {
+    auditLog: {
+      findMany: async ({ where }) =>
+        where.targetType === 'CalendarEvent'
+          ? [{ after: { calendarId: e.id, tournamentId: 77 }, createdAt: new Date() }]
+          : [{ targetId: 99, after: { date: '2027-04-04' } }],
+    },
+    tournament: {
+      findMany: async () => [{ id: 77, name: 'Worlds', competitions: [{ id: 99, name: "Junior Women's Epee" }] }],
+    },
+  };
+  const found = (await C.upcoming(db, Date.parse('2027-03-01'))).find((x) => x.id === e.id);
+  assert.equal(found.start, '2027-04-01');
+  assert.equal(found.end, '2027-04-09');
+  assert.deepEqual(found.competitionIds, [99]);
 });
