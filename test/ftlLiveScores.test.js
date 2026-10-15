@@ -282,3 +282,55 @@ test('un déroulé partiel cohérent reste affichable après publication du rés
   assert.equal(done.history.at(-1).score1, 4);
   assert.equal(done.historyIssue, undefined);
 });
+
+test('affiche préchargée : verrouillage seulement au chrono entamé, conservé après remise à 3:00', async () => {
+  const at = 180000,
+    guids = new Set([GUID]);
+  const matches = [
+    { id: 9971, player1: 'CLOCK ALPHA', player2: 'CLOCK BETA', isFinished: false, liveDetectedAt: null },
+    { id: 9972, player1: 'CLOCK GAMMA', player2: 'CLOCK DELTA', isFinished: false, liveDetectedAt: null },
+  ];
+  const first = live.record(
+    msg('clock-1', matches[0].player1, matches[0].player2, 0, 0, { Clock: 180, PeriodNum: 1 }),
+    at,
+    guids,
+  );
+  const other = live.record(
+    msg('clock-2', matches[1].player1, matches[1].player2, 0, 0, { Clock: 180, PeriodNum: 1 }),
+    at,
+    guids,
+  );
+  assert.deepEqual(
+    live.matchLive(matches, [first, other], at).map((m) => m.started),
+    [false, false],
+  );
+  const running = live.record(
+    msg('clock-1', matches[0].player1, matches[0].player2, 0, 0, { Clock: 179, PeriodNum: 1 }),
+    at + 1,
+    guids,
+  );
+  assert.deepEqual(
+    live.matchLive(matches, [running, other], at + 1).map((m) => m.started),
+    [true, false],
+  );
+  const paused = live.record(
+    msg('clock-1', matches[0].player1, matches[0].player2, 0, 0, { Clock: 180, PeriodNum: 1 }),
+    at + 2,
+    guids,
+  );
+  assert.equal(live.matchLive(matches, [paused], at + 2)[0].started, true);
+});
+
+test('une horloge absente ou initialisée à zéro sans touche ne prouve pas un départ', () => {
+  const at = 190000,
+    guids = new Set([GUID]);
+  for (const [i, clock] of [null, 0, 180].entries()) {
+    const match = { id: 9980 + i, player1: `CLOCK IDLE ${i}`, player2: `CLOCK WAIT ${i}`, isFinished: false };
+    const state = live.record(
+      msg(`idle-${i}`, match.player1, match.player2, 0, 0, { Clock: clock, PeriodNum: 1 }),
+      at,
+      guids,
+    );
+    assert.equal(live.matchLive([match], [state], at)[0].started, false);
+  }
+});

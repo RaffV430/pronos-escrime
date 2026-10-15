@@ -58,8 +58,25 @@ test(
       new Set([guid]),
     );
     await F.persistLiveLocks(db, c.id, now);
+    const preloaded = await db.match.findUnique({ where: { id: a.id } });
+    assert.equal(preloaded.liveDetectedAt, null);
+    assert.equal(matchClosed(preloaded, now), false);
+    assert.deepEqual(await db.prediction.findUnique({ where: { id: p.id } }), p);
+    F.record(
+      {
+        TournGuid: guid,
+        StripNum: '1',
+        Clock: 179,
+        PeriodNum: 1,
+        Left: { Name: a.player1, Score: 0 },
+        Right: { Name: a.player2, Score: 0 },
+      },
+      now + 1,
+      new Set([guid]),
+    );
+    await F.persistLiveLocks(db, c.id, now + 1);
     const locked = await db.match.findUnique({ where: { id: a.id } });
-    assert.equal(locked.liveDetectedAt.toISOString(), new Date(now).toISOString());
+    assert.equal(locked.liveDetectedAt.toISOString(), new Date(now + 1).toISOString());
     assert.equal(matchClosed(locked, now), true);
     assert.equal((await db.match.findUnique({ where: { id: b.id } })).liveDetectedAt, null);
     assert.equal(matchClosed(await db.match.findUnique({ where: { id: b.id } }), now), false);
