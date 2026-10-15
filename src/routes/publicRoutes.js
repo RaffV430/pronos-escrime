@@ -321,18 +321,39 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
   res.flushHeaders?.();
   let closed = false,
     timer = null,
-    last = '';
+    last = '',
+    previous = null,
+    sending = false,
+    again = false;
+  const delta = req.query.delta === '1';
+  const { liveDelta } = require('../services/liveDelta');
   const send = async () => {
     timer = null;
     if (closed) return;
+    if (sending) {
+      again = true;
+      return;
+    }
+    sending = true;
     try {
-      const body = JSON.stringify(await live.liveFor(db, competitionId));
-      if (body === last) return;
+      const rows = await live.liveFor(db, competitionId);
+      if (closed) return;
+      const diff = delta ? liveDelta(previous, rows) : null;
+      if (delta && !diff.message) return;
+      const body = JSON.stringify(delta ? diff.message : rows);
+      if (!delta && body === last) return;
       last = body;
+      if (delta) previous = diff.next;
       res.write(`data: ${body}\n\n`);
       res.flush?.(); // compression : envoyer tout de suite, sans attendre d'autres données
     } catch (error) {
       reportError(error, 'direct des pistes');
+    } finally {
+      sending = false;
+      if (again && !closed) {
+        again = false;
+        if (!timer) timer = setTimeout(send, 150);
+      }
     }
   };
   const unsubscribe = await live.subscribe(db, competitionId, () => {
