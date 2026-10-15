@@ -4,6 +4,7 @@ const { EventEmitter } = require('node:events');
 const { ORIGIN } = require('./ftlClient');
 const { norm } = require('./ftlParser');
 const { countryFor } = require('./matchCountries');
+const { rememberLive, liveDetectedAt } = require('../lib/liveDetection');
 
 const FRESH_MS = 3 * 60000; // une piste muette depuis 3 min n'est plus « en cours »
 const REFRESH_MS = 5 * 60000; // relecture des tournois suivis
@@ -17,6 +18,7 @@ const matchesCache = new Map(); // competitionId → { at, guid, matches }
 const events = new EventEmitter();
 events.setMaxListeners(500);
 let tracked = new Set();
+let trackedCompetitions = new Map();
 
 const fold = (s) =>
   norm(s)
@@ -164,6 +166,19 @@ function matchLive(matches, states, now = Date.now()) {
     const swap = team
       ? countryFor([{ name: s.left.name, country: s.left.country }], s.left.name) !== c1
       : fold(s.left.name) !== a;
+    if (!team) {
+      const sameFencers = matches.filter(
+        (other) =>
+          !other.isFinished &&
+          ((fold(other.player1) === a && fold(other.player2) === b) ||
+            (fold(other.player1) === b && fold(other.player2) === a)),
+      );
+      if (sameFencers.length > 1) {
+        const onStrip = sameFencers.filter((other) => other.strip && fold(other.strip) === fold(s.strip));
+        if (onStrip.length !== 1 || onStrip[0].id !== m.id) continue;
+      }
+    }
+    rememberLive(m, s.at);
     const [p1, p2] = swap ? [s.right, s.left] : [s.left, s.right];
     const history = oriented(bouts.get(boutKey(s))?.touches || [], swap);
     if (history.length) finishedHistory.set(m.id, history);
@@ -188,9 +203,12 @@ function matchLive(matches, states, now = Date.now()) {
 async function refreshTracked(db) {
   const list = await db.tournament.findMany({
     where: { archivedAt: null, ftlSourceUrl: { not: null } },
-    select: { ftlSourceUrl: true },
+    select: { ftlSourceUrl: true, competitions: { select: { id: true } } },
   });
   tracked = new Set(list.map((t) => GUID.exec(t.ftlSourceUrl || '')?.[1]?.toUpperCase()).filter(Boolean));
+  trackedCompetitions = new Map(
+    list.map((t) => [GUID.exec(t.ftlSourceUrl || '')?.[1]?.toUpperCase(), (t.competitions || []).map((c) => c.id)]),
+  );
 }
 
 // Rencontres de l'épreuve et identifiant FencingTimeLive du tournoi (gardés quelques secondes).
@@ -205,7 +223,7 @@ async function competitionContext(db, competitionId, now = Date.now()) {
   const matches = guid
     ? await db.match.findMany({
         where: { competitionId },
-        select: { id: true, player1: true, player2: true, isFinished: true, strip: true },
+        select: { id: true, player1: true, player2: true, isFinished: true, strip: true, liveDetectedAt: true },
       })
     : [];
   const enriched = matches.map((match) => ({
@@ -224,6 +242,22 @@ async function liveFor(db, competitionId, now = Date.now()) {
   if (!guid) return [];
   const states = [...strips.values()].filter((s) => s.guid === guid);
   return matchLive(matches, states, now);
+}
+
+// Exécuté par le worker, même sans écran ouvert. Les mises à jour conditionnelles prennent
+// le même verrou de ligne PostgreSQL que l’enregistrement d’un pronostic.
+async function persistLiveLocks(db, competitionId, now = Date.now()) {
+  const { matches } = await competitionContext(db, competitionId, now);
+  await liveFor(db, competitionId, now);
+  for (const match of matches) {
+    const detected = liveDetectedAt(match);
+    if (!detected || match.liveDetectedAt || match.isFinished) continue;
+    const saved = await db.match.updateMany({
+      where: { id: match.id, player1: match.player1, player2: match.player2, isFinished: false, liveDetectedAt: null },
+      data: { liveDetectedAt: new Date(detected) },
+    });
+    if (saved.count) match.liveDetectedAt = new Date(detected);
+  }
 }
 
 // Abonnement d'un écran : appelé à chaque changement sur une piste du tournoi de l'épreuve.
@@ -245,12 +279,45 @@ function startWorker(db, { connect = (url, opts) => require('socket.io-client').
   const timer = setInterval(refresh, REFRESH_MS);
   timer.unref?.();
   socket = connect(`${ORIGIN}/livescores`, { transports: ['websocket'], reconnectionDelayMax: 30000 });
-  socket.on('change', (message) => record(message));
+  const running = new Map();
+  let stopped = false;
+  const schedule = (id) => {
+    const state = running.get(id);
+    if (state) {
+      state.again = true;
+      return;
+    }
+    const next = { again: false };
+    running.set(id, next);
+    persistLiveLocks(db, id)
+      .catch((error) => {
+        console.error('Verrouillage des pronostics live indisponible :', error.message);
+      })
+      .finally(() => {
+        running.delete(id);
+        if (next.again && !stopped) schedule(id);
+      });
+  };
+  socket.on('change', (message) => {
+    const state = record(message);
+    if (state) for (const id of trackedCompetitions.get(state.guid) || []) schedule(id);
+  });
   console.log('Scores en direct FencingTimeLive : écoute des pistes active.');
   return () => {
+    stopped = true;
     clearInterval(timer);
     socket?.close();
   };
 }
 
-module.exports = { startWorker, liveFor, subscribe, matchLive, record, FRESH_MS, _strips: strips, _bouts: bouts };
+module.exports = {
+  persistLiveLocks,
+  startWorker,
+  liveFor,
+  subscribe,
+  matchLive,
+  record,
+  FRESH_MS,
+  _strips: strips,
+  _bouts: bouts,
+};

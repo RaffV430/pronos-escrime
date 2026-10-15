@@ -75,3 +75,24 @@ test('podium closes with first round, independent of later round', () => {
   );
   assert.equal(podiumClosed({}, [{ round: 'T32', startsAt: iso(start) }], start), true);
 });
+
+test('détection live : seule cette rencontre ferme, avant horaire, délai ou réouverture', () => {
+  const { rememberLive } = require('../src/lib/liveDetection');
+  const a = {
+    id: 987001,
+    player1: 'LIVE A',
+    player2: 'LIVE B',
+    startsAt: '2030-01-01T00:00:00Z',
+    manualUnlockUntil: '2030-01-01T00:00:00Z',
+  };
+  const b = { ...a, id: 987002 };
+  const before = structuredClone(a),
+    now = Date.parse('2026-10-15T07:00:00Z');
+  rememberLive(a, now);
+  assert.equal(matchClosed(a, now), true);
+  assert.equal(matchClosed(b, now), false);
+  assert.equal(closesAt(a), new Date(now).toISOString());
+  assert.equal(matchClosed({ ...b, liveDetectedAt: new Date(now) }, now), true);
+  assert.deepEqual(a, before);
+  assert.equal(matchClosed(a, now + 86400000), true);
+});

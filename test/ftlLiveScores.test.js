@@ -154,3 +154,78 @@ test('liveFor utilise le format, les pays officiels et la piste de la base sans 
   );
   assert.deepEqual(match, { id: 950, player1: 'TEAM ONE', player2: 'TEAM TWO', strip: '42', isFinished: false });
 });
+
+test('la même affiche dans deux phases n’entraîne jamais deux verrous live', () => {
+  const now = Date.now();
+  const s = live.record(msg('live-ambiguity', 'LIVE X', 'LIVE Y', 0, 0), now, new Set([GUID]));
+  const matches = [
+    { id: 981001, player1: 'LIVE X', player2: 'LIVE Y', round: 'J1:T64' },
+    { id: 981002, player1: 'LIVE X', player2: 'LIVE Y', round: 'T64' },
+  ];
+  assert.deepEqual(live.matchLive(matches, [s], now), []);
+  const assigned = matches.map((m, i) => ({ ...m, strip: i ? 'other' : 'live-ambiguity' }));
+  assert.deepEqual(
+    live.matchLive(assigned, [s], now).map((x) => x.matchId),
+    [981001],
+  );
+});
+
+test(
+  'le worker verrouille la rencontre détectée sans abonné et sans autre synchronisation',
+  { timeout: 3000 },
+  async () => {
+    const old = process.env.FTL_AUTO_SYNC;
+    process.env.FTL_AUTO_SYNC = 'true';
+    const match = {
+      id: 981100,
+      competitionId: 981100,
+      player1: 'WORKER ALPHA',
+      player2: 'WORKER BETA',
+      isFinished: false,
+      liveDetectedAt: null,
+    };
+    let handler, written;
+    const saved = new Promise((resolve) => (written = resolve));
+    const db = {
+      tournament: {
+        findMany: async () => [
+          {
+            ftlSourceUrl: `https://www.fencingtimelive.com/tournaments/eventSchedule/${GUID}`,
+            competitions: [{ id: 981100 }],
+          },
+        ],
+      },
+      competition: {
+        findUnique: async () => ({
+          tournament: { ftlSourceUrl: `https://www.fencingtimelive.com/tournaments/eventSchedule/${GUID}` },
+        }),
+      },
+      match: {
+        findMany: async () => [match],
+        updateMany: async (args) => {
+          written(args);
+          return { count: 1 };
+        },
+      },
+    };
+    const stop = live.startWorker(db, { connect: () => ({ on: (_event, cb) => (handler = cb), close: () => {} }) });
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      handler(msg('worker-test', match.player1, match.player2, 0, 0));
+      const result = await saved;
+      assert.deepEqual(result.where, {
+        id: match.id,
+        player1: match.player1,
+        player2: match.player2,
+        isFinished: false,
+        liveDetectedAt: null,
+      });
+      assert.ok(result.data.liveDetectedAt instanceof Date);
+      assert.deepEqual(Object.keys(result.data), ['liveDetectedAt']);
+    } finally {
+      stop();
+      if (old === undefined) delete process.env.FTL_AUTO_SYNC;
+      else process.env.FTL_AUTO_SYNC = old;
+    }
+  },
+);

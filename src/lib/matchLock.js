@@ -1,6 +1,9 @@
+const { liveDetectedAt } = require('./liveDetection');
 const GRACE_MS = 10 * 60 * 1000;
 const time = (value) => (value ? new Date(value).getTime() : NaN);
 function closesAt(match) {
+  const detected = liveDetectedAt(match);
+  if (detected) return new Date(detected).toISOString();
   if (match.manualUnlockUntil) return new Date(match.manualUnlockUntil).toISOString();
   if (match.timingUnverified || match.awaitingPreviousRound) return null;
   const start = time(match.startsAt),
@@ -15,7 +18,7 @@ function closesAt(match) {
   return Number.isFinite(deadline) ? new Date(deadline).toISOString() : null;
 }
 function matchClosed(match, now = Date.now()) {
-  if (match.isFinished || match.syncIssue || match.progressionConfirmedAt) return true;
+  if (liveDetectedAt(match) || match.isFinished || match.syncIssue || match.progressionConfirmedAt) return true;
   // An expired override closes the round even if its original deadline is later.
   if (match.manualUnlockUntil) return now >= time(match.manualUnlockUntil);
   if (match.timingUnverified) return true;
