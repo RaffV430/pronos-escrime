@@ -677,7 +677,7 @@
       "format": "INDIVIDUAL",
       "level": "international",
       "selectionIds": [4],
-      "calendarNote": "Catégorie U23 distincte de M20, selon la précision utilisateur."
+      "calendarNote": "Épreuve U23."
     },
     {
       "id": "epee-2026-11-07-pont-a-mousson-6",
@@ -730,7 +730,7 @@
       "format": "INDIVIDUAL",
       "level": "national",
       "selectionIds": [9],
-      "calendarNote": "Lieu manquant dans le PDF."
+      "calendarNote": "Lieu à confirmer."
     },
     {
       "id": "epee-2026-11-14-nice-10",
@@ -848,7 +848,7 @@
       "format": "INDIVIDUAL",
       "level": "international",
       "selectionIds": [19],
-      "calendarNote": "Catégorie U23 distincte de M20, selon la précision utilisateur."
+      "calendarNote": "Épreuve U23."
     },
     {
       "id": "epee-2026-12-19-burgos-20",
