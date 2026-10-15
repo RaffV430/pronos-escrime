@@ -318,6 +318,7 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  res.set('X-Live-Protocol', req.query.delta === '1' ? 'delta-v1' : 'snapshot');
   res.flushHeaders?.();
   let closed = false,
     timer = null,
