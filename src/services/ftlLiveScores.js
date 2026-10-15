@@ -217,7 +217,15 @@ function matchLive(matches, states, now = Date.now()) {
         if (onStrip.length !== 1 || onStrip[0].id !== m.id) continue;
       }
     }
-    rememberLive(m, s.at);
+    // FTL peut afficher l’affiche bien avant le combat, à 0–0 / 3:00.
+    // Une horloge entamée (ou une période ultérieure) prouve le début ;
+    // 0:00 sans score peut être une piste initialisée, pas un départ.
+    const clockStarted =
+      (Number.isFinite(s.clock) && s.clock > 0 && s.clock < 180) ||
+      (s.clock === 0 && (s.left.score > 0 || s.right.score > 0)) ||
+      s.period > 1;
+    if (clockStarted) rememberLive(m, s.at);
+    const started = Boolean(liveDetectedAt(m));
     const [p1, p2] = swap ? [s.right, s.left] : [s.left, s.right];
     const history = oriented(bouts.get(boutKey(s))?.touches || [], swap);
     if (history.length) finishedHistory.set(m.id, { player1: m.player1, player2: m.player2, history });
@@ -225,6 +233,7 @@ function matchLive(matches, states, now = Date.now()) {
       matchId: m.id,
       ftlLeftPlayer: swap ? 2 : 1,
       finished: false,
+      started,
       strip: s.strip,
       clock: s.clock,
       period: s.period,
