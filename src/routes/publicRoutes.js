@@ -205,6 +205,15 @@ async function publicList() {
     };
   });
 }
+router.get('/next-prediction', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    res.json(await require('../services/nextPrediction').nextPrediction(db));
+  } catch (error) {
+    reportError(error, 'prochaine étape de pronostic');
+    res.status(500).json({ error: 'Prochaine étape indisponible.' });
+  }
+});
 router.get('/tournaments', async (req, res) => {
   try {
     res.set('Cache-Control', 'public, max-age=300');
