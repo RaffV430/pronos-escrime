@@ -154,3 +154,57 @@ test('liveFor utilise le format, les pays officiels et la piste de la base sans 
   );
   assert.deepEqual(match, { id: 950, player1: 'TEAM ONE', player2: 'TEAM TWO', strip: '42', isFinished: false });
 });
+
+test('le déroulé terminé suit les identités conservées, même si la rencontre change de sens', () => {
+  const at = 120000,
+    guids = new Set([GUID]);
+  const match = { id: 9901, player1: 'SYNTH ALPHA', player2: 'SYNTH BRAVO', isFinished: false };
+  live.record(msg('history-order', 'SYNTH BRAVO', 'SYNTH ALPHA', 0, 0), at, guids);
+  live.record(msg('history-order', 'SYNTH BRAVO', 'SYNTH ALPHA', 0, 1), at + 1, guids);
+  const state = live.record(msg('history-order', 'SYNTH BRAVO', 'SYNTH ALPHA', 8, 15), at + 2, guids);
+  const before = structuredClone(match);
+  live.matchLive([match], [state], at + 3);
+  const done = { ...match, isFinished: true, score1: 15, score2: 8 };
+  const [a] = live.matchLive([done], [], at + 4);
+  assert.deepEqual([a.history.at(-1).score1, a.history.at(-1).score2], [15, 8]);
+  const [b] = live.matchLive(
+    [{ ...done, player1: match.player2, player2: match.player1, score1: 8, score2: 15 }],
+    [],
+    at + 5,
+  );
+  assert.deepEqual([b.history[0].by, b.history.at(-1).score1, b.history.at(-1).score2], [2, 8, 15]);
+  assert.deepEqual(match, before);
+  assert.deepEqual(live.matchLive([done], [], at + 6)[0].history, a.history);
+  const [other] = live.matchLive([{ ...done, player2: 'SYNTH CHARLIE' }], [], at + 7);
+  assert.deepEqual(other.history, []);
+  assert.match(other.historyIssue, /tireurs/);
+});
+
+test('un déroulé contradictoire est signalé sans inventer une inversion à partir du score final', () => {
+  const at = 140000,
+    guids = new Set([GUID]);
+  const match = { id: 9902, player1: 'SYNTH DELTA', player2: 'SYNTH ECHO', isFinished: false };
+  live.record(msg('history-conflict', match.player1, match.player2, 0, 0), at, guids);
+  const state = live.record(msg('history-conflict', match.player1, match.player2, 8, 15), at + 1, guids);
+  live.matchLive([match], [state], at + 2);
+  const done = { ...match, isFinished: true, score1: 15, score2: 8 };
+  const before = structuredClone(done);
+  const [bad] = live.matchLive([done], [], at + 3);
+  assert.deepEqual(bad.history, []);
+  assert.match(bad.historyIssue, /résultat officiel/);
+  assert.deepEqual(done, before);
+  const [valid] = live.matchLive([{ ...done, score1: 8, score2: 15 }], [], at + 4);
+  assert.equal(valid.history.at(-1).by, 'double');
+  assert.equal(valid.historyIssue, undefined);
+});
+
+test('un déroulé partiel cohérent reste affichable après publication du résultat', () => {
+  const at = 160000,
+    guids = new Set([GUID]);
+  const match = { id: 9903, player1: 'SYNTH FOXTROT', player2: 'SYNTH GOLF', isFinished: false };
+  const state = live.record(msg('history-partial', match.player1, match.player2, 4, 3), at, guids);
+  live.matchLive([match], [state], at + 1);
+  const [done] = live.matchLive([{ ...match, isFinished: true, score1: 15, score2: 8 }], [], at + 2);
+  assert.equal(done.history.at(-1).score1, 4);
+  assert.equal(done.historyIssue, undefined);
+});
