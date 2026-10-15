@@ -11,10 +11,14 @@ const LINKED = 'Calendrier : tournoi relié';
 const WATCHED = 'Calendrier : surveillance';
 const AHEAD = 60; // jours : on cherche les tournois qui commencent dans les deux mois
 const ACTOR_ACTION = 'Calendrier : ajout automatique';
-const rechecked = new Map();
+const passes = new WeakMap();
 
 // Noms des villes du calendrier FFE (français) → noms utilisés par les sites officiels.
 const ALIASES = {
+  bale: ['basel', 'basle'],
+  berne: ['bern'],
+  thessalonique: ['thessaloniki', 'thessalonica', 'salonika'],
+  luxembourg: ['luxemburg', 'luxembourgcity'],
   livourne: ['livorno'],
   dresde: ['dresden'],
   turin: ['torino'],
@@ -210,7 +214,7 @@ async function links(db) {
 }
 
 // Un passage : pour chaque entrée à surveiller, cherche le tournoi officiel et ajoute les épreuves.
-async function watch(db, deps = {}) {
+async function watchPass(db, deps = {}) {
   const now = deps.now ?? Date.now();
   const entries = due(now);
   if (!entries.length) return { checked: 0, added: [] };
@@ -237,14 +241,16 @@ async function watch(db, deps = {}) {
   for (const entry of entries) {
     for (const source of candidates(entry, lists)) {
       try {
-        // Source déjà reliée : un nouveau contrôle par jour suffit (épreuves ajoutées plus tard).
-        if (
-          known.get(entry.id)?.sourceUrl === source.sourceUrl &&
-          now - (rechecked.get(`${entry.id}|${source.sourceUrl}`) || 0) < 20 * 3600000
-        )
+        // Une seule source officielle par rendez-vous. La seconde publication reste à vérifier,
+        // sans créer de tournoi/épreuve ni remplacer les liens et pronostics existants.
+        const primary = known.get(entry.id)?.sourceUrl;
+        if (primary && primary !== source.sourceUrl) {
+          problems.push(
+            `${entry.city} (${entry.start}) : autre publication ${source.sourceUrl}. Source conservée : ${primary}. Vérifier dans l’administration avant tout rapprochement.`,
+          );
           continue;
-        // Par entrée : un même tournoi officiel porte souvent plusieurs entrées (M17 samedi, M20 dimanche).
-        rechecked.set(`${entry.id}|${source.sourceUrl}`, now);
+        }
+        // La source retenue est relue à chaque passage (3 h), y compris pour les ajouts tardifs.
         const venue = await venueOf(entry, source.country, deps);
         const preview = await ftlTournament.preview(
           db,
@@ -259,7 +265,7 @@ async function watch(db, deps = {}) {
           names = [];
         if (missing.length) {
           const saveEvents = (ids) =>
-            ftlTournament.save(db, { previewId: preview.previewId, eventIds: ids }, admin.id, deps.client);
+            ftlTournament.save(db, { previewId: preview.previewId, eventIds: ids }, admin.id, deps.client, entry.id);
           let results = [];
           try {
             results = [await saveEvents(missing.map((e) => e.eventId))];
@@ -333,6 +339,14 @@ async function watch(db, deps = {}) {
     },
   });
   return { checked: entries.length, added, problems };
+}
+
+// Un clic administrateur pendant le passage serveur partage le même travail.
+function watch(db, deps = {}) {
+  if (passes.has(db)) return passes.get(db);
+  const pass = watchPass(db, deps).finally(() => passes.delete(db));
+  passes.set(db, pass);
+  return pass;
 }
 
 // Calendrier public : épreuves à venir, avec le tournoi de l'application quand il existe déjà.

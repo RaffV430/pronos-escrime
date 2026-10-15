@@ -115,7 +115,7 @@ async function preview(db, input, actorId, client = createEngardeClient()) {
 
 // Enregistre le tournoi et les épreuves choisies, même vides : le suivi automatique reviendra jusqu'à la
 // publication des engagés, des poules puis du tableau.
-async function save(db, input, actorId, client = createEngardeClient()) {
+async function save(db, input, actorId, client = createEngardeClient(), calendarId = null) {
   client ||= createEngardeClient();
   const previewId = Number(input.previewId),
     ids = input.eventIds;
@@ -164,6 +164,7 @@ async function save(db, input, actorId, client = createEngardeClient()) {
   return db.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184722)`;
+      const calendarLink = await require('./calendarSource').check(tx, calendarId, preview.sourceUrl);
       const keys = observations.map((o) => engardeKey(o.event.eventId));
       const existing = await tx.competition.findMany({ where: { ftlEventId: { in: keys } } });
       const linked = await tx.tournament.findUnique({ where: { ftlSourceUrl: preview.sourceUrl } });
@@ -228,6 +229,7 @@ async function save(db, input, actorId, client = createEngardeClient()) {
           after: { sourceUrl: preview.sourceUrl, events: results },
         },
       });
+      await require('./calendarSource').bind(tx, calendarId, preview.sourceUrl, tournament.id, actorId, calendarLink);
       return { tournamentId: tournament.id, name: tournament.name, events: results };
     },
     { timeout: 30000 },

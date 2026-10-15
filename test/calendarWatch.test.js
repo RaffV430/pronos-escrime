@@ -315,3 +315,75 @@ test('un championnat lié conserve sa plage globale malgré une seule épreuve d
   assert.equal(found.end, '2027-04-09');
   assert.deepEqual(found.competitionIds, [99]);
 });
+
+test('villes épée : variantes internationales sans rapprochement de villes différentes', () => {
+  for (const [a, b] of [
+    ['Bâle', 'Basel'],
+    ['Bâle', 'Basle'],
+    ['Berne', 'Bern'],
+    ['Thessalonique', 'Thessaloniki'],
+    ['Luxembourg', 'Luxemburg'],
+  ])
+    assert.ok(C.sameCity(a, b));
+  assert.ok(!C.sameCity('Bâle', 'Bern'));
+});
+
+test('ajouts tardifs : même source relue au passage suivant, autre plateforme signalée sans sauvegarde', async () => {
+  const logs = [],
+    calendarId = '2026-10-17-henin-beaumont-senior-ind';
+  const ftlUrl = 'https://www.fencingtimelive.com/tournaments/eventSchedule/' + 'E'.repeat(32);
+  let saved = [],
+    late = false,
+    previews = 0;
+  const db = {
+    user: { findFirst: async () => ({ id: 1 }), findMany: async () => [] },
+    auditLog: {
+      findMany: async () => logs.map((data) => ({ ...data, createdAt: new Date() })),
+      create: async ({ data }) => (logs.push(data), data),
+    },
+    competition: { findUnique: async () => ({ tournamentId: 7 }) },
+    pushSubscription: { findMany: async () => [] },
+  };
+  const deps = {
+    now: Date.parse('2026-10-07T12:00Z'),
+    ftl: {
+      login: async () => {},
+      get: async () => [{ id: 'e'.repeat(32), name: 'EN', location: 'Hénin-Beaumont, FRA', start: '2026-10-17' }],
+    },
+    engarde: {
+      get: async () =>
+        JSON.stringify({
+          events: [{ org: 'test', ev: 'en', city: 'Henin-Beaumont', date_from: '2026-10-17', date_to: '2026-10-18' }],
+        }),
+    },
+    ftlTournament: {
+      preview: async (_db, { sourceUrl }) => {
+        previews++;
+        assert.equal(sourceUrl, ftlUrl);
+        return {
+          previewId: 1,
+          events: [
+            { eventId: 'H', event: 'Senior Men’s Foil', existingCompetitionId: 7 },
+            ...(late ? [{ eventId: 'D', event: 'Senior Women’s Foil', existingCompetitionId: null }] : []),
+          ],
+        };
+      },
+      save: async (_db, input, _actor, _client, id) => {
+        assert.equal(id, calendarId);
+        saved.push(...input.eventIds);
+        return { tournamentId: 7, name: 'EN', events: input.eventIds.map((name) => ({ name, created: true })) };
+      },
+    },
+    mailer: { mailConfigured: () => false },
+    push: { configured: () => false },
+  };
+  const first = await C.watch(db, deps);
+  assert.equal(first.added.length, 0);
+  assert.ok(first.problems.some((p) => p.includes('autre publication')));
+  late = true;
+  const second = await C.watch(db, { ...deps, now: deps.now + 3 * 3600000 });
+  assert.deepEqual(saved, ['D']);
+  assert.equal(previews, 2);
+  assert.equal(second.added[0].tournamentId, 7);
+  assert.ok(second.problems.some((p) => p.includes('Source conservée')));
+});
