@@ -29,26 +29,52 @@ function health(state, competition, now = Date.now()) {
   };
 }
 
+// Un horaire de match importé est une preuve officielle ; ne jamais déduire J2 de J1 + un jour.
+function waitingForJ2(competition, config, now) {
+  const matches = (competition.matches || []).filter((m) => m.resultType !== 'CANCELLED');
+  const first = matches.filter((m) => m.round?.startsWith('J1:'));
+  const main = matches.filter((m) => /^T\d+$/.test(m.round || ''));
+  if (
+    !first.length ||
+    first.some((m) => !m.isFinished) ||
+    (competition.pools || []).some((p) => !p.isFinal) ||
+    main.some((m) => m.isFinished || m.liveDetectedAt)
+  )
+    return null;
+  const times = main.map((m) => m.startsAt && +new Date(m.startsAt)).filter(Number.isFinite);
+  const session = config?.scheduleSessions?.[1];
+  const planned =
+    session && config.timezone && session.time ? require('./eventStart').eventStart({ ...config, ...session }) : null;
+  const startsAt = times.length ? Math.min(...times) : planned;
+  if (!startsAt || startsAt <= now) return null;
+  return { startsAt: new Date(startsAt).toISOString(), timezone: config?.timezone || null };
+}
 async function syncHealth(db, now = Date.now()) {
   const competitions = await db.competition.findMany({
     where: {
       tournament: { archivedAt: null },
       OR: [{ rosterSourceUrl: { not: null } }, { ftlEventId: { not: null } }],
     },
-    select: { id: true, name: true, tournament: { select: { name: true } } },
+    select: {
+      id: true,
+      name: true,
+      tournament: { select: { name: true } },
+      matches: { select: { round: true, isFinished: true, startsAt: true, liveDetectedAt: true, resultType: true } },
+      pools: { select: { isFinal: true } },
+    },
     orderBy: { id: 'asc' },
   });
   const states = await db.ftlSyncState.findMany({ where: { competitionId: { in: competitions.map((c) => c.id) } } });
   // Les avertissements ne sont pas des erreurs réseau : ils restent dans le dernier contrôle terminé.
   const controls = await db.auditLog.findMany({
     where: {
-      action: 'Contrôle FTL terminé',
+      action: { in: ['Contrôle FTL terminé', 'Configuration FTL validée'] },
       targetType: 'Competition',
       targetId: { in: competitions.map((c) => c.id) },
     },
     orderBy: { id: 'desc' },
-    distinct: ['targetId'],
-    select: { targetId: true, after: true },
+    distinct: ['targetId', 'action'],
+    select: { targetId: true, action: true, after: true },
   });
   const rows = competitions.map((c) => ({
     ...health(
@@ -56,9 +82,16 @@ async function syncHealth(db, now = Date.now()) {
       c,
       now,
     ),
+    waitingForJ2: waitingForJ2(
+      c,
+      controls.find((a) => a.targetId === c.id && a.action === 'Configuration FTL validée')?.after,
+      now,
+    ),
     warnings: [
       ...new Set(
-        (controls.find((a) => a.targetId === c.id)?.after?.warnings || []).filter((w) => typeof w === 'string'),
+        (
+          controls.find((a) => a.targetId === c.id && a.action !== 'Configuration FTL validée')?.after?.warnings || []
+        ).filter((w) => typeof w === 'string'),
       ),
     ],
   }));
@@ -410,3 +443,5 @@ module.exports = {
   alertAttention,
   ATTENTION_ACTION,
 };
+
+module.exports.waitingForJ2 = waitingForJ2;

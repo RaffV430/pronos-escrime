@@ -8,8 +8,8 @@ test('administration : détails du dernier contrôle seulement, sans écriture n
     ftlSyncState: { findMany: async () => [{ competitionId: 20, status: 'ATTENTION', failures: 0, lastError: null }] },
     auditLog: {
       findMany: async (q) => {
-        assert.equal(q.where.action, 'Contrôle FTL terminé');
-        assert.deepEqual(q.distinct, ['targetId']);
+        assert.deepEqual(q.where.action.in, ['Contrôle FTL terminé', 'Configuration FTL validée']);
+        assert.deepEqual(q.distinct, ['targetId', 'action']);
         return rows;
       },
     },
