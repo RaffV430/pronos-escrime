@@ -117,7 +117,7 @@ function podiumFromResults(rows, c, matches) {
   };
 }
 async function observe(c, existing, client, configured = null, loggedIn = false) {
-  if (configured?.scheduleSessions?.length > 1) {
+  if (require('./ftlTableauPhases').enabled(configured)) {
     const urls = [
       ...new Set(
         [...(configured.tableauSources || []), configured.sourceUrl, ...existing.map((m) => m.sourceUrl)].filter(
@@ -1043,7 +1043,10 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
           try {
             observation = await read();
           } catch (e) {
-            if (e.message !== 'Les derniers tours du tableau sont absents.' || config.scheduleSessions?.length > 1)
+            if (
+              e.message !== 'Les derniers tours du tableau sont absents.' ||
+              require('./ftlTableauPhases').enabled(config)
+            )
               throw e;
             const refreshed = await require('./ftlTournament').refreshSessions(db, c, config, actorId, client);
             if (refreshed === config) throw e;

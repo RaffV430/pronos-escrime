@@ -376,7 +376,7 @@ async function applyEvent(tx, c, { config, roster }, actorId, allowWithdrawals =
 // enregistré dans la configuration. Aucun tableau deviné : un seul lien, de la même épreuve.
 async function discoverTableau(db, c, config, actorId, client) {
   if (
-    (!(config.scheduleSessions?.length > 1) && (config.sourceUrl || config.eventSourceUrl)) ||
+    (!require('./ftlTableauPhases').enabled(config) && (config.sourceUrl || config.eventSourceUrl)) ||
     !/^[a-f0-9]{32}$/i.test(config.eventId || '')
   )
     return config;
@@ -396,13 +396,13 @@ async function discoverTableau(db, c, config, actorId, client) {
         .filter((u) => u.includes('/tableaus/') && SOURCE.test(u) && SOURCE.exec(u)[2].toUpperCase() === eventId),
     ),
   ];
-  if (tableaus.length > 1 && !(config.scheduleSessions?.length > 1))
+  if (tableaus.length > 1 && !require('./ftlTableauPhases').enabled(config))
     throw failure('Plusieurs tableaux publiés : sélection manuelle nécessaire.');
   if (!tableaus.length) return config;
   const next = {
     ...config,
     sourceUrl: config.sourceUrl || tableaus[0],
-    ...(config.scheduleSessions?.length > 1
+    ...(require('./ftlTableauPhases').enabled(config)
       ? { tableauSources: [...new Set([...(config.tableauSources || []), ...tableaus])] }
       : {}),
   };
@@ -412,7 +412,7 @@ async function discoverTableau(db, c, config, actorId, client) {
     const previous = await configuration(tx, c.id);
     if (
       !previous ||
-      (previous.sourceUrl && !previous.scheduleSessions?.length) ||
+      (previous.sourceUrl && !require('./ftlTableauPhases').enabled(previous)) ||
       String(previous.eventId).toUpperCase() !== eventId
     )
       throw failure('Configuration modifiée pendant le contrôle.', 409);
@@ -425,11 +425,22 @@ async function discoverTableau(db, c, config, actorId, client) {
 // An older pool-only setup may predate discovery of the two official sessions.
 // Upgrade only after an incomplete tableau, using the same schedule parser as tournament setup.
 async function refreshSessions(db, c, config, actorId, client) {
-  if (config.scheduleSessions?.length > 1 || !config.scheduleUrl) return config;
+  if (require('./ftlTableauPhases').enabled(config) || !config.scheduleUrl) return config;
   const url = scheduleUrl(config.scheduleUrl);
   const schedule = parseSchedule(await client.get(url), url, config.timezone, config.city);
   const event = schedule.events.find((e) => e.eventId === String(config.eventId).toUpperCase());
-  if (event && !(event.scheduleSessions?.length > 1)) return config;
+  let evidence;
+  if (event && !(event.scheduleSessions?.length > 1)) {
+    const formatUrl = `${ORIGIN}/events/format/${event.eventId}`;
+    const $ = require('./ftlSync').verifyPage(await client.get(formatUrl), config);
+    const text = clean($('#mainContent').text());
+    if (
+      !/Incomplete tableau of (?:128|256|512) fenced until 32 competitors remain\./i.test(text) ||
+      !/Complete tableau of 64 fenced through the finals\./i.test(text)
+    )
+      return config;
+    evidence = { preliminaryUntil: 'T64', formatSourceUrl: formatUrl };
+  }
   if (
     norm(schedule.tournament) !== norm(config.tournament) ||
     !event ||
@@ -440,7 +451,7 @@ async function refreshSessions(db, c, config, actorId, client) {
   )
     throw failure('Sessions officielles non concordantes : configuration conservée.');
   const { nameAliases, ...expected } = config;
-  const next = { ...expected, scheduleSessions: event.scheduleSessions };
+  const next = { ...expected, ...(evidence || { scheduleSessions: event.scheduleSessions }) };
   await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
     const previous = await configuration(tx, c.id);
