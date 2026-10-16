@@ -19,6 +19,7 @@ test('qualification garçons trois tours, filles deux, puis un tour national ; a
   assert.equal(S.profile(h).rounds, 3);
   assert.equal(S.profile(d).rounds, 2);
   assert.equal(S.sessions(h, [h, d]).length, 1);
+  assert.equal(S.sessions(h, [{ ...h, compe: 'fhs_samedi' }, d])[0].compe, 'fhs_samedi');
   const sunday = event({
     date: '2026-10-18',
     time: '08:00',

@@ -18,7 +18,7 @@ function sessions(config, published) {
   const at = (date) => same.filter((e) => e.date === date);
   const qualification = at(plan.qualificationDate),
     main = at(plan.mainDate);
-  if (qualification.length !== 1 || main.length > 1 || qualification[0].compe !== config.compe)
+  if (qualification.length !== 1 || main.length > 1)
     throw new E.EngardeError('Journées engarde ambiguës : sources et pronostics conservés, vérification requise.');
   return [
     { ...qualification[0], role: 'qualification', roundOffset: 0, poolRounds: plan.rounds },
@@ -54,6 +54,40 @@ async function discover(config, client) {
 async function control(db, c, config, actorId, claim, client) {
   const published = await discover(config, client);
   const results = [];
+  if (published[0].compe !== config.compe) {
+    const session = published[0];
+    config = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
+      const previous = await require('./ftlConfiguration').configuration(tx, c.id);
+      if (!require('node:util').isDeepStrictEqual(previous, config))
+        throw new E.EngardeError('Configuration modifiée pendant le contrôle.');
+      const [pools, matches] = await Promise.all([
+        tx.pool.count({ where: { competitionId: c.id } }),
+        tx.match.count({ where: { competitionId: c.id } }),
+      ]);
+      if (pools || matches)
+        throw new E.EngardeError(
+          'Source officielle déplacée après import sportif : rapprochement à vérifier, données conservées.',
+        );
+      const eventId = `${session.org}/${session.tournamentSlug}/${session.compe}`;
+      const existing = await tx.competition.findUnique({ where: { ftlEventId: `ENGARDE:${eventId}` } });
+      if (existing && existing.id !== c.id)
+        throw new E.EngardeError('Nouvelle source déjà utilisée par une autre compétition.');
+      const next = { ...config, compe: session.compe, eventId, eventSourceUrl: session.eventSourceUrl };
+      await tx.competition.update({ where: { id: c.id }, data: { ftlEventId: `ENGARDE:${eventId}` } });
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: 'Configuration FTL validée',
+          targetType: 'Competition',
+          targetId: c.id,
+          before: config,
+          after: next,
+        },
+      });
+      return next;
+    });
+  }
   for (const session of published) {
     const eventId = `ENGARDE:${session.org}/${session.tournamentSlug}/${session.compe}`;
     const existing = await db.competition.findUnique({ where: { ftlEventId: eventId } });
@@ -103,4 +137,28 @@ async function control(db, c, config, actorId, claim, client) {
     summary.notes.push('Épreuve du dimanche en attente de publication officielle ; suivi maintenu.');
   return { c, poolSummary, summary };
 }
-module.exports = { profile, sessions, canonicalEvents, control };
+async function existingAnchor(db, event) {
+  const plan = profile(event);
+  if (!plan || event.date !== plan.qualificationDate) return null;
+  const candidates = await db.competition.findMany({
+    where: { name: { equals: event.event, mode: 'insensitive' }, tournament: { ftlSourceUrl: plan.source } },
+    select: { id: true, ftlEventId: true },
+  });
+  const mine = candidates.filter((c) => c.ftlEventId?.startsWith(`ENGARDE:${event.org}/${event.tournamentSlug}/`));
+  if (mine.length > 1)
+    throw new E.EngardeError('Plusieurs compétitions existantes pour cette journée : aucun doublon créé.');
+  if (!mine.length) return null;
+  const config = await require('./ftlConfiguration').configuration(db, mine[0].id);
+  if (config?.date !== event.date || norm(config.event) !== norm(event.event) || config.format !== event.format)
+    throw new E.EngardeError('Source déplacée non concordante avec la configuration existante.');
+  if (config.compe !== event.compe) {
+    const [pools, matches] = await Promise.all([
+      db.pool.count({ where: { competitionId: mine[0].id } }),
+      db.match.count({ where: { competitionId: mine[0].id } }),
+    ]);
+    if (pools || matches)
+      throw new E.EngardeError('Source déplacée après import sportif : aucun nouveau tournoi créé.');
+  }
+  return mine[0];
+}
+module.exports = { profile, sessions, canonicalEvents, control, existingAnchor };
