@@ -33,7 +33,18 @@
       "weapon": "Fleuret",
       "gender": "HD",
       "categories": ["SENIOR"],
-      "format": "INDIVIDUAL"
+      "format": "INDIVIDUAL",
+      "officialSourceUrl": "https://engarde-service.com/tournament/heninbeaumont/seniorf1026",
+      "poolStages": {
+        "qualificationDate": "2026-10-17",
+        "mainDate": "2026-10-18",
+        "qualificationRounds": {
+          "H": 3,
+          "F": 2
+        },
+        "mainRounds": 1,
+        "mainTime": "08:00"
+      }
     },
     {
       "id": "2026-10-24-hammamet-m17-ind",

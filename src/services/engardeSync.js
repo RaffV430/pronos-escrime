@@ -20,12 +20,20 @@ const linkOf = (config) => ({ org: config.org, event: config.tournamentSlug, com
 // Engagés : nouveaux ajoutés, absents de la liste marqués inactifs (identifiants conservés pour les
 // pronostics), nation et rang mis à jour, noms corrigés suivis sans changer d'identifiant (poules et
 // rencontres prennent le nouveau nom).
-async function refreshRoster(db, c, url, client, html = null) {
+async function refreshRoster(db, c, url, client, html = null, retainMissing = false) {
   const observed = E.parseRoster(html ?? (await client.get(url)));
   const current = c.podiumRoster || [];
   let merged, renames;
   try {
     ({ merged, renames } = mergeRoster(current, observed));
+    if (retainMissing)
+      merged = merged.map((e) =>
+        e.active === false &&
+        current.some((old) => old.id === e.id && old.active !== false) &&
+        !observed.some((o) => norm(o.name) === norm(e.name))
+          ? { ...e, active: true }
+          : e,
+      );
   } catch (error) {
     if (error.status !== 409) throw error;
     await require('./identityReview').record(db, c, url, observed);
@@ -149,7 +157,12 @@ function nextDay(prev, min) {
 async function syncPools(db, c, config, url, client, leaseToken, { provisional = false, round = 1, prev = null } = {}) {
   const summary = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [], day: prev };
   // Second tour de poules et suivants : « Tour 2 · Poule 3 » (les numéros repartent de 1 à chaque tour).
-  const label = (n) => (round > 1 ? `Tour ${round} · Poule ${n}` : `Poule ${n}`);
+  const label = (n) =>
+    config._stage
+      ? `Tour ${round} · ${config._stage.role === 'main' ? 'J2' : 'J1'} · Poule ${n}`
+      : round > 1
+        ? `Tour ${round} · Poule ${n}`
+        : `Poule ${n}`;
   let observedAll;
   try {
     observedAll = E.parsePools(await client.get(url));
@@ -177,7 +190,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
   });
   let day = nextDay(prev, minutes(observedAll.filter((o) => !o.error).map((o) => o.time)));
   // Jour du tour corrigé par un administrateur : il fait foi (et sert de repère aux phases suivantes).
-  const forced = schedule.phaseDay(config, `pools-${round}`);
+  const forced = schedule.phaseDay(config, `pools-${round}`) || (config._stage ? config.date : null);
   if (forced && config.date) day = { ...day, offset: schedule.daysBetween(config.date, forced) };
   summary.day = day;
   try {
@@ -408,6 +421,9 @@ async function observeTableau(c, config, pages, client, prev = null) {
 
 // Partie propre à engarde-service d'un contrôle ; la suite (résumé, classements, rythme) est commune.
 async function control(db, c, config, actorId, claim, client) {
+  const stages = require('./engardeStages');
+  if (!config._stage && stages.profile(config))
+    return stages.control(db, c, config, actorId, claim, client || createEngardeClient());
   const source = client || createEngardeClient();
   // Heure de publication la plus récente lue en pied des pages consultées (affichée aux joueurs).
   let publishedAt = null;
@@ -425,7 +441,7 @@ async function control(db, c, config, actorId, claim, client) {
     rosterWarnings = [];
   const pages = E.competitionPages(await client.get(config.eventSourceUrl), linkOf(config));
   try {
-    config = await require('./officialFormat').refresh(db, c, config, actorId, client, pages);
+    if (!config._stage) config = await require('./officialFormat').refresh(db, c, config, actorId, client, pages);
   } catch (e) {
     rosterWarnings.push(e.status ? e.message : 'Formule engarde non vérifiable pour le moment.');
   }
@@ -435,7 +451,7 @@ async function control(db, c, config, actorId, claim, client) {
   if (pages.roster) {
     try {
       const rosterHtml = await client.get(pages.roster);
-      c = await refreshRoster(db, c, pages.roster, client, rosterHtml);
+      c = await refreshRoster(db, c, pages.roster, client, rosterHtml, Boolean(config._stage));
       let dayStart = null;
       try {
         dayStart = localTime(config.date, 0, 0, config.timezone).getTime();
@@ -465,6 +481,8 @@ async function control(db, c, config, actorId, claim, client) {
     return { c, poolSummary: empty, summary: { ...summary, notes } };
   }
   // Tous les tours de poules publiés (poules1.htm, poules2.htm…), dans l'ordre.
+  if (config._stage && pages.pools.some((u) => Number(/poules(\d+)\.htm$/.exec(u)?.[1]) > config._stage.poolRounds))
+    throw failure('Nombre de tours de poules différent du déroulement confirmé : vérification requise.');
   const poolPages = [...pages.pools].sort(
     (a, b) => Number(/poules(\d+)\.htm$/.exec(a)?.[1]) - Number(/poules(\d+)\.htm$/.exec(b)?.[1]),
   );
@@ -475,7 +493,11 @@ async function control(db, c, config, actorId, claim, client) {
     poolSummary = { ...empty, warnings: [] };
     for (const [i, url] of poolPages.entries()) {
       try {
-        const s = await syncPools(db, c, config, url, client, claim.token, { provisional, round: i + 1, prev: day });
+        const s = await syncPools(db, c, config, url, client, claim.token, {
+          provisional,
+          round: Number(/poules(\d+)\.htm$/.exec(url)?.[1]) + (config._stage?.roundOffset || 0),
+          prev: day,
+        });
         day = s.day;
         for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated']) poolSummary[k] += s[k];
         poolSummary.warnings.push(...s.warnings);
@@ -506,7 +528,11 @@ async function control(db, c, config, actorId, claim, client) {
         poolSummary.notes = [...(poolSummary.notes || []), 'Poules confirmées : joueurs prévenus.'];
   }
   const existing = await db.match.findMany({ where: { competitionId: c.id } });
-  if (pages.tableaus.length) {
+  if (config._stage?.role === 'qualification' && pages.tableaus.length) {
+    summary.warnings.push(
+      'Tableau qualificatif publié : sa formule doit être vérifiée avant import ; aucun résultat final national déduit.',
+    );
+  } else if (pages.tableaus.length) {
     try {
       let observation = await observeTableau(c, config, pages, client, day);
       const conflicts = planMatches(existing, observation, { allowPartial: true }).conflicts;

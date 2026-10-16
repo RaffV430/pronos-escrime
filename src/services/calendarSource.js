@@ -35,4 +35,15 @@ async function bind(tx, calendarId, sourceUrl, tournamentId, actorId, previous) 
     },
   });
 }
-module.exports = { check, bind };
+async function linkExisting(db, calendarId, sourceUrl, tournamentId, actorId) {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(184722)`;
+    await tx.$queryRaw`SELECT id FROM "Tournament" WHERE id=${tournamentId} FOR UPDATE`;
+    const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
+    if (!tournament || tournament.ftlSourceUrl !== sourceUrl)
+      throw Object.assign(new Error('Source du tournoi existant différente : rattachement refusé.'), { status: 409 });
+    const previous = await check(tx, calendarId, sourceUrl);
+    await bind(tx, calendarId, sourceUrl, tournamentId, actorId, previous);
+  });
+}
+module.exports = { check, bind, linkExisting };
