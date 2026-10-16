@@ -34,28 +34,28 @@ test('FTL : formule J1/J2 avant toute publication de tableau ; identité et form
   assert.throws(() => F.ftl(ftl(formula), { ...config, event: 'Other event' }, source), /Identité/);
   assert.equal(await F.readFtl(config, ftl(''), { get: () => assert.fail('aucune adresse devinée') }), null);
 });
-test('Engarde : vrais formats Grand Prix séparé et nationale continue, pas de J2 inventé', () => {
-  const split = F.engarde(
-    fixture('doha-formule.html'),
-    { event: 'Grand Prix du Qatar Epee Hommes Senior' },
-    'official',
-  );
+test('Engarde : vrais formats Grand Prix séparé et nationale continue, identité par source officielle', () => {
+  const gp = 'https://engarde-service.com/competition/rousseau/doha_2019/doha_ehs';
+  const national = 'https://engarde-service.com/competition/era/sem_es_25/ehs';
+  const cfg = { event: 'Épée Hommes Senior', eventSourceUrl: gp };
+  const split = F.engarde(fixture('doha-formule.html'), cfg, gp + '/formule.htm');
   assert.equal(split.kind, 'split');
   assert.equal(split.preliminaryUntil, 'T64');
   assert.equal(split.scheduleSessions, undefined);
   assert.equal(
     F.engarde(
       '<h1>TEST Dames</h1><p>Tableau préliminaire avec 32 qualifiées. Tableau principal de 64</p>',
-      { event: 'TEST Dames' },
-      'official',
+      { ...cfg, event: 'Épée Dames Senior' },
+      gp + '/formule.htm',
     ).kind,
     'split',
   );
   assert.equal(
-    F.engarde(fixture('national-formule.html'), { event: 'Epée Hommes Senior' }, 'official').kind,
+    F.engarde(fixture('national-formule.html'), { ...cfg, eventSourceUrl: national }, national + '/formule.htm').kind,
     'continuous',
   );
-  assert.throws(() => F.engarde(fixture('doha-formule.html'), { event: 'Other event' }, 'official'), /correspond pas/);
+  assert.throws(() => F.engarde(fixture('doha-formule.html'), cfg, national + '/formule.htm'), /correspond pas/);
+  assert.throws(() => F.engarde('<p>Tableau direct</p>', cfg, gp + '/formule.htm'), /correspond pas/);
 });
 const base = '/competition/test/worldcup/senior/';
 const menu = `<a class="link-competition" href="${base}formule.htm">Formule</a><a class="link-competition" href="${base}tableauPreliminaire.htm">Tableau préliminaire de 256</a><a class="link-competition" href="${base}tableau64.htm">Tableau principal de 64</a>`;

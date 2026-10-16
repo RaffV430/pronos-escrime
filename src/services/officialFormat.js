@@ -1,6 +1,6 @@
 // Read the published sporting formula; calendar labels alone never invent a second bracket.
 const { load } = require('cheerio');
-const { clean, norm } = require('./ftlParser');
+const { clean } = require('./ftlParser');
 const { failure, ORIGIN } = require('./ftlClient');
 const compact = (text) =>
   clean(text)
@@ -20,9 +20,13 @@ function ftl(html, config, sourceUrl) {
 }
 function engarde(html, config, sourceUrl) {
   const $ = load(html);
-  // The heading and same-competition Formule link are checked, not the unrelated site navigation.
+  // Engarde titles differ from the normalized app label (e.g. IDF 1 FDM20 / Fleuret Dames M20).
+  // Identity comes from the observed Formule link in exactly the configured competition directory.
+  const E = require('./engardeParser');
+  const expected = E.parseLink(config.eventSourceUrl);
+  const actual = E.parseLink(sourceUrl);
   const heading = clean($('h1').last().text());
-  if (!heading || norm(heading) !== norm(config.event))
+  if (!heading || !expected || !actual || expected.kind !== 'competition' || actual.url !== expected.url)
     throw failure('La formule engarde ne correspond pas à cette épreuve.');
   const text = compact($('body').clone().find('script,style,nav,footer').remove().end().text());
   if (/repech/.test(text)) return null;
