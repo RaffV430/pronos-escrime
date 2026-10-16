@@ -434,11 +434,17 @@ async function discoverTableau(db, c, config, actorId, client) {
 }
 // An older pool-only setup may predate discovery of the two official sessions.
 // Upgrade only after an incomplete tableau, using the same schedule parser as tournament setup.
-async function refreshSessions(db, c, config, actorId, client) {
-  if (require('./ftlTableauPhases').enabled(config) || !config.scheduleUrl) return config;
+async function refreshSessions(db, c, config, actorId, client, { sessionsOnly = false } = {}) {
+  if (
+    !config.scheduleUrl ||
+    config.scheduleSessions?.length > 1 ||
+    (!sessionsOnly && require('./ftlTableauPhases').enabled(config))
+  )
+    return config;
   const url = scheduleUrl(config.scheduleUrl);
   const schedule = parseSchedule(await client.get(url), url, config.timezone, config.city);
   const event = schedule.events.find((e) => e.eventId === String(config.eventId).toUpperCase());
+  if (sessionsOnly && !(event?.scheduleSessions?.length > 1)) return config;
   let evidence;
   if (event && !(event.scheduleSessions?.length > 1)) {
     const formatUrl = `${ORIGIN}/events/format/${event.eventId}`;

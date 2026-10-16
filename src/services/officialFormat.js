@@ -88,7 +88,12 @@ async function refresh(db, c, config, actorId, client, pages = null) {
       });
     });
   }
+  let enriched = next;
+  if (plan.kind === 'split' && !next.scheduleSessions?.[1]) {
+    // Une formule J1/J2 peut avoir été découverte avant les horaires de la seconde journée.
+    enriched = await require('./ftlTournament').refreshSessions(db, c, next, actorId, client, { sessionsOnly: true });
+  }
   entries.set(key, { at: Date.now() });
-  return next;
+  return enriched;
 }
 module.exports = { ftl, engarde, readFtl, refresh };

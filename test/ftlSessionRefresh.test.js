@@ -211,3 +211,10 @@ test('principal publié sans date J2 : ne réutilise pas la date J1 pour fermer 
   assert.ok(out.matches.length > 0);
   assert.ok(out.matches.every((m) => m.startsAt === null));
 });
+
+test('les horaires J2 peuvent enrichir une formule split déjà connue', async () => {
+  const original = { ...config, preliminaryUntil: 'T64' };
+  const d = fake(original);
+  const next = await refreshSessions(d, { id: 21 }, original, 1, { get: async () => html() }, { sessionsOnly: true });
+  assert.equal(next.scheduleSessions.length, 2);
+});
