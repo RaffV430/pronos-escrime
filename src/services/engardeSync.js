@@ -275,12 +275,12 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
 }
 
 // Manifeste des tours : du premier tour publié jusqu'à la finale (exemptions exclues du premier tour).
-function manifest(rounds) {
+function manifest(rounds, { terminal = 'T2' } = {}) {
   const played = rounds.filter((r) => r.round !== 'Bronze' && r.expectedMatchCount > 0).sort((a, b) => b.size - a.size);
   if (!played.length) throw failure('Tableau sans rencontre publiée.');
   const first = played[0].size;
   const out = [];
-  for (let n = first; n >= 2; n /= 2)
+  for (let n = first; n >= Number(terminal.slice(1)); n /= 2)
     out.push({
       round: `T${n}`,
       previousRound: n === first ? null : `T${n * 2}`,
@@ -289,11 +289,31 @@ function manifest(rounds) {
   // Épreuve par équipes : match pour la 3e place après les demi-finales.
   if (rounds.some((r) => r.round === 'Bronze'))
     out.push({ round: 'Bronze', previousRound: 'T4', expectedMatchCount: 1 });
-  return validateManifest(out);
+  return validateManifest(out, { terminal });
 }
 
 async function observeTableau(c, config, pages, client, prev = null) {
   const { podiumFromResults } = require('./ftlSync');
+  if (pages.preliminary?.length) {
+    if (config.preliminaryUntil !== 'T64')
+      throw failure('Formule du tableau préliminaire non vérifiable : phases non mélangées.');
+    const observations = [];
+    observations.push(
+      await observeTableau(
+        c,
+        config,
+        { ...pages, preliminary: [], tableaus: pages.preliminary, final: null, phase: 'preliminary' },
+        client,
+        prev,
+      ),
+    );
+    const main = pages.tableaus.filter((url) => !pages.preliminary.includes(url));
+    if (main.length)
+      observations.push(
+        await observeTableau(c, config, { ...pages, preliminary: [], tableaus: main, phase: 'main' }, client, null),
+      );
+    return require('./ftlTableauPhases').combine(observations);
+  }
   const htmls = [],
     pageIssues = [];
   for (const url of pages.tableaus) {
@@ -315,7 +335,7 @@ async function observeTableau(c, config, pages, client, prev = null) {
   let day = prev;
   for (const r of [...parsed.rounds].sort((a, b) => b.size - a.size)) {
     day = nextDay(day, minutes(parsed.matches.filter((m) => m.round === r.round).map((m) => m.time)));
-    const forced = schedule.phaseDay(config, r.round);
+    const forced = schedule.phaseDay(config, pages.phase === 'preliminary' ? `J1:${r.round}` : r.round);
     if (forced && config.date) day = { ...day, offset: schedule.daysBetween(config.date, forced) };
     offsets.set(r.round, day.offset);
   }
@@ -335,7 +355,10 @@ async function observeTableau(c, config, pages, client, prev = null) {
         player2: m.player2,
         seed1: m.seed1,
         seed2: m.seed2,
-        startsAt: startsAt(config, m.time, offsets.get(m.round) || 0),
+        startsAt:
+          pages.phase === 'main' && !schedule.phaseDay(config, m.round)
+            ? null
+            : startsAt(config, m.time, offsets.get(m.round) || 0),
         strip: m.strip,
         winner: m.winner,
         score1: m.score1,
@@ -353,7 +376,7 @@ async function observeTableau(c, config, pages, client, prev = null) {
       return [];
     }
   });
-  const rounds = manifest(parsed.rounds);
+  const rounds = manifest(parsed.rounds, { terminal: pages.phase === 'preliminary' ? 'T64' : 'T2' });
   const issues = [...pageIssues, ...(parsed.issues || []), ...identityIssues];
   const warnings = issues.map((i) => i.message);
   let officialPodium = null,
@@ -370,8 +393,8 @@ async function observeTableau(c, config, pages, client, prev = null) {
       warnings.push(e.status ? e.message : 'Podium non vérifiable pour le moment.');
     }
   }
-  return {
-    sourceUrl: `${config.eventSourceUrl}/tableau`,
+  const observation = {
+    sourceUrl: `${config.eventSourceUrl}/tableau${pages.phase === 'preliminary' ? '/preliminary' : ''}`,
     matches,
     rounds,
     issues,
@@ -380,6 +403,7 @@ async function observeTableau(c, config, pages, client, prev = null) {
     warnings,
     checkedAt: new Date(),
   };
+  return pages.phase === 'preliminary' ? require('./ftlTableauPhases').preliminary(observation) : observation;
 }
 
 // Partie propre à engarde-service d'un contrôle ; la suite (résumé, classements, rythme) est commune.
@@ -400,6 +424,11 @@ async function control(db, c, config, actorId, claim, client) {
   const notes = [],
     rosterWarnings = [];
   const pages = E.competitionPages(await client.get(config.eventSourceUrl), linkOf(config));
+  try {
+    config = await require('./officialFormat').refresh(db, c, config, actorId, client, pages);
+  } catch (e) {
+    rosterWarnings.push(e.status ? e.message : 'Formule engarde non vérifiable pour le moment.');
+  }
   // Tirage publié la veille, avant l'appel : poules provisoires, fermées aux pronostics jusqu'à l'appel
   // (liste « présents ») ou, faute d'appel sur engarde, jusqu'au jour de l'épreuve.
   let provisional = false;

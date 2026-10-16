@@ -123,7 +123,9 @@ async function readEvent(event, client) {
     ...new Set(links.filter((u) => SOURCE.test(u) && SOURCE.exec(u)[2].toUpperCase() === event.eventId)),
   ];
   const tableaus = related.filter((u) => u.includes('/tableaus/'));
-  if (tableaus.length > 1 && !(event.scheduleSessions?.length > 1))
+  const eventFormat = await require('./officialFormat').readFtl({ ...event, eventTime }, page.html, client);
+  const phases = event.scheduleSessions?.length > 1 || eventFormat?.kind === 'split';
+  if (tableaus.length > 1 && !phases)
     throw failure('Plusieurs tableaux principaux : vérification individuelle nécessaire.');
   let roster = null;
   if (rosterSourceUrl) {
@@ -146,7 +148,15 @@ async function readEvent(event, client) {
       eventTime,
       rosterSourceUrl: rosterSourceUrl || null,
       sourceUrl: tableaus[0] || null,
-      ...(event.scheduleSessions?.length > 1 ? { tableauSources: tableaus } : {}),
+      ...(phases ? { tableauSources: tableaus } : {}),
+      ...(eventFormat
+        ? {
+            eventFormat,
+            ...(eventFormat.kind === 'split'
+              ? { preliminaryUntil: eventFormat.preliminaryUntil, formatSourceUrl: eventFormat.sourceUrl }
+              : {}),
+          }
+        : {}),
       poolSources: related.filter((u) => u.includes('/pools/')),
     },
     roster,
