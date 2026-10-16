@@ -166,3 +166,48 @@ test('tableau dames réel anonymisé : lecture J1:T128 et J1:T64 avec seule preu
   assert.ok(out.matches.every((m) => m.sourceKey.startsWith('J1:')));
   assert.equal(out.officialPodium, null);
 });
+test('principal publié sans date J2 : ne réutilise pas la date J1 pour fermer les pronostics', async () => {
+  const fs = require('node:fs'),
+    { load } = require('cheerio');
+  const table = fs.readFileSync(`${__dirname}/fixtures/ftl-team.html`, 'utf8');
+  const $ = load(table);
+  const roster = [
+    ...new Set(
+      $('.tbb,.tbbr')
+        .toArray()
+        .map((e) =>
+          $(e)
+            .find('.tcln,.tcfn')
+            .map((i, n) => $(n).text())
+            .get()
+            .join(' ')
+            .trim(),
+        )
+        .filter((n) => n && !n.includes('BYE')),
+    ),
+  ].map((name, i) => ({ name, id: String(i + 1) }));
+  const client = {
+    get: async (url) =>
+      url.endsWith('/trees')
+        ? [{ treeNum: 0, guid: 'C'.repeat(32), numTables: 1, name: 'Primary Tableau' }]
+        : url.includes('/tables/')
+          ? table
+          : format(''),
+  };
+  const c = {
+    name: config.name,
+    podiumFormat: 'INDIVIDUAL',
+    podiumRoster: roster,
+    rosterSourceUrl: `https://www.fencingtimelive.com/events/competitors/${id}`,
+  };
+  const out = await require('../src/services/ftlSync').observe(
+    c,
+    [],
+    client,
+    { ...config, preliminaryUntil: 'T64' },
+    true,
+  );
+  assert.ok(out.rounds.some((r) => r.round === 'T2'));
+  assert.ok(out.matches.length > 0);
+  assert.ok(out.matches.every((m) => m.startsAt === null));
+});
