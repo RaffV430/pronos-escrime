@@ -45,4 +45,7 @@ function combine(observations) {
     resultsSourceUrl: main[0]?.resultsSourceUrl || null,
   };
 }
-module.exports = { preliminary, combine };
+function enabled(config) {
+  return config?.scheduleSessions?.length > 1 || config?.preliminaryUntil === 'T64';
+}
+module.exports = { preliminary, combine, enabled };

@@ -59,7 +59,15 @@ test('ancienne configuration dames : récupère les deux sessions sans remplacer
 });
 test('un seul jour ne donne aucune permission de préliminaire', async () => {
   const db = fake();
-  assert.equal(await refreshSessions(db, { id: 21 }, config, 1, { get: async () => html(false) }), config);
+  assert.equal(
+    await refreshSessions(db, { id: 21 }, config, 1, {
+      get: async (url) =>
+        url === config.scheduleUrl
+          ? html(false).replace(' (Day 1)', '')
+          : format('Complete tableau of 128 fenced through the finals.'),
+    }),
+    config,
+  );
   assert.equal(db.writes.length, 0);
 });
 test('autre épreuve ou modification concurrente : aucune écriture', async () => {
@@ -75,4 +83,131 @@ test('autre épreuve ou modification concurrente : aucune écriture', async () =
     /Configuration modifiée/,
   );
   assert.equal(changed.writes.length, 0);
+});
+
+const format = (text, event = config.event) =>
+  `<span class="desktop tournName">${config.tournament}</span><span class="desktop eventName">${event}</span><span class="desktop eventTime"></span><div id="mainContent">${text}</div>`;
+const formula =
+  'Incomplete tableau of 128 fenced until 32 competitors remain. Complete tableau of 64 fenced through the finals.';
+test('formule officielle dames : préliminaire reconnu sans inventer une deuxième date', async () => {
+  const d = fake();
+  const next = await refreshSessions(d, { id: 21 }, config, 1, {
+    get: async (url) => (url === config.scheduleUrl ? html(false).replace(' (Day 1)', '') : format(formula)),
+  });
+  assert.equal(next.preliminaryUntil, 'T64');
+  assert.equal(next.scheduleSessions, undefined);
+  assert.equal(next.formatSourceUrl, `https://www.fencingtimelive.com/events/format/${id}`);
+  assert.equal(require('../src/services/ftlTableauPhases').enabled(next), true);
+  assert.deepEqual(next.poolSources, config.poolSources);
+  assert.equal(next.sourceUrl, config.sourceUrl);
+  assert.equal(d.writes.length, 1);
+  await refreshSessions(d, { id: 21 }, next, 1, { get: () => assert.fail('preuve déjà enregistrée') });
+});
+test('formule incomplète ou autre identité : pas de mode préliminaire', async () => {
+  const d = fake();
+  const get = (text) => async (url) => (url === config.scheduleUrl ? html(false).replace(' (Day 1)', '') : text);
+  assert.equal(
+    await refreshSessions(d, { id: 21 }, config, 1, {
+      get: get(format('Incomplete tableau of 128 fenced until 16 competitors remain.')),
+    }),
+    config,
+  );
+  await assert.rejects(
+    refreshSessions(d, { id: 21 }, config, 1, { get: get(format(formula, "Senior Men's Foil")) }),
+    /Identité/,
+  );
+  assert.equal(d.writes.length, 0);
+});
+test('tableau dames réel anonymisé : lecture J1:T128 et J1:T64 avec seule preuve de formule', async () => {
+  const fs = require('node:fs'),
+    { load } = require('cheerio');
+  const table = fs.readFileSync(`${__dirname}/fixtures/ftl-women-preliminary-anonymous.html`, 'utf8');
+  const $ = load(table);
+  const roster = [
+    ...new Set(
+      $('.tbb,.tbbr')
+        .toArray()
+        .map((e) =>
+          $(e)
+            .find('.tcln,.tcfn')
+            .map((i, n) => $(n).text())
+            .get()
+            .join(' ')
+            .trim(),
+        )
+        .filter((n) => n && !n.includes('BYE')),
+    ),
+  ].map((name, i) => ({ name, id: String(i + 1) }));
+  const guid = 'C'.repeat(32);
+  const page = format('');
+  const client = {
+    get: async (url) =>
+      url.endsWith('/trees')
+        ? [{ treeNum: 0, guid, numTables: 1, name: 'Primary Tableau' }]
+        : url.includes('/tables/')
+          ? table
+          : page,
+  };
+  const { observe } = require('../src/services/ftlSync');
+  const c = {
+    name: config.name,
+    rosterSourceUrl: `https://www.fencingtimelive.com/events/competitors/${id}`,
+    podiumRoster: roster,
+    podiumFormat: 'INDIVIDUAL',
+  };
+  await assert.rejects(observe(c, [], client, config, true), /derniers tours/);
+  const out = await observe(c, [], client, { ...config, preliminaryUntil: 'T64' }, true);
+  assert.deepEqual(
+    out.rounds.map((r) => r.round),
+    ['J1:T128', 'J1:T64'],
+  );
+  assert.equal(out.rounds.find((r) => r.round === 'J1:T64').expectedMatchCount, 32);
+  assert.equal(out.matches.filter((m) => m.round === 'J1:T64').length, 18);
+  assert.ok(out.matches.every((m) => m.sourceKey.startsWith('J1:')));
+  assert.equal(out.officialPodium, null);
+});
+test('principal publié sans date J2 : ne réutilise pas la date J1 pour fermer les pronostics', async () => {
+  const fs = require('node:fs'),
+    { load } = require('cheerio');
+  const table = fs.readFileSync(`${__dirname}/fixtures/ftl-team.html`, 'utf8');
+  const $ = load(table);
+  const roster = [
+    ...new Set(
+      $('.tbb,.tbbr')
+        .toArray()
+        .map((e) =>
+          $(e)
+            .find('.tcln,.tcfn')
+            .map((i, n) => $(n).text())
+            .get()
+            .join(' ')
+            .trim(),
+        )
+        .filter((n) => n && !n.includes('BYE')),
+    ),
+  ].map((name, i) => ({ name, id: String(i + 1) }));
+  const client = {
+    get: async (url) =>
+      url.endsWith('/trees')
+        ? [{ treeNum: 0, guid: 'C'.repeat(32), numTables: 1, name: 'Primary Tableau' }]
+        : url.includes('/tables/')
+          ? table
+          : format(''),
+  };
+  const c = {
+    name: config.name,
+    podiumFormat: 'INDIVIDUAL',
+    podiumRoster: roster,
+    rosterSourceUrl: `https://www.fencingtimelive.com/events/competitors/${id}`,
+  };
+  const out = await require('../src/services/ftlSync').observe(
+    c,
+    [],
+    client,
+    { ...config, preliminaryUntil: 'T64' },
+    true,
+  );
+  assert.ok(out.rounds.some((r) => r.round === 'T2'));
+  assert.ok(out.matches.length > 0);
+  assert.ok(out.matches.every((m) => m.startsAt === null));
 });
