@@ -444,7 +444,7 @@ async function refreshSessions(db, c, config, actorId, client) {
   await db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
     const previous = await configuration(tx, c.id);
-    if (JSON.stringify(previous) !== JSON.stringify(expected))
+    if (!require('node:util').isDeepStrictEqual(previous, expected))
       throw failure('Configuration modifiée pendant le contrôle.', 409);
     await tx.auditLog.create({
       data: {
