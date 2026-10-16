@@ -77,7 +77,9 @@ async function preview(db, input, actorId, client = createEngardeClient()) {
         entries = 0; // liste pas encore publiée
       }
     const eventId = `${e.org}/${e.tournamentSlug}/${e.compe}`;
-    const existing = await db.competition.findUnique({ where: { ftlEventId: engardeKey(eventId) } }).catch(() => null);
+    const existing =
+      (await db.competition.findUnique({ where: { ftlEventId: engardeKey(eventId) } }).catch(() => null)) ||
+      (await require('./engardeStages').existingAnchor(db, e));
     events.push({
       ...e,
       eventId,
@@ -173,6 +175,16 @@ async function save(db, input, actorId, client = createEngardeClient(), calendar
       const calendarLink = await require('./calendarSource').check(tx, calendarId, preview.sourceUrl);
       const keys = observations.map((o) => engardeKey(o.event.eventId));
       const existing = await tx.competition.findMany({ where: { ftlEventId: { in: keys } } });
+      const aliases = new Map();
+      for (const o of observations)
+        if (!existing.some((c) => c.ftlEventId === engardeKey(o.event.eventId))) {
+          const anchor = await require('./engardeStages').existingAnchor(tx, o.event);
+          if (anchor) {
+            if (!existing.some((c) => c.id === anchor.id))
+              existing.push(await tx.competition.findUnique({ where: { id: anchor.id } }));
+            aliases.set(o.event.eventId, anchor.id);
+          }
+        }
       const linked = await tx.tournament.findUnique({ where: { ftlSourceUrl: preview.sourceUrl } });
       const targetIds = [...new Set([...existing.map((c) => c.tournamentId), ...(linked ? [linked.id] : [])])];
       if (targetIds.length > 1)
@@ -186,13 +198,14 @@ async function save(db, input, actorId, client = createEngardeClient(), calendar
       const results = [];
       for (const { event, pages, roster } of observations) {
         const key = engardeKey(event.eventId);
-        let c = existing.find((x) => x.ftlEventId === key),
+        let c = existing.find((x) => x.ftlEventId === key || x.id === aliases.get(event.eventId)),
           created = !c;
         if (c && c.podiumFormat !== event.format) throw new E.EngardeError('Format existant différent.', 409);
         if (!c)
           c = await tx.competition.create({
             data: { name: event.event, tournamentId: tournament.id, podiumFormat: event.format, ftlEventId: key },
           });
+        if (c.ftlEventId !== key) c = await tx.competition.update({ where: { id: c.id }, data: { ftlEventId: key } });
         if (roster && !c.podiumRoster)
           c = await tx.competition.update({
             where: { id: c.id },

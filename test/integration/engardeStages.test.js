@@ -17,17 +17,26 @@ test(
   { skip },
   async () => {
     const { control } = require('../../src/services/engardeSync');
+    const { existingAnchor } = require('../../src/services/engardeStages');
+    const { configuration } = require('../../src/services/ftlConfiguration');
     const { parsePools } = require('../../src/services/engardeParser');
     const admin = await db.user.create({
       data: { email: 'stages@example.invalid', name: 'TEST', password: 'test', isAdmin: true },
     });
-    const tournament = await db.tournament.create({ data: { name: 'TEST WEEKEND' } });
+    const tournament = await db.tournament.create({
+      data: { name: 'TEST WEEKEND', ftlSourceUrl: 'https://engarde-service.com/tournament/heninbeaumont/seniorf1026' },
+    });
     for (const [gender, compe, rounds] of [
       ['Hommes', 'fh_samedi', 3],
       ['Dames', 'fd_samedi', 2],
     ]) {
       const c = await db.competition.create({
-        data: { name: `Fleuret ${gender} senior`, tournamentId: tournament.id, podiumFormat: 'INDIVIDUAL' },
+        data: {
+          name: `Fleuret ${gender} senior`,
+          ftlEventId: `ENGARDE:heninbeaumont/seniorf1026/${compe}`,
+          tournamentId: tournament.id,
+          podiumFormat: 'INDIVIDUAL',
+        },
       });
       const cfg = {
         provider: 'engarde',
@@ -41,7 +50,22 @@ test(
         timezone: 'Europe/Paris',
         eventSourceUrl: `https://engarde-service.com/competition/heninbeaumont/seniorf1026/${compe}`,
       };
-      const sources = [cfg.eventSourceUrl, cfg.eventSourceUrl.replace(compe, compe + '-national')];
+      let publishedCompe = gender === 'Hommes' ? 'fhs_samedi' : compe;
+      const sources = [
+        cfg.eventSourceUrl.replace(compe, publishedCompe),
+        cfg.eventSourceUrl.replace(compe, compe + '-national'),
+      ];
+      await db.auditLog.create({
+        data: {
+          actorId: admin.id,
+          action: 'Configuration FTL validée',
+          targetType: 'Competition',
+          targetId: c.id,
+          after: cfg,
+        },
+      });
+      const anchor = await existingAnchor(db, { ...cfg, compe: publishedCompe });
+      assert.equal(anchor?.id, c.id);
       const files = [
         {
           'tireurs.htm': rosterHtml(mennecyEntries()),
@@ -51,7 +75,7 @@ test(
       ];
       let main = false;
       const xml = () =>
-        `<?xml version="1.0"?><comps>${[0, ...(main ? [1] : [])].map((i) => `<comp org="heninbeaumont" evt="seniorf1026" compe="${i ? compe + '-national' : compe}" sexe="${gender === 'Hommes' ? 'm' : 'f'}" arme="f" estindividuelle="1" date="2026 10 ${i ? 18 : 17}" startTime="${i ? '08:00:00' : '10:00:00'}"><categorie>senior</categorie><titre>TEST</titre></comp>`).join('')}</comps>`;
+        `<?xml version="1.0"?><comps>${[0, ...(main ? [1] : [])].map((i) => `<comp org="heninbeaumont" evt="seniorf1026" compe="${i ? compe + '-national' : publishedCompe}" sexe="${gender === 'Hommes' ? 'm' : 'f'}" arme="f" estindividuelle="1" date="2026 10 ${i ? 18 : 17}" startTime="${i ? '08:00:00' : '10:00:00'}"><categorie>senior</categorie><titre>TEST</titre></comp>`).join('')}</comps>`;
       const client = () => ({
         competitions: async () => xml(),
         get: async (u) => {
@@ -66,8 +90,19 @@ test(
         },
       });
       const run = async () =>
-        control(db, await db.competition.findUnique({ where: { id: c.id } }), cfg, admin.id, { token: null }, client());
+        control(
+          db,
+          await db.competition.findUnique({ where: { id: c.id } }),
+          await configuration(db, c.id),
+          admin.id,
+          { token: null },
+          client(),
+        );
       await run();
+      assert.equal(
+        (await db.competition.findUnique({ where: { id: c.id } })).ftlEventId,
+        `ENGARDE:heninbeaumont/seniorf1026/${publishedCompe}`,
+      );
       const initial = await db.pool.findMany({
         where: { competitionId: c.id },
         include: { fencers: true },
@@ -123,6 +158,9 @@ test(
         ),
         all.map((p) => p.id),
       );
+      assert.deepEqual(await db.poolPrediction.findUnique({ where: { id: p.id } }), baseline);
+      publishedCompe += '-moved';
+      await assert.rejects(run(), /déplacée après import/);
       assert.deepEqual(await db.poolPrediction.findUnique({ where: { id: p.id } }), baseline);
       assert.equal(await db.competition.count({ where: { tournamentId: tournament.id } }), gender === 'Hommes' ? 1 : 2);
     }
