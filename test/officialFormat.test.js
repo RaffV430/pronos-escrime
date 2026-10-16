@@ -44,6 +44,14 @@ test('Engarde : vrais formats Grand Prix séparé et nationale continue, pas de 
   assert.equal(split.preliminaryUntil, 'T64');
   assert.equal(split.scheduleSessions, undefined);
   assert.equal(
+    F.engarde(
+      '<h1>TEST Dames</h1><p>Tableau préliminaire avec 32 qualifiées. Tableau principal de 64</p>',
+      { event: 'TEST Dames' },
+      'official',
+    ).kind,
+    'split',
+  );
+  assert.equal(
     F.engarde(fixture('national-formule.html'), { event: 'Epée Hommes Senior' }, 'official').kind,
     'continuous',
   );

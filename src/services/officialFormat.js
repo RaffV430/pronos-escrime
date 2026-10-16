@@ -26,7 +26,7 @@ function engarde(html, config, sourceUrl) {
     throw failure('La formule engarde ne correspond pas à cette épreuve.');
   const text = compact($('body').clone().find('script,style,nav,footer').remove().end().text());
   if (/repech/.test(text)) return null;
-  if (/tableau preliminaire/.test(text) && /32 qualifies/.test(text) && /tableau principal de 64/.test(text))
+  if (/tableau preliminaire/.test(text) && /32 qualifi(?:e|ee)s/.test(text) && /tableau principal de 64/.test(text))
     return { kind: 'split', preliminaryUntil: 'T64', mainRound: 'T64', sourceUrl };
   if (/tableau preliminaire|tableau principal/.test(text)) return null;
   if (/tableau direct/.test(text)) return { kind: 'continuous', sourceUrl };
