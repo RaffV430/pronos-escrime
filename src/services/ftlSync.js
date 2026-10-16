@@ -1031,13 +1031,29 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
       if (existing.some((m) => m.sourceUrl) || config.sourceUrl) {
         config = { ...config, nameAliases: await require('./ftlNameReview').aliases(db, c.id) };
         try {
-          let observation = await observe(
-            c,
-            existing.filter((m) => m.resultType !== 'CANCELLED'),
-            client,
-            config,
-            true,
-          );
+          let observation;
+          const read = () =>
+            observe(
+              c,
+              existing.filter((m) => m.resultType !== 'CANCELLED'),
+              client,
+              config,
+              true,
+            );
+          try {
+            observation = await read();
+          } catch (e) {
+            if (e.message !== 'Les derniers tours du tableau sont absents.' || config.scheduleSessions?.length > 1)
+              throw e;
+            const refreshed = await require('./ftlTournament').refreshSessions(db, c, config, actorId, client);
+            if (refreshed === config) throw e;
+            const { nameAliases, ...officialConfig } = refreshed;
+            config = {
+              ...(await require('./ftlTournament').discoverTableau(db, c, officialConfig, actorId, client)),
+              nameAliases,
+            };
+            observation = await read();
+          }
           const conflicts = planMatches(existing, observation, { allowPartial: true }).conflicts;
           if (
             conflicts.some((i) =>

@@ -422,6 +422,42 @@ async function discoverTableau(db, c, config, actorId, client) {
   });
   return next;
 }
+// An older pool-only setup may predate discovery of the two official sessions.
+// Upgrade only after an incomplete tableau, using the same schedule parser as tournament setup.
+async function refreshSessions(db, c, config, actorId, client) {
+  if (config.scheduleSessions?.length > 1 || !config.scheduleUrl) return config;
+  const url = scheduleUrl(config.scheduleUrl);
+  const schedule = parseSchedule(await client.get(url), url, config.timezone, config.city);
+  const event = schedule.events.find((e) => e.eventId === String(config.eventId).toUpperCase());
+  if (event && !(event.scheduleSessions?.length > 1)) return config;
+  if (
+    norm(schedule.tournament) !== norm(config.tournament) ||
+    !event ||
+    norm(event.event) !== norm(config.event) ||
+    event.date !== config.date ||
+    norm(event.time) !== norm(config.time) ||
+    event.format !== config.format
+  )
+    throw failure('Sessions officielles non concordantes : configuration conservée.');
+  const { nameAliases, ...expected } = config;
+  const next = { ...expected, scheduleSessions: event.scheduleSessions };
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
+    const previous = await configuration(tx, c.id);
+    if (JSON.stringify(previous) !== JSON.stringify(expected))
+      throw failure('Configuration modifiée pendant le contrôle.', 409);
+    await tx.auditLog.create({
+      data: {
+        actorId,
+        action: CONFIG,
+        targetType: 'Competition',
+        targetId: c.id,
+        after: next,
+      },
+    });
+  });
+  return { ...next, ...(nameAliases ? { nameAliases } : {}) };
+}
 async function refreshPending(db, c, config, actorId, client) {
   if (!config.eventSourceUrl || (c.podiumRoster && config.sourceUrl)) return { c, config };
   const observation = await readEvent(config, client);
@@ -445,6 +481,7 @@ module.exports = {
   preview,
   save,
   refreshPending,
+  refreshSessions,
   discoverTableau,
   rosterIsSubset,
 };
