@@ -201,7 +201,8 @@ async function observeSingle(c, existing, client, configured = null, loggedIn = 
       const mainPhase = config.allowPreliminary && parsed.rounds.some((r) => r.round === 'T2');
       const session = mainPhase ? config.scheduleSessions?.at(-1) : config.scheduleSessions?.[0];
       const forced = schedule.phaseDay(config, m.round) || session?.date;
-      if (forced && m.startsAt) m.startsAt = schedule.onDay(m.startsAt, forced, config.timezone);
+      if (mainPhase && config.preliminaryUntil === 'T64' && !forced) m.startsAt = null;
+      else if (forced && m.startsAt) m.startsAt = schedule.onDay(m.startsAt, forced, config.timezone);
     }
     matches.push(...parsed.matches);
     rounds.push(...parsed.rounds);
