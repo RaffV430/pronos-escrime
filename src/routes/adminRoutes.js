@@ -45,8 +45,7 @@ router.get(
 router.post(
   '/ftl/discovered-events/:tournamentId/:eventId/ignore',
   wrap(async (req, res) => {
-    const eventId = String(req.params.eventId).toUpperCase();
-    if (!/^[A-F0-9]{32}$/.test(eventId)) throw Object.assign(new Error('Épreuve invalide.'), { status: 400 });
+    const eventId = discovery.eventIdentity(req.params.eventId);
     res.json(await discovery.dismiss(prisma, id(req.params.tournamentId), eventId, req.user.userId));
   }),
 );

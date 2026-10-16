@@ -146,3 +146,103 @@ test('sans aperçu historique, premier passage établit une référence sans not
   assert.equal(alerts, 0);
   assert.equal(rows.get(D.PREFIX + 7).value.events[B].status, 'KNOWN');
 });
+
+const engardeXml = (extra = false, org = 'heninbeaumont') =>
+  `<?xml version="1.0"?><comps>${[['fhs_samedi', 'm', '17'], ['fd_samedi', 'f', '17'], ...(extra ? [['h_national', 'm', '18']] : [])].map(([compe, sexe, day]) => `<comp org="${org}" evt="seniorf1026" compe="${compe}" sexe="${sexe}" arme="f" estindividuelle="1" date="2026 10 ${day}" startTime="10:00:00" pays="FRA"><categorie>senior</categorie><titre>TEST</titre></comp>`).join('')}</comps>`;
+const et = {
+  id: 8,
+  name: 'TEST',
+  ftlSourceUrl: 'https://engarde-service.com/tournament/heninbeaumont/seniorf1026',
+  competitions: [{ id: 23, ftlEventId: 'ENGARDE:heninbeaumont/seniorf1026/fhs_samedi' }],
+};
+test('Engarde : source publique, IDs liés reconnus, reprise ancienne erreur, pas de connexion FTL ni import', async () => {
+  const { db, rows } = database();
+  const eid = 'heninbeaumont/seniorf1026/fhs_samedi';
+  db.auditLog.findFirst = async (q) => {
+    assert.equal(q.where.targetType, 'EngardePreview');
+    return { after: { events: [{ eventId: eid }] } };
+  };
+  rows.set(D.PREFIX + 8, { value: { events: {}, lastError: 'ancienne erreur' } });
+  let alerts = 0;
+  const notify = async (d, alert) => {
+    alerts++;
+    assert.match(alert.title, /Engarde/);
+    return { mail: 0 };
+  };
+  const client = {
+    login: () => assert.fail('aucun login FTL'),
+    get: () => assert.fail('aucune page FTL'),
+    engarde: { competitions: async () => engardeXml() },
+  };
+  await D.scan(db, et, cfg, client, now, notify);
+  let state = rows.get(D.PREFIX + 8).value;
+  assert.equal(state.lastError, null);
+  assert.equal(state.events[eid].status, 'ADDED');
+  const girls = 'heninbeaumont/seniorf1026/fd_samedi';
+  assert.equal(state.events[girls].status, 'PENDING');
+  assert.equal(alerts, 1);
+  await D.dismiss(db, 8, girls, 1);
+  await D.scan(db, et, cfg, client, new Date(+now + 3600000), notify);
+  assert.equal(rows.get(D.PREFIX + 8).value.events[girls].status, 'DISMISSED');
+  assert.equal(alerts, 1);
+  await D.scan(
+    db,
+    et,
+    cfg,
+    { engarde: { competitions: async () => engardeXml(false, 'other') } },
+    new Date(+now + 7200000),
+    notify,
+  );
+  state = rows.get(D.PREFIX + 8).value;
+  assert.ok(state.lastError);
+  assert.equal(state.leaseUntil, null);
+  assert.equal(state.events[eid].status, 'ADDED');
+  assert.equal(alerts, 1);
+});
+test('Engarde : dimanche Hénin rattaché à samedi, aucune nouvelle compétition proposée', async () => {
+  const { db, rows } = database();
+  db.auditLog.findFirst = async () => null;
+  const client = { engarde: { competitions: async () => engardeXml() } };
+  await D.scan(db, et, cfg, client, now, () => assert.fail('aucune alerte initiale'));
+  client.engarde.competitions = async () => engardeXml(true);
+  await D.scan(db, et, cfg, client, new Date(+now + 3600000), () => assert.fail('dimanche ne crée pas de doublon'));
+  assert.equal(Object.keys(rows.get(D.PREFIX + 8).value.events).length, 2);
+});
+test('identités FTL et Engarde valides seulement, y compris routes encodées par le client', () => {
+  assert.equal(D.eventIdentity(A.toLowerCase()), A);
+  assert.equal(D.eventIdentity('ENGARDE:HENINBEAUMONT/SENIORF1026/FD_SAMEDI'), 'heninbeaumont/seniorf1026/fd_samedi');
+  for (const id of ['a/b/c?x=1', 'a/b/c#x', 'a/../c', 'a/b/c/d', '', 'https://evil/a'])
+    assert.throws(() => D.eventIdentity(id), { status: 400 });
+});
+
+test('ancienne erreur Engarde hors fenêtre sportive : relire réellement puis arrêter les contrôles hors fenêtre', async () => {
+  const { db, rows } = database();
+  const error = 'Utilisez le lien SCHEDULE du tournoi FencingTimeLive, ou le lien du tournoi engarde-service.';
+  rows.set(D.PREFIX + 8, { value: { events: {}, lastError: error } });
+  db.tournament = { findMany: async () => [structuredClone(et)] };
+  db.auditLog.findFirst = async ({ where }) =>
+    where.action === 'Configuration FTL validée' ? { after: { timezone: 'Europe/Paris', date: '2026-11-07' } } : null;
+  let reads = 0;
+  const client = {
+    engarde: {
+      competitions: async () => {
+        reads++;
+        return engardeXml();
+      },
+    },
+  };
+  await D.watch(db, { now, force: true, client, notify: () => assert.fail('pas de nouvelle épreuve') });
+  assert.equal(reads, 1);
+  assert.equal(rows.get(D.PREFIX + 8).value.lastError, null);
+  await D.watch(db, { now: new Date(+now + 3600000), force: true, client });
+  assert.equal(reads, 1);
+});
+test('liste administrative : une épreuve Engarde déjà liée ne reste pas proposée', async () => {
+  const { db, rows } = database();
+  const eid = 'heninbeaumont/seniorf1026/fhs_samedi';
+  rows.set(D.PREFIX + 8, { key: D.PREFIX + 8, value: { events: { [eid]: { eventId: eid, status: 'PENDING' } } } });
+  db.appSetting.findMany = async () => [...rows.values()];
+  db.competition = { findMany: async () => et.competitions };
+  db.tournament = { findMany: async () => [et] };
+  assert.deepEqual((await D.list(db))[0].events, []);
+});
