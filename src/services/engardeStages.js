@@ -55,6 +55,14 @@ async function control(db, c, config, actorId, claim, client) {
   const published = await discover(config, client);
   const results = [];
   for (const session of published) {
+    const eventId = `ENGARDE:${session.org}/${session.tournamentSlug}/${session.compe}`;
+    const existing = await db.competition.findUnique({ where: { ftlEventId: eventId } });
+    if (existing && existing.id !== c.id)
+      throw new E.EngardeError(
+        'La journée est déjà importée dans une autre compétition : rapprochement manuel requis, aucun doublon créé.',
+      );
+  }
+  for (const session of published) {
     const sessionConfig = {
       ...config,
       date: session.date,

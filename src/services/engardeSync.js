@@ -20,20 +20,12 @@ const linkOf = (config) => ({ org: config.org, event: config.tournamentSlug, com
 // Engagés : nouveaux ajoutés, absents de la liste marqués inactifs (identifiants conservés pour les
 // pronostics), nation et rang mis à jour, noms corrigés suivis sans changer d'identifiant (poules et
 // rencontres prennent le nouveau nom).
-async function refreshRoster(db, c, url, client, html = null, retainMissing = false) {
+async function refreshRoster(db, c, url, client, html = null) {
   const observed = E.parseRoster(html ?? (await client.get(url)));
   const current = c.podiumRoster || [];
   let merged, renames;
   try {
     ({ merged, renames } = mergeRoster(current, observed));
-    if (retainMissing)
-      merged = merged.map((e) =>
-        e.active === false &&
-        current.some((old) => old.id === e.id && old.active !== false) &&
-        !observed.some((o) => norm(o.name) === norm(e.name))
-          ? { ...e, active: true }
-          : e,
-      );
   } catch (error) {
     if (error.status !== 409) throw error;
     await require('./identityReview').record(db, c, url, observed);
@@ -451,7 +443,7 @@ async function control(db, c, config, actorId, claim, client) {
   if (pages.roster) {
     try {
       const rosterHtml = await client.get(pages.roster);
-      c = await refreshRoster(db, c, pages.roster, client, rosterHtml, Boolean(config._stage));
+      c = await refreshRoster(db, c, pages.roster, client, rosterHtml);
       let dayStart = null;
       try {
         dayStart = localTime(config.date, 0, 0, config.timezone).getTime();
