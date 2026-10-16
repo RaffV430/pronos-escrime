@@ -1,6 +1,17 @@
 const { createClient, failure } = require('./ftlClient');
 const { parseSchedule, scheduleUrl } = require('./ftlTournament');
 const { configuration } = require('./ftlConfiguration');
+const E = require('./engardeParser');
+// Identité utilisée par l'aperçu : Engarde conserve ses trois segments, FTL son identifiant hexadécimal.
+function eventIdentity(value) {
+  const id = String(value || '');
+  if (/^[a-f0-9]{32}$/i.test(id)) return id.toUpperCase();
+  const raw = id.replace(/^ENGARDE:/i, '');
+  const link = E.parseLink(`${E.ORIGIN}/competition/${raw}`);
+  if (link && /^[a-z0-9][a-z0-9_-]{0,80}\/[a-z0-9][a-z0-9_-]{0,80}\/[a-z0-9][a-z0-9_-]{0,80}$/i.test(raw))
+    return `${link.org}/${link.event}/${link.compe}`;
+  throw failure('Épreuve invalide.', 400);
+}
 const PREFIX = 'ftl-discovery:';
 const INTERVAL = 3600000;
 let running = false,
@@ -65,31 +76,57 @@ async function scan(
   });
   if (!claimed) return;
   try {
-    const sourceUrl = scheduleUrl(tournament.ftlSourceUrl);
-    await client.login();
-    const parsed = parseSchedule(await client.get(sourceUrl), sourceUrl, config.timezone, config.city, {
-      allowUnknownTime: true,
-    });
+    const engarde = E.parseLink(tournament.ftlSourceUrl);
+    const sourceUrl = engarde
+      ? `${E.ORIGIN}/tournament/${engarde.org}/${engarde.event}`
+      : scheduleUrl(tournament.ftlSourceUrl);
+    let parsed;
+    if (engarde) {
+      const official = client.engarde || require('./engardeTournament').createEngardeClient();
+      const events = require('./engardeStages').canonicalEvents(
+        E.parseCompetitions(await official.competitions(engarde.org, engarde.event), {
+          org: engarde.org,
+          event: engarde.event,
+        }),
+      );
+      parsed = {
+        events: events.map((e) => ({
+          ...e,
+          eventId: `${e.org}/${e.tournamentSlug}/${e.compe}`,
+          timezone: e.timezone || config.timezone,
+        })),
+      };
+    } else {
+      await client.login();
+      parsed = parseSchedule(await client.get(sourceUrl), sourceUrl, config.timezone, config.city, {
+        allowUnknownTime: true,
+      });
+    }
     const linked = new Set(
       tournament.competitions
         .map((c) => c.ftlEventId)
         .filter(Boolean)
-        .map((s) => s.toUpperCase()),
+        .map(eventIdentity),
     );
     const fresh = await locked(db, tournament.id, async (state, tx) => {
       if (!state.initialized) {
         const previous = await tx.auditLog.findFirst({
           where: {
-            action: 'Aperçu tournoi FTL',
-            targetType: 'FtlTournamentPreview',
+            action: engarde ? 'Aperçu tournoi engarde-service' : 'Aperçu tournoi FTL',
+            targetType: engarde ? 'EngardePreview' : 'FtlTournamentPreview',
             after: { path: ['sourceUrl'], equals: sourceUrl },
           },
           orderBy: { id: 'desc' },
         });
         const baseline = previous?.after?.events || parsed.events;
-        for (const e of baseline)
-          if (/^[A-F0-9]{32}$/i.test(e.eventId || ''))
-            state.events[e.eventId.toUpperCase()] = { eventId: e.eventId.toUpperCase(), status: 'KNOWN' };
+        for (const e of baseline) {
+          try {
+            const eventId = eventIdentity(e.eventId);
+            state.events[eventId] = { eventId, status: 'KNOWN' };
+          } catch {
+            /* Ancienne référence mal formée : elle ne permet pas de masquer une découverte. */
+          }
+        }
         state.initialized = true;
       }
       const ids = reconcile(state, parsed.events, linked, now);
@@ -113,7 +150,7 @@ async function scan(
       let delivery;
       try {
         delivery = await notify(db, {
-          title: 'Nouvelle épreuve FTL à vérifier',
+          title: `Nouvelle épreuve ${engarde ? 'Engarde' : 'FTL'} à vérifier`,
           body: `${tournament.name} : ${e.event} · ${e.date} ${e.time || 'horaire non publié'} (${e.timezone}). À ajouter ou ignorer dans l’administration.`,
           tag: `ftl-new-${tournament.id}-${e.eventId}`,
           url: '/admin?panel=tournaments',
@@ -127,7 +164,7 @@ async function scan(
     }
   } catch (error) {
     await locked(db, tournament.id, (state) => {
-      state.lastError = error.status ? error.message : 'Calendrier FTL temporairement illisible.';
+      state.lastError = error.status ? error.message : 'Calendrier officiel temporairement illisible.';
     });
     if (manual) throw error;
   } finally {
@@ -164,8 +201,17 @@ async function watch(db, { now = new Date(), client = createClient(), notify, fo
         !dates.length ||
         now.getTime() < Math.min(...dates) - 7 * 86400000 ||
         now.getTime() > Math.max(...dates) + 7 * 86400000
-      )
-        continue;
+      ) {
+        // Réparer aussi l'ancienne fausse alerte FTL sur Engarde hors fenêtre sportive.
+        const previous = E.parseLink(t.ftlSourceUrl)
+          ? await db.appSetting.findUnique({ where: { key: keyFor(t.id) } })
+          : null;
+        if (
+          previous?.value?.lastError !==
+          'Utilisez le lien SCHEDULE du tournoi FencingTimeLive, ou le lien du tournoi engarde-service.'
+        )
+          continue;
+      }
       await scan(db, t, config, client, now, notify);
     }
   } finally {
@@ -176,7 +222,7 @@ async function list(db) {
   const rows = await db.appSetting.findMany({ where: { key: { startsWith: PREFIX } } });
   const linked = new Set(
     (await db.competition.findMany({ where: { ftlEventId: { not: null } }, select: { ftlEventId: true } })).map((c) =>
-      c.ftlEventId.toUpperCase(),
+      eventIdentity(c.ftlEventId),
     ),
   );
   const tournaments = await db.tournament.findMany({
@@ -234,4 +280,4 @@ async function checkNow(db, tournamentId, client = createClient(), notify) {
   );
   return { checked: true };
 }
-module.exports = { checkNow, watch, scan, reconcile, list, dismiss, INTERVAL, PREFIX };
+module.exports = { eventIdentity, checkNow, watch, scan, reconcile, list, dismiss, INTERVAL, PREFIX };
