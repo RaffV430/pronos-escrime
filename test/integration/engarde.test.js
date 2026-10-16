@@ -79,6 +79,7 @@ test('engarde-service : tournoi créé vide, puis engagés, poules, tableau et p
       if (!stage.published.includes(file)) throw Object.assign(new Error('absent'), { status: 404 });
       return {
         'tireurs.htm': roster.html,
+        'formule.htm': '<h1>IDF 1 FDM20</h1><p>Tableau direct</p>',
         'poules1.htm': stage.pools,
         'poules2.htm': stage.pools2,
         'tableau16.htm': fixture('fdm20-tableau16.html'),
@@ -164,6 +165,8 @@ test('engarde-service : tournoi créé vide, puis engagés, poules, tableau et p
   stage.published.push('tableau16.htm', 'clasfinal.htm');
   summary = await run();
   assert.deepEqual(summary.warnings, []);
+  const phaseConfig = await require('../../src/services/ftlConfiguration').configuration(prisma, id);
+  assert.equal(phaseConfig.eventFormat.kind, 'continuous');
   const matches = await prisma.match.findMany({ where: { competitionId: id } });
   assert.equal(matches.length, 15);
   const first = matches.find((m) => m.sourceKey === 'T16:1');

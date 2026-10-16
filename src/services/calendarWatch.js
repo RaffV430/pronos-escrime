@@ -145,6 +145,11 @@ function candidates(entry, { ftl = [], engarde = [] }) {
         country: String(t.ioc_country_code || t.ioc_competition || '').toUpperCase(),
         sourceUrl: `https://engarde-service.com/tournament/${t.org}/${t.ev}`,
       });
+  if (entry.officialSourceUrl && !found.some((s) => s.sourceUrl === entry.officialSourceUrl)) {
+    const link = require('./engardeParser').parseLink(entry.officialSourceUrl);
+    if (link?.kind === 'tournament')
+      found.push({ provider: 'engarde', name: entry.label, country: 'FRA', sourceUrl: link.url });
+  }
   return found;
 }
 
@@ -156,13 +161,19 @@ async function ftlList(client, now) {
   return Array.isArray(data) ? data : [];
 }
 async function engardeList(client) {
-  const text = await client.get('/prog/getTournoisForDisplay.php');
-  try {
-    const data = JSON.parse(text);
-    return Array.isArray(data?.events) ? data.events : [];
-  } catch {
-    return [];
-  }
+  const out = [];
+  const read = (text) => (typeof text === 'string' ? JSON.parse(text) : text);
+  const recent = read(await client.get('/prog/getTournoisForDisplay.php'));
+  if (Array.isArray(recent?.events)) out.push(...recent.events);
+  if (client.tournaments)
+    for (let page = 1; page <= 10; page++) {
+      const data = read(await client.tournaments(page, 'next'));
+      if (!Array.isArray(data?.events)) throw new Error('Liste des prochains tournois engarde illisible.');
+      out.push(...data.events);
+      if (!data.events.length || page >= Number(data.last || 1)) break;
+      if (page === 10) throw new Error('Liste engarde tronquée : plus de dix pages à vérifier.');
+    }
+  return [...new Map(out.map((e) => [e.org + '/' + e.ev, e])).values()];
 }
 
 // Fuseau du lieu d'après le pays de la source officielle (code CIO), sinon géocodage de la ville.
@@ -291,15 +302,7 @@ async function watchPass(db, deps = {}) {
           tournamentId = c?.tournamentId || null;
         }
         if (tournamentId && known.get(entry.id)?.tournamentId !== tournamentId) {
-          await db.auditLog.create({
-            data: {
-              actorId: admin.id,
-              action: LINKED,
-              targetType: 'CalendarEvent',
-              targetId: tournamentId,
-              after: { calendarId: entry.id, tournamentId, sourceUrl: source.sourceUrl, provider: source.provider },
-            },
-          });
+          await require('./calendarSource').linkExisting(db, entry.id, source.sourceUrl, tournamentId, admin.id);
           known.set(entry.id, { calendarId: entry.id, tournamentId, sourceUrl: source.sourceUrl });
         }
       } catch (e) {
@@ -392,7 +395,7 @@ async function upcoming(db, now = Date.now()) {
       .sort();
     return {
       ...e,
-      ...(days.length && !e.globalDates ? { start: days[0], end: days.at(-1) } : {}),
+      ...(days.length && !e.globalDates && !e.poolStages ? { start: days[0], end: days.at(-1) } : {}),
       tournamentId: t.id,
       tournamentName: t.name,
       competitionIds: mine.map((c) => c.id),
@@ -463,4 +466,16 @@ function startWorker(db, every = 3 * 3600000) {
   };
 }
 
-module.exports = { events, classify, wanted, sameCity, sameDates, candidates, due, watch, upcoming, startWorker };
+module.exports = {
+  events,
+  classify,
+  wanted,
+  sameCity,
+  sameDates,
+  candidates,
+  due,
+  watch,
+  upcoming,
+  startWorker,
+  engardeList,
+};

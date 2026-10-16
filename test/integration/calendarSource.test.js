@@ -43,3 +43,35 @@ test(
     assert.deepEqual(await db.prediction.findUnique({ where: { id: p.id } }), p);
   },
 );
+test(
+  'Hénin : rattacher le tournoi existant une seule fois, garder les deux journées et ses compétitions',
+  { skip },
+  async () => {
+    const source = 'https://engarde-service.com/tournament/heninbeaumont/seniorf1026';
+    const calendarId = '2026-10-17-henin-beaumont-senior-ind';
+    const u = await db.user.create({ data: { name: 'TEST', email: 'henin-link@example.invalid', password: 'test' } });
+    const t = await db.tournament.create({ data: { name: 'TEST HENIN', ftlSourceUrl: source } });
+    const c = await db.competition.create({ data: { name: 'Fleuret Hommes senior', tournamentId: t.id } });
+    await db.auditLog.create({
+      data: {
+        actorId: u.id,
+        action: 'Configuration FTL validée',
+        targetType: 'Competition',
+        targetId: c.id,
+        after: { date: '2026-10-17' },
+      },
+    });
+    await Promise.all([
+      S.linkExisting(db, calendarId, source, t.id, u.id),
+      S.linkExisting(db, calendarId, source, t.id, u.id),
+    ]);
+    assert.equal(await db.auditLog.count({ where: { action: 'Calendrier : tournoi relié', targetId: t.id } }), 1);
+    const listed = await require('../../src/services/calendarWatch').upcoming(db, Date.parse('2026-10-16T12:00Z'));
+    const entry = listed.find((e) => e.id === calendarId);
+    assert.deepEqual(
+      [entry.tournamentId, entry.start, entry.end, entry.competitionIds],
+      [t.id, '2026-10-17', '2026-10-18', [c.id]],
+    );
+    await assert.rejects(S.linkExisting(db, calendarId, 'https://other.invalid', t.id, u.id), /Source/);
+  },
+);

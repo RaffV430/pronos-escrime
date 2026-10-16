@@ -1000,6 +1000,11 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
       ));
     } else {
       await client.login();
+      try {
+        config = await require('./officialFormat').refresh(db, c, config, actorId, client);
+      } catch (e) {
+        discoveryWarning = e.status ? e.message : 'Formule officielle non vérifiable pour le moment.';
+      }
       // Lecture de la page d'épreuve (tableau pas encore publié) : un échec ne doit pas bloquer les poules.
       try {
         ({ c, config } = await require('./ftlTournament').refreshPending(db, c, config, actorId, client));

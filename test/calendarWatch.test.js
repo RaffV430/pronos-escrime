@@ -84,6 +84,13 @@ test('tournois candidats : même ville (alias compris) et dates qui se recouvren
 test('surveillance : seules les épreuves voulues sont ajoutées, le lien est noté, les admins prévenus', async () => {
   const logs = [];
   const db = {
+    $transaction: async (fn) => fn(db),
+    $queryRaw: async () => [],
+    tournament: {
+      findUnique: async () => ({
+        ftlSourceUrl: `https://www.fencingtimelive.com/tournaments/eventSchedule/${'C'.repeat(32)}`,
+      }),
+    },
     user: { findFirst: async () => ({ id: 1 }), findMany: async () => [] },
     auditLog: {
       findMany: async () => [],
@@ -137,6 +144,13 @@ test('surveillance : seules les épreuves voulues sont ajoutées, le lien est no
 test('surveillance : une épreuve illisible n’empêche pas l’ajout des autres', async () => {
   const logs = [];
   const db = {
+    $transaction: async (fn) => fn(db),
+    $queryRaw: async () => [],
+    tournament: {
+      findUnique: async () => ({
+        ftlSourceUrl: `https://www.fencingtimelive.com/tournaments/eventSchedule/${'C'.repeat(32)}`,
+      }),
+    },
     user: { findFirst: async () => ({ id: 1 }), findMany: async () => [] },
     auditLog: { findMany: async () => [], create: async ({ data }) => (logs.push(data), data) },
     competition: { findUnique: async () => null },
@@ -176,6 +190,13 @@ test('surveillance : une épreuve illisible n’empêche pas l’ajout des autre
 test('calendrier public : chaque entrée garde ses propres épreuves et leurs vraies dates', async () => {
   const link = (calendarId) => ({ after: { calendarId, tournamentId: 4 }, createdAt: new Date() });
   const db = {
+    $transaction: async (fn) => fn(db),
+    $queryRaw: async () => [],
+    tournament: {
+      findUnique: async () => ({
+        ftlSourceUrl: `https://www.fencingtimelive.com/tournaments/eventSchedule/${'C'.repeat(32)}`,
+      }),
+    },
     auditLog: {
       findMany: async ({ where }) =>
         where.action === 'Calendrier : tournoi relié'
@@ -210,6 +231,13 @@ test('calendrier public : chaque entrée garde ses propres épreuves et leurs vr
 test('calendrier : tournoi préparé hors sélection FFE, sessions exactes et configuration récente', async () => {
   let poolRows = [];
   const db = {
+    $transaction: async (fn) => fn(db),
+    $queryRaw: async () => [],
+    tournament: {
+      findUnique: async () => ({
+        ftlSourceUrl: `https://www.fencingtimelive.com/tournaments/eventSchedule/${'C'.repeat(32)}`,
+      }),
+    },
     pool: { findMany: async () => poolRows },
     tournament: {
       findMany: async ({ where }) => {
@@ -300,6 +328,13 @@ test('60 choix conservés, regroupements uniques et dates globales non inventée
 test('un championnat lié conserve sa plage globale malgré une seule épreuve datée', async () => {
   const e = C.events().find((e) => e.city === 'Ankara');
   const db = {
+    $transaction: async (fn) => fn(db),
+    $queryRaw: async () => [],
+    tournament: {
+      findUnique: async () => ({
+        ftlSourceUrl: `https://www.fencingtimelive.com/tournaments/eventSchedule/${'C'.repeat(32)}`,
+      }),
+    },
     auditLog: {
       findMany: async ({ where }) =>
         where.targetType === 'CalendarEvent'
@@ -336,6 +371,13 @@ test('ajouts tardifs : même source relue au passage suivant, autre plateforme s
     late = false,
     previews = 0;
   const db = {
+    $transaction: async (fn) => fn(db),
+    $queryRaw: async () => [],
+    tournament: {
+      findUnique: async () => ({
+        ftlSourceUrl: ftlUrl,
+      }),
+    },
     user: { findFirst: async () => ({ id: 1 }), findMany: async () => [] },
     auditLog: {
       findMany: async () => logs.map((data) => ({ ...data, createdAt: new Date() })),

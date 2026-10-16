@@ -157,6 +157,7 @@ function competitionPages(html, link) {
     const url = ORIGIN + href;
     if (file === 'tireurs.htm' || file === 'equipes.htm') pages.roster = url;
     else if (/^poules\d+\.htm$/.test(file)) pages.pools.push(url);
+    else if (file === 'formule.htm') pages.format = url;
     else if (/^tableau[\w-]*\.htm$/i.test(file)) tableaus.push({ file, url, label: clean($(a).text()) });
     else if (file === 'clasfinal.htm') pages.final = url;
   });
@@ -166,8 +167,12 @@ function competitionPages(html, link) {
   pages.tableaus = (
     pages.repechage
       ? tableaus.filter((t) => /tableau final/i.test(t.label))
-      : tableaus.filter((t) => /^tableau[\d-]+\.htm$/.test(t.file))
+      : tableaus.filter((t) => /^tableau(?:[\d-]+|Preliminaire)\.htm$/i.test(t.file))
   ).map((t) => t.url);
+  const preliminary = tableaus
+    .filter((t) => /pr[eé]liminaire/i.test(t.label) || /preliminaire/i.test(t.file))
+    .map((t) => t.url);
+  if (preliminary.length) pages.preliminary = preliminary;
   return pages;
 }
 
@@ -464,7 +469,7 @@ function parseFinalRanking(html) {
 // ---- Tableau : grille HTML → matchs par tour (géométrie des lignes, comme la page officielle) ----
 function roundOf(title) {
   const t = norm(title);
-  const n = /tableau (?:final )?de (\d+)/.exec(t)?.[1];
+  const n = /tableau (?:(?:final|pr[eé]liminaire|principal) )?de (\d+)/.exec(t)?.[1];
   if (n) return `T${n}`;
   if (/demi/.test(t)) return 'T4';
   if (/^finale?$/.test(t) || t === 'finales') return 'T2';

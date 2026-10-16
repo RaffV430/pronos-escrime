@@ -40,6 +40,11 @@ function createEngardeClient({ http = axios } = {}) {
   }
   return {
     get: (path) => request(path),
+    tournaments: (page = 1, option = 'next') =>
+      request('/prog/getTournoisForDisplay.php', {
+        method: 'POST',
+        data: new URLSearchParams({ page: String(page), option }),
+      }),
     competitions: (org, event) =>
       request('/prog/getCompeForDisplay.php', {
         method: 'POST',
@@ -58,7 +63,8 @@ async function preview(db, input, actorId, client = createEngardeClient()) {
     event: link.event,
   });
   // Lien d'une épreuve : seule cette épreuve est proposée.
-  const selected = link.kind === 'competition' ? all.filter((e) => e.compe === link.compe) : all;
+  const canonical = require('./engardeStages').canonicalEvents(all);
+  const selected = link.kind === 'competition' ? canonical.filter((e) => e.compe === link.compe) : canonical;
   if (!selected.length) throw new E.EngardeError('Épreuve absente de la liste officielle du tournoi.', 404);
   const events = [];
   for (const e of selected) {
