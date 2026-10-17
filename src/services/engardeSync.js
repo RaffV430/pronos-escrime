@@ -11,7 +11,7 @@ const { localTime } = require('./localTime');
 const { validateManifest } = require('./roundManifest');
 const { norm } = require('./ftlParser');
 const { failure } = require('./ftlClient');
-const { mergeRoster, entryFor } = require('./engardeRoster');
+const { mergeRoster, entryFor, overlapsPool } = require('./engardeRoster');
 
 const linkOf = (config) => ({ org: config.org, event: config.tournamentSlug, compe: config.compe });
 
@@ -195,6 +195,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
       observedAll.filter((o) => !o.error),
       c.podiumRoster,
       label,
+      (roster, row) => entryFor(roster, row.name, row.club),
     );
     if (plan) {
       if (leaseToken) await db.$transaction((tx) => require('./ftlScheduler').assertClaim(tx, c.id, leaseToken));
@@ -224,9 +225,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
         // les poules de ce tour et celles saisies à la main.
         if (
           pools.some(
-            (p) =>
-              (!p.sourceUrl || p.sourceUrl === url) &&
-              p.fencers.some((f) => observed.rows.some((r) => norm(r.name) === norm(f.name))),
+            (p) => (!p.sourceUrl || p.sourceUrl === url) && overlapsPool(p, observed, observedAll, c.podiumRoster, url),
           )
         )
           throw failure(`${label(observed.number)} déjà présente sans correspondance de source certaine.`);
