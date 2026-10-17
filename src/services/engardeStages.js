@@ -11,10 +11,33 @@ function profile(config) {
   const rounds = entry.poolStages.qualificationRounds[gender];
   return rounds ? { ...entry.poolStages, rounds, calendarId: entry.id, source } : null;
 }
+// Certains organisateurs dupliquent une fiche sans corriger le champ sexe.
+// Pour les formules multi-journées validées, un titre explicite et concordant
+// sur l'arme et la catégorie départage les sessions ; aucune URL n'est déduite.
+function sessionIdentity(event) {
+  if (!profile(event) || !event.title) return event;
+  const classify = require('./calendarWatch').classify;
+  const title = classify(event.title),
+    structured = classify(event.event);
+  const genders = ['Dames', 'Hommes', 'Mixte'];
+  const explicit = genders.filter((gender) => new RegExp(`\\b${gender}\\b`, 'i').test(event.title));
+  if (
+    explicit.length !== 1 ||
+    !title.weapon ||
+    title.weapon !== structured.weapon ||
+    !title.category ||
+    title.category !== structured.category
+  )
+    return event;
+  const gender = explicit[0];
+  return { ...event, gender, event: event.event.replace(/\b(Dames|Hommes|Mixte)\b/i, gender) };
+}
 function sessions(config, published) {
   const plan = profile(config);
   if (!plan) return null;
-  const same = published.filter((e) => norm(e.event) === norm(config.event) && e.format === config.format);
+  const same = published
+    .map(sessionIdentity)
+    .filter((e) => norm(e.event) === norm(config.event) && e.format === config.format);
   const at = (date) => same.filter((e) => e.date === date);
   const qualification = at(plan.qualificationDate),
     main = at(plan.mainDate);
@@ -26,6 +49,7 @@ function sessions(config, published) {
   ];
 }
 function canonicalEvents(events) {
+  events = events.map(sessionIdentity);
   return events.filter((event) => {
     const plan = profile(event);
     if (!plan || event.date !== plan.mainDate) return true;

@@ -52,3 +52,23 @@ test('recherche Engarde : prochains tournois paginés au-delà des vingt résult
   ]);
   assert.equal(found.length, 2);
 });
+
+test('titre dames explicite départage les deux sessions dimanche malgré un champ sexe copié', () => {
+  const h = event(),
+    d = event({ event: 'Fleuret Dames senior', compe: 'fd_samedi' });
+  const hd = event({ date: '2026-10-18', compe: 'national-h', title: 'Senior Fleuret Hommes' });
+  const dd = event({ date: '2026-10-18', compe: 'national-d', title: 'Senior Fleuret Dames' });
+  const rows = [h, d, hd, dd];
+  const before = structuredClone(rows);
+  assert.equal(S.sessions(h, rows)[1].compe, 'national-h');
+  const women = S.sessions(d, rows)[1];
+  assert.equal(women.compe, 'national-d');
+  assert.equal(women.roundOffset, 2);
+  assert.equal(women.event, d.event);
+  assert.deepEqual(S.canonicalEvents(rows), [h, d]);
+  assert.deepEqual(rows, before, 'ne modifie ni les sources ni les objets existants');
+  assert.throws(() => S.sessions(h, [h, d, hd, { ...dd, title: 'Fleuret' }]), /ambigu/);
+  assert.throws(() => S.sessions(h, [h, d, hd, { ...dd, title: 'Senior Épée Dames' }]), /ambigu/);
+  assert.throws(() => S.sessions(h, [h, d, hd, { ...dd, title: 'Senior Fleuret Dames Hommes' }]), /ambigu/);
+  assert.throws(() => S.sessions(h, [...rows, { ...hd, compe: 'duplicate' }]), /ambigu/);
+});
