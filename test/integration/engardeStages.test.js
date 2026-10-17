@@ -75,7 +75,7 @@ test(
       ];
       let main = false;
       const xml = () =>
-        `<?xml version="1.0"?><comps>${[0, ...(main ? [1] : [])].map((i) => `<comp org="heninbeaumont" evt="seniorf1026" compe="${i ? compe + '-national' : publishedCompe}" sexe="${gender === 'Hommes' ? 'm' : 'f'}" arme="f" estindividuelle="1" date="2026 10 ${i ? 18 : 17}" startTime="${i ? '08:00:00' : '10:00:00'}"><categorie>senior</categorie><titre>TEST</titre></comp>`).join('')}</comps>`;
+        `<?xml version="1.0"?><comps>${[0, ...(main ? [1] : [])].map((i) => `<comp org="heninbeaumont" evt="seniorf1026" compe="${i ? compe + '-national' : publishedCompe}" sexe="${i ? 'm' : gender === 'Hommes' ? 'm' : 'f'}" arme="f" estindividuelle="1" date="2026 10 ${i ? 18 : 17}" startTime="${i ? '08:00:00' : '10:00:00'}"><categorie>senior</categorie><titre>Senior Fleuret ${gender}</titre></comp>`).join('')}</comps>`;
       const client = () => ({
         competitions: async () => xml(),
         get: async (u) => {
