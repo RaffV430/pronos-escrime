@@ -29,6 +29,25 @@ function health(state, competition, now = Date.now()) {
   };
 }
 
+// Une configuration sans premier passage, ou un état arrêté, doit être visible même sans erreur réseau.
+function trackingIssue(state, competition, config, now) {
+  if (
+    !config ||
+    competition.podiumResolvedAt ||
+    !competition.createdAt ||
+    now - +new Date(competition.createdAt) <= LATE_MS ||
+    state?.status === 'RUNNING'
+  )
+    return null;
+  const start = require('./eventStart').eventStart(config);
+  if (!start || now < start) return null;
+  if (!state) return 'Épreuve configurée mais aucun suivi automatique enregistré.';
+  if (state.nextAutomaticAt === null && state.status !== 'COMPLETE')
+    return 'Suivi arrêté : aucun prochain contrôle programmé.';
+  if (state.status === 'COMPLETE') return 'Suivi déclaré terminé sans podium résolu : vérification nécessaire.';
+  return null;
+}
+
 // Un horaire de match importé est une preuve officielle ; ne jamais déduire J2 de J1 + un jour.
 function waitingForJ2(competition, config, now) {
   const matches = (competition.matches || []).filter((m) => m.resultType !== 'CANCELLED');
@@ -58,6 +77,8 @@ async function syncHealth(db, now = Date.now()) {
     select: {
       id: true,
       name: true,
+      createdAt: true,
+      podiumResolvedAt: true,
       tournament: { select: { name: true } },
       matches: { select: { round: true, isFinished: true, startsAt: true, liveDetectedAt: true, resultType: true } },
       pools: { select: { isFinal: true } },
@@ -76,25 +97,37 @@ async function syncHealth(db, now = Date.now()) {
     distinct: ['targetId', 'action'],
     select: { targetId: true, action: true, after: true },
   });
-  const rows = competitions.map((c) => ({
-    ...health(
-      states.find((s) => s.competitionId === c.id),
-      c,
-      now,
-    ),
-    waitingForJ2: waitingForJ2(
+  const rows = competitions.map((c) => {
+    const state = states.find((s) => s.competitionId === c.id);
+    const issue = trackingIssue(
+      state,
       c,
       controls.find((a) => a.targetId === c.id && a.action === 'Configuration FTL validée')?.after,
       now,
-    ),
-    warnings: [
-      ...new Set(
-        (
-          controls.find((a) => a.targetId === c.id && a.action !== 'Configuration FTL validée')?.after?.warnings || []
-        ).filter((w) => typeof w === 'string'),
+    );
+    return {
+      ...health(
+        states.find((s) => s.competitionId === c.id),
+        c,
+        now,
       ),
-    ],
-  }));
+      ...(issue
+        ? { level: state?.status === 'ERROR' ? 'error' : 'warning', lastError: state?.lastError || issue }
+        : {}),
+      waitingForJ2: waitingForJ2(
+        c,
+        controls.find((a) => a.targetId === c.id && a.action === 'Configuration FTL validée')?.after,
+        now,
+      ),
+      warnings: [
+        ...new Set(
+          (
+            controls.find((a) => a.targetId === c.id && a.action !== 'Configuration FTL validée')?.after?.warnings || []
+          ).filter((w) => typeof w === 'string'),
+        ),
+      ],
+    };
+  });
   return {
     workerEnabled: process.env.FTL_AUTO_SYNC === 'true',
     // Canaux d'alerte des administrateurs : sans e-mail, seules les notifications arrivent.
@@ -445,3 +478,5 @@ module.exports = {
 };
 
 module.exports.waitingForJ2 = waitingForJ2;
+
+module.exports.trackingIssue = trackingIssue;

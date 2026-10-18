@@ -134,7 +134,17 @@ async function control(db, c, config, actorId, claim, client) {
     c = result.c;
     results.push(result);
   }
-  const poolSummary = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [], notes: [] };
+  const poolSummary = {
+    checked: 0,
+    locks: 0,
+    finalized: 0,
+    changed: 0,
+    pointsUpdated: 0,
+    warnings: [],
+    notes: [],
+    expectedPools: 0,
+    coverageComplete: true,
+  };
   const summary = {
     createdIds: [],
     created: 0,
@@ -149,6 +159,8 @@ async function control(db, c, config, actorId, claim, client) {
   for (const r of results) {
     for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated'])
       poolSummary[k] += r.poolSummary[k] || 0;
+    poolSummary.expectedPools += r.poolSummary.expectedPools || 0;
+    poolSummary.coverageComplete &&= r.poolSummary.coverageComplete !== false;
     poolSummary.warnings.push(...(r.poolSummary.warnings || []));
     poolSummary.notes.push(...(r.poolSummary.notes || []));
     for (const k of ['created', 'results', 'corrections', 'pointsUpdated', 'checked']) summary[k] += r.summary[k] || 0;
