@@ -574,6 +574,7 @@ function tableauMatches(grid, { allowPartial = false } = {}) {
       if (Number.isSafeInteger(place) && place > 0) places.set(c.text, place);
     }
   const matches = [];
+  const byes = [];
   const rounds = [];
   const issues = [];
   for (const zone of kept) {
@@ -593,7 +594,12 @@ function tableauMatches(grid, { allowPartial = false } = {}) {
       const [a, b] = [entrants[i], entrants[i + 1]];
       const between = (c) => c.row >= a.row && c.row <= b.row;
       const position = i / 2 + 1;
-      if (!a.text || !b.text) continue; // exemption : pas de match
+      if (!a.text || !b.text) {
+        const alone = a.text ? a : b.text ? b : null;
+        if (alone && zone === entry)
+          byes.push({ round, pos: position, name: alone.text, club: clubs.get(alone.text) || null });
+        continue; // exemption : pas de match ni de score
+      }
       real++;
       const winnerCell = cells.find((c) => c.col === next && c.role === 'fencer' && between(c));
       const scoreCell = cells.find((c) => c.col === next && c.role === 'score' && between(c));
@@ -668,19 +674,27 @@ function tableauMatches(grid, { allowPartial = false } = {}) {
       previousRound: null,
     });
   }
-  return { matches, rounds, places, issues };
+  return { matches, rounds, places, issues, byes };
 }
 
 // Plusieurs pages de tableau (T128-32, T16…) : réunies par tour, sans doublon.
 function parseTableaus(pages, options = {}) {
   const byKey = new Map(),
     rounds = new Map(),
+    byes = new Map(),
     pageSeeds = [];
   const issues = [];
   for (const [pageIndex, html] of pages.entries()) {
     try {
-      const { matches, rounds: found, places, issues: pageIssues = [] } = tableauMatches(tableauGrid(html), options);
+      const {
+        matches,
+        rounds: found,
+        places,
+        issues: pageIssues = [],
+        byes: exemptions = [],
+      } = tableauMatches(tableauGrid(html), options);
       issues.push(...pageIssues);
+      for (const bye of exemptions) byes.set(`${bye.round}:${bye.pos}`, bye);
       for (const m of matches) byKey.set(m.sourceKey, m);
       for (const r of found) rounds.set(r.round, r);
       pageSeeds.push({ size: Math.max(0, ...found.map((r) => r.size)), places });
@@ -703,7 +717,12 @@ function parseTableaus(pages, options = {}) {
     seed1: seeds.get(m.player1) ?? null,
     seed2: seeds.get(m.player2) ?? null,
   }));
-  return { matches, rounds: ordered, ...(issues.length ? { issues } : {}) };
+  return {
+    matches,
+    rounds: ordered,
+    byes: [...byes.values()].filter((b) => b.round === ordered[0]?.round),
+    ...(issues.length ? { issues } : {}),
+  };
 }
 
 module.exports = {
