@@ -73,7 +73,16 @@ test('pools: wins, losses and official indicator, with time and strip from the h
 });
 
 test('tableau: matches by official slot, byes skipped, winner, score, time and strip', () => {
-  const { matches, rounds } = E.parseTableaus([fixture('fdm20-tableau64-top.html'), fixture('fdm20-tableau16.html')]);
+  const { matches, rounds, byes } = E.parseTableaus([
+    fixture('fdm20-tableau64-top.html'),
+    fixture('fdm20-tableau16.html'),
+  ]);
+  assert.equal(byes.find((b) => b.round === 'T64' && b.pos === 1)?.name, 'BOLORE Mélisande');
+  assert.equal(new Set(byes.map((b) => `${b.round}:${b.pos}`)).size, byes.length);
+  assert.ok(
+    byes.every((b) => b.round === 'T64'),
+    'une case future partielle ne crée pas une exemption',
+  );
   assert.deepEqual(
     rounds.map((r) => [r.round, r.previousRound]),
     [
@@ -186,4 +195,31 @@ test('admin preview of an engarde-service tournament lists events, venue time zo
     one.events.map((e) => e.compe),
     ['fhm20'],
   );
+});
+
+test('exemptions Engarde transmises sans créer de match ni modifier la source', async () => {
+  const html = fixture('fdm20-tableau64-top.html');
+  const parsed = E.parseTableaus([html]);
+  const names = [
+    ...new Set([...parsed.matches.flatMap((m) => [m.player1, m.player2]), ...parsed.byes.map((b) => b.name)]),
+  ];
+  const c = { id: 1, podiumRoster: names.map((name, i) => ({ id: String(i + 1), name })) };
+  const observation = await require('../src/services/engardeSync').observeTableau(
+    c,
+    {
+      date: '2026-10-18',
+      time: '09:00',
+      timezone: 'Europe/Paris',
+      eventSourceUrl: 'https://engarde-service.com/competition/test/event/main',
+    },
+    { tableaus: ['https://engarde-service.com/competition/test/event/main/tableau64.htm'], phase: 'main' },
+    { get: async () => html },
+  );
+  assert.ok(observation.byes.length > 0);
+  assert.ok(observation.byes.every((b) => !observation.matches.some((m) => m.sourceKey === `${b.round}:${b.pos}`)));
+  assert.deepEqual(
+    observation.byes.map((b) => [b.round, b.pos, b.name]),
+    parsed.byes.map((b) => [b.round, b.pos, b.name]),
+  );
+  assert.equal(observation.matches.length, parsed.matches.length);
 });

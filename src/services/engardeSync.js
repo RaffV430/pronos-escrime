@@ -402,6 +402,9 @@ async function observeTableau(c, config, pages, client, prev = null) {
     sourceUrl: `${config.eventSourceUrl}/tableau${pages.phase === 'preliminary' ? '/preliminary' : ''}`,
     matches,
     rounds,
+    byes: (parsed.byes || [])
+      .filter((b) => rounds.some((r) => r.round === b.round))
+      .map((b) => ({ round: b.round, pos: b.pos, name: entry(b.name, b.club).name })),
     issues,
     officialPodium,
     resultsSourceUrl,
