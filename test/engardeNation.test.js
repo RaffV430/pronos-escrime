@@ -34,6 +34,20 @@ test('engarde : « DNF » à la place du score = qualifié sur abandon', () => {
   );
 });
 
+test('engarde : « NCB » (non combattu) = qualifié sans score, compté comme un abandon', () => {
+  const ncb = html.replace('<td class="D score">15/10</td>', '<td class="D score">NCB</td>');
+  assert.notEqual(ncb, html);
+  for (const allowPartial of [false, true]) {
+    const parsed = E.parseTableaus([ncb], { allowPartial });
+    const m = parsed.matches.find((x) => x.sourceKey === 'T8:1');
+    assert.deepEqual(
+      [m.winner, m.isFinished, m.resultType, m.score1, m.score2],
+      [1, true, 'MEDICAL_WITHDRAWAL', null, null],
+    );
+    assert.equal((parsed.issues || []).filter((i) => i.sourceKey === 'T8:1').length, 0);
+  }
+});
+
 test('engarde : piste « Podium », exclusion au tableau, heure de publication', () => {
   assert.equal(E.timeAndStrip('19:50 Podium Arbitre: MIELCAREK Gaspard FRA').strip, 'Podium');
   assert.equal(E.timeAndStrip('Poule No 1 - 09:00 - Podium - Arbitre : X').strip, 'Podium');

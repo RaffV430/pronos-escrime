@@ -540,9 +540,9 @@ function tableauGrid(html) {
     );
 }
 
-// Qualifié sans score : « DNF » (abandon), forfait.
-// Qualifié sans score : abandon, forfait ou exclusion de l'adversaire (« vainqueur seul » au barème).
-const WITHDRAWAL = /^(DNF|DNS|ABD|ABANDON|F|FORFAIT|EXC|EXCL|EXCLU|EXCLUSION)$/i;
+// Qualifié sans score : abandon, forfait, exclusion de l'adversaire ou « NCB » (non combattu) :
+// match noté comme un abandon, seul le bon vainqueur rapporte des points.
+const WITHDRAWAL = /^(DNF|DNS|NCB|ABD|ABANDON|F|FORFAIT|EXC|EXCL|EXCLU|EXCLUSION)$/i;
 
 // Tableau principal et match pour la 3e place (épreuves par équipes). Les tableaux de classement
 // (9e, 13e place…) partagent la même grille, à gauche : ils sont ignorés.
