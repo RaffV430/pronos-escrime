@@ -77,6 +77,11 @@ function finalPlace(competition, name, tableau) {
     .filter((m) => !m.won && m.round !== 'Bronze')
     .sort((a, b) => roundSize(a.round) - roundSize(b.round));
   if (lost.length) return { place: null, label: `Éliminé en ${lost[0].round}`, round: lost[0].round };
+  // Classement final officiel (toutes les places), quand le tableau n'est pas connu de l'application.
+  const mine = roster.filter((e) => same(e.name, name)).map((e) => String(e.id));
+  const ranked = (official.classification || []).find((r) => mine.includes(String(r.entryId)));
+  const rank = Number(ranked?.rank);
+  if (Number.isSafeInteger(rank) && rank > 0) return { place: rank, label: rank === 1 ? 'Vainqueur' : `${rank}e` };
   return null;
 }
 
@@ -110,6 +115,8 @@ function competitionEntry(c, name, matches, pools) {
       result: finalPlace(c, name, tableau),
       pools: lines,
       tableau,
+      // Engagé connu par la liste officielle seulement : poules et tableau non importés dans l'application.
+      ...(!lines.length && !tableau.length ? { detailMissing: true } : {}),
     },
   };
 }
@@ -145,7 +152,19 @@ async function fencerProfile(db, rawName) {
       },
     }),
   ]);
-  const ids = [...new Set([...matches.map((m) => m.competitionId), ...poolRows.map((r) => r.pool.competitionId)])];
+  const core = [...new Set([...matches.map((m) => m.competitionId), ...poolRows.map((r) => r.pool.competitionId)])];
+  // Épreuves où le tireur figure dans la liste officielle des engagés, même sans poule ni match importés
+  // (ex. Samsun, 24-25/09/2026 : seul le podium avait été enregistré).
+  const lowered = names.map((n) => String(n).trim().toLowerCase());
+  const registered = db.$queryRaw
+    ? (
+        await db.$queryRaw`SELECT c.id FROM "Competition" c
+          WHERE c."podiumFormat" <> 'TEAM' AND jsonb_typeof(c."podiumRoster") = 'array'
+          AND EXISTS (SELECT 1 FROM jsonb_array_elements(c."podiumRoster") e
+            WHERE lower(trim(e->>'name')) = ANY(${lowered}::text[]))`
+      ).map((r) => Number(r.id))
+    : [];
+  const ids = [...new Set([...core, ...registered])];
   const competitions = await db.competition.findMany({
     where: { id: { in: ids } },
     select: {
@@ -158,9 +177,12 @@ async function fencerProfile(db, rawName) {
     },
   });
   const { countryFor } = require('./matchCountries');
+  const rosterCountry = (c) =>
+    (c.podiumRoster || []).filter((e) => anyName(e.name)).map((e) => countryFor([e], e.name));
   const countries = new Set(
     competitions
-      .flatMap((c) => (c.podiumRoster || []).filter((e) => anyName(e.name)).map((e) => countryFor([e], e.name)))
+      .filter((c) => core.includes(c.id))
+      .flatMap(rosterCountry)
       .filter(Boolean),
   );
   for (const row of poolRows)
@@ -170,13 +192,24 @@ async function fencerProfile(db, rawName) {
         if (code) countries.add(code);
       }
     }
+  // Épreuves connues par la liste des engagés seulement : gardées si la nation ne contredit pas celle du tireur
+  // (homonymes d'une autre nation écartés, jamais fusionnés).
+  const extra = competitions.filter((c) => !core.includes(c.id));
+  const keptExtra = extra.filter((c) => {
+    const own = rosterCountry(c).filter(Boolean);
+    if (countries.size) return own.every((code) => countries.has(code));
+    // Aucune autre information : deux nations différentes = homonymes, signalés comme avant (jamais fusionnés).
+    return true;
+  });
+  for (const c of keptExtra) for (const code of rosterCountry(c)) if (code) countries.add(code);
+  const shown = competitions.filter((c) => core.includes(c.id) || keptExtra.includes(c));
   if (countries.size > 1)
     throw failure(
       'Plusieurs tireurs portent ce nom avec des nationalités différentes. Historique non fusionné ; vérification administrateur nécessaire.',
       409,
     );
   let country = null;
-  const entries = competitions.map((c) => {
+  const entries = shown.map((c) => {
     const own = matches.filter((m) => m.competitionId === c.id);
     const ownPools = poolRows.filter((r) => r.pool.competitionId === c.id).map((r) => r.pool);
     // Orthographe utilisée dans cette épreuve.
@@ -184,7 +217,8 @@ async function fencerProfile(db, rawName) {
       names.find(
         (n) =>
           own.some((m) => same(m.player1, n) || same(m.player2, n)) ||
-          ownPools.some((p) => p.fencers.some((f) => same(f.name, n))),
+          ownPools.some((p) => p.fencers.some((f) => same(f.name, n))) ||
+          (c.podiumRoster || []).some((e) => same(e.name, n)),
       ) || name;
     const entry = competitionEntry(c, local, own, ownPools);
     country ||= entry.country;
