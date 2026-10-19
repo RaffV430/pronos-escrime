@@ -27,6 +27,7 @@ model User {
   // Tutoriel de l'application vu (ou passé) : ne se relance plus sur aucun appareil.
   tutorialSeenAt    DateTime?
   followedFencers   FollowedFencer[]
+  followedTeams     FollowedTeam[]
   pushSubscriptions PushSubscription[]
   predictions       Prediction[]
   poolPredictions   PoolPrediction[]
@@ -132,6 +133,7 @@ model Competition {
   matches           Match[]
   matchRounds       MatchRound[]
   pools             Pool[]
+  followedTeams     FollowedTeam[]
   createdAt         DateTime           @default(now())
 }
 
@@ -411,6 +413,20 @@ model MatchComment {
 }
 
 // Favoris personnels indépendants des identifiants des engagés d’une épreuve.
+// Équipe suivie dans une épreuve précise (« France » du fleuret hommes ≠ « France » du sabre dames).
+model FollowedTeam {
+  id Int @id @default(autoincrement())
+  userId Int
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  competitionId Int
+  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  entryId String
+  name String
+  createdAt DateTime @default(now())
+  @@unique([userId, competitionId, entryId])
+  @@index([competitionId])
+}
+
 model FollowedFencer {
   id Int @id @default(autoincrement())
   userId Int

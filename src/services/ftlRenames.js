@@ -5,6 +5,19 @@ const { parseRoster } = require('./ftlConfiguration');
 const { norm } = require('./ftlParser');
 const { failure } = require('./ftlClient');
 
+// Composition des équipes publiée ou modifiée après le paramétrage de l'épreuve.
+function withMembers(current, observed) {
+  const byId = new Map(observed.map((e) => [e.id, e]));
+  let changed = false;
+  const roster = (current || []).map((e) => {
+    const members = byId.get(e.id)?.members;
+    if (!members?.length || JSON.stringify(members) === JSON.stringify(e.members || null)) return e;
+    changed = true;
+    return { ...e, members };
+  });
+  return changed ? roster : null;
+}
+
 function plannedRenames(current, observed) {
   const byId = new Map(observed.map((e) => [e.id, e]));
   const renames = [];
@@ -21,6 +34,15 @@ function plannedRenames(current, observed) {
 async function reconcileRenames(db, c, eventId, client, actorId = 0) {
   if (!c.podiumRoster || !/^[a-f0-9]{32}$/i.test(eventId || '')) return { c, renames: [] };
   const observed = parseRoster(await client.get(`/events/competitors/data/${eventId}`));
+  const teamRoster = c.podiumFormat === 'TEAM' ? withMembers(c.podiumRoster, observed) : null;
+  if (teamRoster)
+    c = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
+      const fresh = await tx.competition.findUnique({ where: { id: c.id } });
+      if (JSON.stringify(fresh.podiumRoster) !== JSON.stringify(c.podiumRoster))
+        throw failure('Liste des engagés modifiée pendant le contrôle.', 409);
+      return tx.competition.update({ where: { id: c.id }, data: { podiumRoster: teamRoster } });
+    });
   const renames = plannedRenames(c.podiumRoster, observed);
   await require('./fencerAffiliations').ingestObserved(
     db,
@@ -61,4 +83,4 @@ async function reconcileRenames(db, c, eventId, client, actorId = 0) {
   return { c: updated, renames };
 }
 
-module.exports = { reconcileRenames, plannedRenames };
+module.exports = { reconcileRenames, plannedRenames, withMembers };
