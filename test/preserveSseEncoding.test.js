@@ -31,7 +31,12 @@ test('SSE : no-transform ajouté après compression, négociation gzip/br/identi
       const response = await new Promise((resolve, reject) => {
         http
           .get(
-            { host: '127.0.0.1', port: server.address().port, path: '/sse', headers: { 'Accept-Encoding': accept } },
+            {
+              host: '127.0.0.1',
+              port: server.address().port,
+              path: '/sse?transport=diagnostic',
+              headers: { 'Accept-Encoding': accept },
+            },
             (res) => {
               const chunks = [];
               res.on('data', (chunk) => chunks.push(chunk));
@@ -41,6 +46,8 @@ test('SSE : no-transform ajouté après compression, négociation gzip/br/identi
           .on('error', reject);
       });
       assert.equal(response.headers['content-encoding'] || 'identity', expected);
+      assert.equal(response.headers['x-live-origin-encoding'], expected);
+      assert.equal(response.headers['x-live-request-encoding'], 'present');
       assert.equal(response.headers['cache-control'], 'no-cache, no-store, no-transform');
       const decode = expected === 'gzip' ? zlib.gunzipSync : expected === 'br' ? zlib.brotliDecompressSync : (x) => x;
       assert.equal(decode(response.body).toString(), 'data: []\n\n');
