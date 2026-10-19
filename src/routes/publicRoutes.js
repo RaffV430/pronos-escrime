@@ -323,7 +323,8 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
   const live = require('../services/ftlLiveScores');
   res.set({
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
+    // Autoriser gzip ; flush() conserve l’envoi immédiat de chaque trame SSE.
+    'Cache-Control': 'no-cache, no-store',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
@@ -337,9 +338,19 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
     again = false;
   const delta = req.query.delta === '1';
   const { liveDelta } = require('../services/liveDelta');
+  const output = require('../services/liveStreamOutput').liveStreamOutput(res, () => {
+    if (again && !closed && !timer) {
+      again = false;
+      timer = setTimeout(send, 150);
+    }
+  });
   const send = async () => {
     timer = null;
     if (closed) return;
+    if (output.blocked) {
+      again = true;
+      return;
+    }
     if (sending) {
       again = true;
       return;
@@ -352,34 +363,56 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
       if (delta && !diff.message) return;
       const body = JSON.stringify(delta ? diff.message : rows);
       if (!delta && body === last) return;
+      if (!output.write(`data: ${body}\n\n`)) {
+        // Un ping peut bloquer la sortie pendant la lecture asynchrone.
+        again = true;
+        return;
+      }
       last = body;
       if (delta) previous = diff.next;
-      res.write(`data: ${body}\n\n`);
-      res.flush?.(); // compression : envoyer tout de suite, sans attendre d'autres données
     } catch (error) {
       reportError(error, 'direct des pistes');
     } finally {
       sending = false;
-      if (again && !closed) {
+      if (again && !closed && !output.blocked) {
         again = false;
         if (!timer) timer = setTimeout(send, 150);
       }
     }
   };
-  const unsubscribe = await live.subscribe(db, competitionId, () => {
-    if (!timer) timer = setTimeout(send, 150);
-  });
-  const ping = setInterval(() => {
-    res.write(': ping\n\n');
-    res.flush?.();
-  }, 25000);
-  send();
-  req.on('close', () => {
+  let unsubscribe = () => {};
+  let ping = null;
+  const close = () => {
+    if (closed) return;
     closed = true;
     clearTimeout(timer);
     clearInterval(ping);
+    output.close();
     unsubscribe();
-  });
+  };
+  req.once('close', close);
+  res.once('close', close);
+  res.once('error', close);
+  try {
+    unsubscribe = await live.subscribe(db, competitionId, () => {
+      if (closed) return;
+      if (output.blocked) {
+        again = true;
+        return;
+      }
+      if (!timer) timer = setTimeout(send, 150);
+    });
+    if (closed) {
+      unsubscribe();
+      return;
+    }
+    ping = setInterval(() => output.write(': ping\n\n'), 25000);
+    send();
+  } catch (error) {
+    reportError(error, 'abonnement direct des pistes');
+    close();
+    res.end();
+  }
 });
 router.get('/competitions/:competitionId/pools', async (req, res) => {
   try {
