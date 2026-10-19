@@ -7,9 +7,18 @@ test('administration : détails du dernier contrôle seulement, sans écriture n
     competition: { findMany: async () => [{ id: 20, name: 'TEST', tournament: { name: 'TEST' } }] },
     ftlSyncState: { findMany: async () => [{ competitionId: 20, status: 'ATTENTION', failures: 0, lastError: null }] },
     auditLog: {
+      groupBy: async (q) => {
+        assert.deepEqual(q.by, ['targetId', 'action']);
+        assert.deepEqual(q._max, { id: true });
+        return rows.map((_, i) => ({ _max: { id: i + 1 } }));
+      },
       findMany: async (q) => {
         assert.deepEqual(q.where.action.in, ['Contrôle FTL terminé', 'Configuration FTL validée']);
-        assert.deepEqual(q.distinct, ['targetId', 'action']);
+        assert.equal(q.distinct, undefined);
+        assert.deepEqual(
+          q.where.id.in,
+          rows.map((_, i) => i + 1),
+        );
         return rows;
       },
     },

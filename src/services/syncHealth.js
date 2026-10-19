@@ -49,6 +49,26 @@ function waitingForJ2(competition, config, now) {
   if (!startsAt || startsAt <= now) return null;
   return { startsAt: new Date(startsAt).toISOString(), timezone: config?.timezone || null };
 }
+// Prisma distinct peut dédupliquer après transfert de toutes les lignes. Grouper les identifiants
+// dans PostgreSQL d'abord limite la lecture des JSON à deux journaux par épreuve au maximum.
+// L'id est la même référence chronologique que l'ancien orderBy id desc, pas createdAt.
+async function latestControls(db, competitionIds) {
+  if (!competitionIds.length) return [];
+  const where = {
+    action: { in: ['Contrôle FTL terminé', 'Configuration FTL validée'] },
+    targetType: 'Competition',
+    targetId: { in: competitionIds },
+  };
+  const latest = await db.auditLog.groupBy({ by: ['targetId', 'action'], where, _max: { id: true } });
+  const ids = latest.map((row) => row._max.id).filter((id) => id !== null);
+  if (!ids.length) return [];
+  return db.auditLog.findMany({
+    where: { ...where, id: { in: ids } },
+    orderBy: { id: 'desc' },
+    select: { targetId: true, action: true, after: true },
+  });
+}
+
 async function syncHealth(db, now = Date.now()) {
   const competitions = await db.competition.findMany({
     where: {
@@ -64,18 +84,11 @@ async function syncHealth(db, now = Date.now()) {
     },
     orderBy: { id: 'asc' },
   });
-  const states = await db.ftlSyncState.findMany({ where: { competitionId: { in: competitions.map((c) => c.id) } } });
-  // Les avertissements ne sont pas des erreurs réseau : ils restent dans le dernier contrôle terminé.
-  const controls = await db.auditLog.findMany({
-    where: {
-      action: { in: ['Contrôle FTL terminé', 'Configuration FTL validée'] },
-      targetType: 'Competition',
-      targetId: { in: competitions.map((c) => c.id) },
-    },
-    orderBy: { id: 'desc' },
-    distinct: ['targetId', 'action'],
-    select: { targetId: true, action: true, after: true },
-  });
+  const competitionIds = competitions.map((c) => c.id);
+  const states = competitionIds.length
+    ? await db.ftlSyncState.findMany({ where: { competitionId: { in: competitionIds } } })
+    : [];
+  const controls = await latestControls(db, competitionIds);
   const rows = competitions.map((c) => ({
     ...health(
       states.find((s) => s.competitionId === c.id),
@@ -430,6 +443,7 @@ async function alertStale(db, { competitionId, eventStart, complete, timezone = 
 }
 
 module.exports = {
+  latestControls,
   alertStale,
   STALE_ACTION,
   health,
