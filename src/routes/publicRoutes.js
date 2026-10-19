@@ -337,6 +337,8 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
     sending = false,
     again = false;
   const delta = req.query.delta === '1';
+  const { LIVE_WIRE, encodeLiveWire } = require('../services/liveWire');
+  const packedWire = req.query.wire === LIVE_WIRE;
   const { liveDelta } = require('../services/liveDelta');
   const output = require('../services/liveStreamOutput').liveStreamOutput(res, () => {
     if (again && !closed && !timer) {
@@ -363,7 +365,9 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
       if (delta && !diff.message) return;
       const body = JSON.stringify(delta ? diff.message : rows);
       if (!delta && body === last) return;
-      if (!output.write(`data: ${body}\n\n`)) {
+      const wireBody = await encodeLiveWire(body, packedWire);
+      if (closed) return;
+      if (!output.write(`data: ${wireBody}\n\n`)) {
         // Un ping peut bloquer la sortie pendant la lecture asynchrone.
         again = true;
         return;

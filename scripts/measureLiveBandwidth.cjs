@@ -49,6 +49,7 @@ async function measure({
   updates = 12,
   preserveEncoding = false,
   transformProxy = false,
+  packedWire = false,
 } = {}) {
   let rows = fixtures(),
     notify,
@@ -150,7 +151,7 @@ async function measure({
         {
           hostname: '127.0.0.1',
           port: (proxy || server).address().port,
-          path: `/competitions/20/live/stream${delta ? '?delta=1' : ''}`,
+          path: `/competitions/20/live/stream?delta=${delta ? '1' : '0'}${packedWire ? '&wire=gzip-base64-v1' : ''}`,
           headers: { 'Accept-Encoding': 'gzip' },
         },
         (res) => {
@@ -168,7 +169,10 @@ async function measure({
               const frame = input.slice(0, end);
               input = input.slice(end + 2);
               if (!frame.startsWith('data: ')) continue;
-              state = apply(state, JSON.parse(frame.slice(6)));
+              let packet = JSON.parse(frame.slice(6));
+              if (packet.wire === 'gzip-base64-v1')
+                packet = JSON.parse(zlib.gunzipSync(Buffer.from(packet.data, 'base64')));
+              state = apply(state, packet);
               frames++;
               assert.deepEqual(state, expectedStates.shift());
               currentResolve?.();
