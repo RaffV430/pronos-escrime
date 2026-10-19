@@ -32,3 +32,20 @@ Les compteurs n’incluent pas le trafic initié par le serveur, les en-têtes H
 Render confirme que le plus gros point du15octobre est dominé par les réponses HTTP. Les métriques par URL et journaux de requêtes nécessaires à une attribution exacte ne sont pas disponibles dans ce contrôle. Le direct complet non compressé est un amplificateur avéré dans le code et reproduit en test ; il reste la cause probable, pas une attribution certaine de100% des octets historiques. La baisse du pic précède PR161 : ne pas lui attribuer seule cette baisse.
 
 Aucune publication de ce correctif dans cette préparation. Vérifier CI, prévisualisation et transport SSE via le proxy Render après accord, avant de revendiquer le gain réel.
+
+
+## Complément préparé : préserver l’encodage à travers les intermédiaires
+
+Comparaison en lecture seule du19octobre : sur l’instance Render, le SSE émet `Content-Encoding: gzip` (ou `br` avec `Accept-Encoding: br,gzip`). Le chemin public renvoie `identity`. L’application compresse donc déjà ; la transformation se situe après elle. La couche exacte et sa règle ne sont pas exposées par ce contrôle.
+
+Le correctif local `preserveSseEncoding`, installé avant `compression`, ajoute `no-transform` au moment où les en-têtes vont être envoyés, après le choix de compression. Le mettre directement dans la route désactiverait à nouveau la compression Express. L’ordre des hooks est couvert par un test HTTP ; JSON hors SSE reste inchangé. Négociation gzip/Brotli/identity vérifiée, même pour un petit état initial.
+
+Référence : https://developers.cloudflare.com/speed/optimization/content/compression/ — Cloudflare peut convertir un flux compressé en flux non compressé ; no-transform protège les transformations. Cette documentation ne prouve pas le détail de la configuration du proxy Render.
+
+### Mesure reproductible et limites
+
+`node scripts/measureSseProxy.cjs` mesure des octets reçus sur HTTP localhost. Le relais de test décompresse les réponses sans no-transform et conserve celles qui le portent. Cette politique est une simulation explicite, pas le proxy Render réel. Cas synthétique32 rencontres,40 touches,12 mises à jour : delta115216→3208 octets (−97,22%), snapshot1421632→18462 (−98,70%). Les octets compressés émis par l’origine restent identiques avant/après ; le gain mesuré porte sur le dernier trajet du relais au client. Tous les états reconstruits, corrections et suppressions sont identiques. Délai local maximal154→158ms en delta,155→154ms en snapshot.
+
+Sur la production actuelle hors assaut, l’état initial delta fait60octets :72octets gzip à l’origine et60octets sans compression au public. Cette très petite réponse ne bénéficie pas de gzip. Ne pas extrapoler le scénario volumineux à toutes les connexions.
+
+Aucun gain APRÈS correctif n’est mesuré en production, puisqu’il n’est pas publié. Une absence de Content-Encoding chez le visiteur ne prouve pas une absence d’économie sur le trajet origine/proxy ni sur la facture Render. Il faudra vérifier les en-têtes et les volumes sur le chemin public après publication autorisée, pendant une épreuve réelle, et comparer la consommation à trafic équivalent. Aucun réglage, donnée sportive ou diagnostic en hébergement modifié pour cette préparation.
