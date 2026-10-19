@@ -309,8 +309,15 @@ function roundAlertPlan(matches, round, now = Date.now()) {
 }
 // Contexte commun à tous les abonnements pour un passage de la tâche : épreuves des tournois non
 // archivés, leurs matchs (sans pronostics) et leurs tours, lus une seule fois au lieu d'une fois par abonné.
-async function notificationContext(db) {
-  const competitions = await db.competition.findMany({ where: { tournament: { archivedAt: null } } });
+// Un tournoi archivé juste après la vérification officielle (épreuve d'une journée) doit encore
+// envoyer ses dernières alertes : récap, bilan du dernier tour, résultats de Mes tireurs.
+// Plus aucun match n'est ouvert, donc aucune nouvelle alerte de pronostic ne peut partir.
+const ARCHIVE_GRACE_MS = 24 * 3600000;
+const notifiedTournaments = (now = Date.now()) => ({
+  OR: [{ archivedAt: null }, { archivedAt: { gte: new Date(now - ARCHIVE_GRACE_MS) } }],
+});
+async function notificationContext(db, now = Date.now()) {
+  const competitions = await db.competition.findMany({ where: { tournament: notifiedTournaments(now) } });
   const ids = competitions.map((c) => c.id);
   const [matches, rounds, pools, reopenings] = await Promise.all([
     ids.length ? db.match.findMany({ where: { competitionId: { in: ids } } }) : [],
@@ -1127,6 +1134,8 @@ module.exports = {
   followers,
   DOMAIN_SWITCH,
   notificationContext,
+  notifiedTournaments,
+  ARCHIVE_GRACE_MS,
   poolsFinishedAt,
   poolResultsText,
   recapText,
