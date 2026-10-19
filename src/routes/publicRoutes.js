@@ -418,6 +418,17 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
     res.end();
   }
 });
+router.get('/competitions/:competitionId/standings', async (req, res) => {
+  try {
+    const result = await require('../services/officialStandings').officialStandings(db, id(req.params.competitionId));
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json(result);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    reportError(error, 'classements sportifs publics');
+    res.status(503).json({ error: 'Classements officiels momentanément indisponibles.' });
+  }
+});
 router.get('/competitions/:competitionId/pools', async (req, res) => {
   try {
     const competitionId = id(req.params.competitionId);

@@ -148,7 +148,7 @@ function parseTournamentTitle(html) {
 function competitionPages(html, link) {
   const $ = load(String(html || ''));
   const base = `/competition/${link.org}/${link.event}/${link.compe}/`;
-  const pages = { roster: null, pools: [], tableaus: [], final: null };
+  const pages = { roster: null, pools: [], rankings: [], tableaus: [], final: null };
   const tableaus = [];
   $('a.link-competition[href]').each((_, a) => {
     const href = $(a).attr('href');
@@ -157,6 +157,7 @@ function competitionPages(html, link) {
     const url = ORIGIN + href;
     if (file === 'tireurs.htm' || file === 'equipes.htm') pages.roster = url;
     else if (/^poules\d+\.htm$/.test(file)) pages.pools.push(url);
+    else if (/^claspoules\d+\.htm$/.test(file)) pages.rankings.push(url);
     else if (file === 'formule.htm') pages.format = url;
     else if (/^tableau[\w-]*\.htm$/i.test(file)) tableaus.push({ file, url, label: clean($(a).text()) });
     else if (file === 'clasfinal.htm') pages.final = url;
@@ -466,6 +467,33 @@ function parseFinalRanking(html) {
     .filter((r) => r.place && r.name);
 }
 
+// Classement publié après un tour : conserver l'ordre et les valeurs de la source, sans départage inventé.
+function parsePoolRanking(html) {
+  const rows = parseFinalRanking(html);
+  const $ = load(String(html || ''));
+  const table = $('table').first();
+  const headings = table
+    .find('tr')
+    .first()
+    .children()
+    .toArray()
+    .map((th) => norm($(th).text()));
+  const names = { 'vic/match': 'ratio', 'ind.': 'indicator', td: 'touches', groupe: 'group' };
+  const data = table
+    .find('tr')
+    .slice(1)
+    .toArray()
+    .filter((tr) => $(tr).children('td').length);
+  if (!rows.length || rows.length > 2048 || rows.length !== data.length)
+    fail('Classement de poules incomplet ou non reconnu.');
+  return rows.map((row, i) => ({
+    ...row,
+    stats: Object.fromEntries(
+      headings.flatMap((h, n) => (names[h] ? [[names[h], clean($(data[i]).children('td').eq(n).text())]] : [])),
+    ),
+  }));
+}
+
 // ---- Tableau : grille HTML → matchs par tour (géométrie des lignes, comme la page officielle) ----
 function roundOf(title) {
   const t = norm(title);
@@ -738,6 +766,7 @@ module.exports = {
   rosterCheckedIn,
   parsePools,
   parseFinalRanking,
+  parsePoolRanking,
   tableauGrid,
   tableauMatches,
   parseTableaus,
