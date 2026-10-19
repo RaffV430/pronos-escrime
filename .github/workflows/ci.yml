@@ -42,6 +42,10 @@ jobs:
           node --test test/integration/*.test.js > integration.log 2>&1 || true
           echo "::notice title=Tests base réelle::$(grep -E '^# (tests|pass|fail|skipped)' integration.log | tr '\n' ' ')"
           # Échecs lisibles sans accès aux journaux : nom du test et premières lignes de l'erreur.
+          # Détails seulement s'il y a vraiment des échecs (sinon des noms de tests contenant
+          # « rejection » ou « failures » déclenchaient un faux avertissement).
+          # Un lancement interrompu (aucun total « # fail ») garde ses détails.
+          if grep -qE '^# fail 0$' integration.log && ! grep -qE '^ *not ok' integration.log; then exit 0; fi
           fails=$(awk '/^ *not ok/{n=16} n-- > 0' integration.log | grep -vE "duration_ms|type: 'test'|location:|^ *---|^ *\.\.\.|failureType|ERR_TEST_FAILURE|stack: |^ +at " | head -120 | tr '\n' ' ' | tr -s ' ' | cut -c1-6000)
           if [ -n "$fails" ]; then echo "::warning title=Échecs base réelle::$fails"; fi
           errs=$(grep -nE "AssertionError|Error:|error:|expected:|actual:|Unhandled|rejection|Invalid" integration.log | grep -v "error: 'test failed'" | head -40 | tr '\n' ' ' | tr -s ' ' | cut -c1-6000)
