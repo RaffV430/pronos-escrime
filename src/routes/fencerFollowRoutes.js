@@ -19,6 +19,37 @@ function createRouter(db) {
       res.json(await follows.list(db, req.user.userId, Number(req.query.competitionId) || null));
     }),
   );
+  // Équipes suivies dans une épreuve par équipes.
+  router.get(
+    '/teams',
+    run(async (req, res) => {
+      if (!validId(req.query.competitionId)) return res.status(400).json({ error: 'Épreuve invalide.' });
+      const competition = await db.competition.findUnique({
+        where: { id: Number(req.query.competitionId) },
+        select: { id: true, podiumFormat: true, podiumRoster: true },
+      });
+      if (!competition) return res.status(404).json({ error: 'Épreuve introuvable.' });
+      res.json(await require('../services/teamFollows').forCompetition(db, req.user.userId, competition));
+    }),
+  );
+  router.post(
+    '/teams',
+    run(async (req, res) => {
+      const { competitionId, entryId } = req.body || {};
+      if (!validId(competitionId) || typeof entryId !== 'string' || !entryId || entryId.length > 200)
+        return res.status(400).json({ error: 'Équipe invalide.' });
+      res
+        .status(201)
+        .json(await require('../services/teamFollows').follow(db, req.user.userId, Number(competitionId), entryId));
+    }),
+  );
+  router.delete(
+    '/teams/:id',
+    run(async (req, res) => {
+      if (!validId(req.params.id)) return res.status(400).json({ error: 'Équipe invalide.' });
+      res.json(await require('../services/teamFollows').remove(db, req.user.userId, Number(req.params.id)));
+    }),
+  );
   router.get(
     '/:id/history',
     run(async (req, res) => {

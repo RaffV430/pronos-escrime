@@ -7,6 +7,9 @@ function concerned(match, names) {
 }
 async function namesFor(db, sub, competition) {
   const favorites = await db.followedFencer.findMany({ where: { userId: sub.userId } });
+  // Épreuve par équipes : résultats des équipes suivies dans cette épreuve.
+  if (competition?.podiumFormat === 'TEAM')
+    return (await require('./teamFollows').forCompetition(db, sub.userId, competition, favorites)).names;
   return matchedNames(favorites, competition);
 }
 async function queueEnrollments(tx, sub, context) {

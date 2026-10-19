@@ -71,6 +71,11 @@ async function list(db, userId, competitionId) {
   const decorated = await require('./fencerAffiliations').decorate(db, competition ? [competition] : [], favorites);
   favorites = decorated.favorites;
   if (competition) competition = decorated.competitions[0];
+  if (competition?.podiumFormat === 'TEAM') {
+    // Épreuve par équipes : les matchs portent le nom des équipes suivies (à la main ou par un membre suivi).
+    const { teams, names } = await require('./teamFollows').forCompetition(db, userId, competition, favorites);
+    return { favorites, links: [], ambiguousIds: [], matchNames: names, teams };
+  }
   return {
     favorites,
     ...(competition ? resolve(favorites, competition) : { links: [], ambiguousIds: [], matchNames: [] }),
