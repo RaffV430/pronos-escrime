@@ -363,9 +363,13 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
       if (delta && !diff.message) return;
       const body = JSON.stringify(delta ? diff.message : rows);
       if (!delta && body === last) return;
+      if (!output.write(`data: ${body}\n\n`)) {
+        // Un ping peut bloquer la sortie pendant la lecture asynchrone.
+        again = true;
+        return;
+      }
       last = body;
       if (delta) previous = diff.next;
-      output.write(`data: ${body}\n\n`);
     } catch (error) {
       reportError(error, 'direct des pistes');
     } finally {

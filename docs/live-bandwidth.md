@@ -19,7 +19,7 @@ Scénario :32 rencontres,40 touches par rencontre,12 mises à jour (horloge, lam
 
 Sur cette exécution locale, délai maximal d’une mise à jour :167/168ms en instantané,174/168ms en différentiel (témoin/gzip), regroupement150ms inclus. Pas une mesure de latence réseau réelle ni de facture. L’instantané initial et les historiques répétitifs favorisent la compression ; les gains dépendent de la taille et de la durée de session.
 
-Tests supplémentaires :1000 notifications pendant blocage du client ne créent pas1000 trames ; après drain, l’état final et les touches sont conservés. Client fermé avant résolution de subscribe : désabonnement unique, aucune lecture/envoi supplémentaire.
+Tests supplémentaires :1000 notifications pendant blocage du client ne créent pas1000 trames ; après drain, l’état final et les touches sont conservés. Client fermé avant résolution de subscribe : désabonnement unique, aucune lecture/envoi supplémentaire. Un ping bloqué pendant la lecture asynchrone ne fait plus avancer l’état envoyé : le score est repris après drain, dans les deux protocoles, sans doublon. Le test de régression échoue sur le code précédent et passe après correction.
 
 ## Diagnostic préparé, non activé
 

@@ -102,3 +102,70 @@ test('client lent : 1000 changements regroupés, état final et touches conserv�
     live.subscribe = oldSubscribe;
   }
 });
+
+test('ping bloqué pendant la lecture : instantané et delta repris sans perdre leur état', async () => {
+  const oldFor = live.liveFor,
+    oldSubscribe = live.subscribe,
+    oldInterval = global.setInterval;
+  try {
+    for (const delta of [false, true]) {
+      let resolveRows,
+        notify,
+        ping,
+        reads = 0,
+        unsubscribed = 0;
+      const rows = [{ matchId: 1, score1: 2, history: [{ l: 2, r: 0 }] }];
+      live.subscribe = async (_db, _id, cb) => {
+        notify = cb;
+        return () => unsubscribed++;
+      };
+      live.liveFor = async () => {
+        reads++;
+        return reads === 1
+          ? new Promise((resolve) => {
+              resolveRows = resolve;
+            })
+          : structuredClone(rows);
+      };
+      global.setInterval = (fn, ms) => {
+        ping = fn;
+        return oldInterval(() => {}, ms);
+      };
+      const req = new EventEmitter();
+      req.params = { competitionId: '20' };
+      req.query = delta ? { delta: '1' } : {};
+      const res = response(),
+        frames = [];
+      res.write = (frame) => {
+        frames.push(frame);
+        return !frame.startsWith(': ping');
+      };
+      try {
+        await handler(req, res);
+        ping();
+        resolveRows(structuredClone(rows));
+        await tick();
+        assert.deepEqual(frames, [': ping\n\n']);
+        res.emit('drain');
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        assert.equal(reads, 2);
+        assert.equal(frames.length, 2);
+        const packet = JSON.parse(frames[1].slice(6));
+        if (delta) {
+          assert.equal(packet.reset, true);
+          assert.deepEqual(packet.matches, rows);
+        } else assert.deepEqual(packet, rows);
+        notify();
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        assert.equal(frames.length, 2, 'aucun doublon après la reprise');
+      } finally {
+        req.emit('close');
+      }
+      assert.equal(unsubscribed, 1);
+    }
+  } finally {
+    live.liveFor = oldFor;
+    live.subscribe = oldSubscribe;
+    global.setInterval = oldInterval;
+  }
+});
