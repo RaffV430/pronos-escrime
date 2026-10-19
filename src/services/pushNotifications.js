@@ -381,6 +381,15 @@ const recapText = (r) =>
     ? ` · ${r.winners} vainqueur${r.winners > 1 ? 's' : ''} trouvé${r.winners > 1 ? 's' : ''} sur ${r.played}`
     : '') +
   ' · votre récap est prêt';
+// Résultat importé après coup (épreuve passée réimportée, rattrapage) : l'heure d'enregistrement est récente
+// mais le match ou la poule a été tiré il y a plus d'un jour. Aucune alerte « résultat de mon tireur ».
+const STALE_RESULT_MS = 24 * 3600000;
+// Début connu de l'épreuve : au-delà de 3 jours, ce n'est plus une épreuve en cours.
+const EVENT_SPAN_MS = 3 * 24 * 3600000;
+const eventIsCurrent = (start, now = Date.now()) =>
+  !start || !Number.isFinite(Number(start)) || now - Number(start) < EVENT_SPAN_MS;
+const playedRecently = (startsAt, now = Date.now()) =>
+  !startsAt || now - new Date(startsAt).getTime() < STALE_RESULT_MS;
 async function queueSpecial(db, id, context = null) {
   const shared = context || (await notificationContext(db));
   return db.$transaction(
@@ -401,6 +410,8 @@ async function queueSpecial(db, id, context = null) {
       if (fencerResults) {
         const since = Math.max(Date.now() - 3600000, new Date(sub.preferencesSince || sub.createdAt).getTime());
         for (const x of shared.filter((y) => follows(sub, y.competition))) {
+          // Épreuve commencée il y a plus de 3 jours (réimport d'une épreuve passée) : aucune alerte.
+          if (!eventIsCurrent(await require('./eventStart').eventStartFor(tx, x.competition.id))) continue;
           const names = await namesFor(tx, sub, x.competition);
           if (!names.length) continue;
           const queue = async (kind, key, ids) =>
@@ -431,12 +442,14 @@ async function queueSpecial(db, id, context = null) {
               m.resultType !== 'CANCELLED' &&
               concerned(m, names) &&
               m.resultRegisteredAt &&
-              new Date(m.resultRegisteredAt).getTime() >= since
+              new Date(m.resultRegisteredAt).getTime() >= since &&
+              playedRecently(m.startsAt)
             )
               await queue('FENCER_RESULT', `match-${m.id}`, [m.id]);
           for (const pool of x.pools || []) {
             if (!pool.isFinal || !pool.fencers.some((f) => names.includes(f.name) && Number.isInteger(f.wins)))
               continue;
+            if (!playedRecently(pool.startsAt)) continue;
             const last = Math.max(
               ...pool.fencers.map((f) => (f.firstResultAt ? new Date(f.firstResultAt).getTime() : 0)),
             );
@@ -1134,6 +1147,8 @@ module.exports = {
   followers,
   DOMAIN_SWITCH,
   notificationContext,
+  playedRecently,
+  eventIsCurrent,
   notifiedTournaments,
   ARCHIVE_GRACE_MS,
   poolsFinishedAt,
