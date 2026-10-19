@@ -20,6 +20,7 @@ app.use(helmet());
 if (process.env.BANDWIDTH_DIAGNOSTICS === 'true')
   app.use(require('./lib/bandwidthDiagnostics').bandwidthDiagnostics().middleware);
 // Réponses compressées (gzip) : 5 à 10 fois moins de données à télécharger, décisif en salle mal couverte.
+app.use(require('./middleware/preserveSseEncoding').preserveSseEncoding);
 app.use(require('compression')({ threshold: 1024 }));
 app.use(
   cors({

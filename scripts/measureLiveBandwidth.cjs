@@ -43,7 +43,13 @@ function apply(previous, packet) {
   }
   return [...rows.values()];
 }
-async function measure({ delta = false, gzip = false, updates = 12 } = {}) {
+async function measure({
+  delta = false,
+  gzip = false,
+  updates = 12,
+  preserveEncoding = false,
+  transformProxy = false,
+} = {}) {
   let rows = fixtures(),
     notify,
     unsubscribed = 0,
@@ -59,6 +65,7 @@ async function measure({ delta = false, gzip = false, updates = 12 } = {}) {
     return () => unsubscribed++;
   };
   const app = express();
+  if (preserveEncoding) app.use(require('../src/middleware/preserveSseEncoding').preserveSseEncoding);
   app.use(compression({ threshold: 1024 }));
   if (!gzip)
     app.use((_req, res, next) => {
@@ -85,6 +92,39 @@ async function measure({ delta = false, gzip = false, updates = 12 } = {}) {
   app.use(router);
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
+  // Relais de test explicite : modélise une décompression par un intermédiaire.
+  // Ce n’est ni le proxy Render ni une reproduction prouvée de sa configuration.
+  let upstreamBytes = 0;
+  const proxy = transformProxy
+    ? http.createServer((req, res) => {
+        const upstream = http.get(
+          { hostname: '127.0.0.1', port: server.address().port, path: req.url, headers: req.headers },
+          (source) => {
+            const headers = { ...source.headers };
+            const transform =
+              headers['content-encoding'] === 'gzip' && !String(headers['cache-control']).includes('no-transform');
+            if (transform) delete headers['content-encoding'];
+            res.writeHead(source.statusCode, headers);
+            source.on('data', (chunk) => {
+              upstreamBytes += chunk.length;
+            });
+            const decoded = transform ? source.pipe(zlib.createGunzip()) : source;
+            decoded.on('error', () => res.destroy());
+            decoded.pipe(res);
+            res.on('close', () => {
+              source.destroy();
+              decoded.destroy();
+            });
+          },
+        );
+        upstream.on('error', () => res.destroy());
+        res.on('close', () => upstream.destroy());
+      })
+    : null;
+  if (proxy) {
+    proxy.listen(0, '127.0.0.1');
+    await new Promise((resolve) => proxy.once('listening', resolve));
+  }
   let bytes = 0,
     state = [],
     frames = 0,
@@ -109,7 +149,7 @@ async function measure({ delta = false, gzip = false, updates = 12 } = {}) {
       request = http.get(
         {
           hostname: '127.0.0.1',
-          port: server.address().port,
+          port: (proxy || server).address().port,
           path: `/competitions/20/live/stream${delta ? '?delta=1' : ''}`,
           headers: { 'Accept-Encoding': 'gzip' },
         },
@@ -141,7 +181,7 @@ async function measure({ delta = false, gzip = false, updates = 12 } = {}) {
       expectedStates.push(structuredClone(rows));
     });
     await next;
-    assert.equal(wireEncoding, gzip ? 'gzip' : 'identity');
+    assert.equal(wireEncoding, gzip && (!transformProxy || preserveEncoding) ? 'gzip' : 'identity');
     const deliveries = [];
     for (let n = 0; n < updates; n++) {
       rows = structuredClone(rows);
@@ -159,11 +199,24 @@ async function measure({ delta = false, gzip = false, updates = 12 } = {}) {
       deliveries.push(performance.now() - sentAt);
     }
     assert.equal(expectedStates.length, 0);
-    return { delta, gzip, bytes, frames, calls, identical: true, maxDeliveryMs: Math.round(Math.max(...deliveries)) };
+    return {
+      delta,
+      gzip,
+      preserveEncoding,
+      transformProxy,
+      upstreamBytes,
+      bytes,
+      frames,
+      calls,
+      identical: true,
+      maxDeliveryMs: Math.round(Math.max(...deliveries)),
+    };
   } finally {
     response?.destroy();
     request?.destroy();
     decoder?.destroy();
+    proxy?.closeAllConnections();
+    if (proxy) await new Promise((resolve) => proxy.close(resolve));
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
     await disconnected;
