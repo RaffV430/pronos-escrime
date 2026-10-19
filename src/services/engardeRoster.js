@@ -94,4 +94,24 @@ function entryFor(roster, name, club = '') {
   return active.length === 1 ? active[0] : null;
 }
 
-module.exports = { mergeRoster, entryFor, sameFencer };
+// Une poule déjà importée ne stocke pas le club : son numéro et sa composition officielle
+// inchangée permettent de retrouver l'identité. Sinon, conserver le blocage de sécurité.
+function overlapsPool(pool, observed, allObserved, roster, url) {
+  const source =
+    pool.sourceUrl === url ? allObserved.find((o) => !o.error && o.number === pool.sourcePoolNumber) : null;
+  const aligned =
+    source &&
+    pool.fencers.length === source.rows.length &&
+    pool.fencers.every((f, i) => f.position === source.rows[i].position && norm(f.name) === norm(source.rows[i].name));
+  return pool.fencers.some((f, i) =>
+    observed.rows.some((r) => {
+      if (norm(f.name) !== norm(r.name)) return false;
+      if (!aligned) return true;
+      const storedEntry = entryFor(roster, source.rows[i].name, source.rows[i].club);
+      const incomingEntry = entryFor(roster, r.name, r.club);
+      return !storedEntry?.id || !incomingEntry?.id || storedEntry.id === incomingEntry.id;
+    }),
+  );
+}
+
+module.exports = { mergeRoster, entryFor, sameFencer, overlapsPool };
