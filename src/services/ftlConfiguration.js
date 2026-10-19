@@ -28,6 +28,13 @@ function parseRoster(rows) {
       throw failure(`Identité d’un engagé non vérifiable : ${who} (club ou nation illisible).`);
     const rank = r.rank === null || r.rank === undefined || r.rank === '' ? null : Number(r.rank);
     if (rank !== null && (!Number.isSafeInteger(rank) || rank <= 0)) throw failure('Rang d’engagement non vérifiable.');
+    // Épreuve par équipes : composition publiée (onglet « Teams »), pour le suivi automatique des équipes.
+    const members = Array.isArray(r.members)
+      ? r.members
+          .map((m) => clean(m?.name))
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
     return {
       id: r.id,
       name: clean(r.name),
@@ -35,6 +42,7 @@ function parseRoster(rows) {
       ...(typeof r.club === 'string' && clean(r.club) ? { club: clean(r.club) } : {}),
       active: r.status !== 'Scratched',
       entryRanking: rank,
+      ...(members.length ? { members } : {}),
     };
   });
   if (new Set(entries.map((r) => r.id)).size !== entries.length) throw failure('Identifiants d’engagés dupliqués.');
