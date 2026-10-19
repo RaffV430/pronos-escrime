@@ -147,7 +147,17 @@ function nextDay(prev, min) {
 }
 
 async function syncPools(db, c, config, url, client, leaseToken, { provisional = false, round = 1, prev = null } = {}) {
-  const summary = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [], day: prev };
+  const summary = {
+    checked: 0,
+    locks: 0,
+    finalized: 0,
+    changed: 0,
+    pointsUpdated: 0,
+    warnings: [],
+    expectedPools: 0,
+    coverageComplete: true,
+    day: prev,
+  };
   // Second tour de poules et suivants : « Tour 2 · Poule 3 » (les numéros repartent de 1 à chaque tour).
   const label = (n) =>
     config._stage
@@ -159,9 +169,11 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
   try {
     observedAll = E.parsePools(await client.get(url));
   } catch (e) {
+    summary.coverageComplete = false;
     summary.warnings.push(e.status ? e.message : 'Poules engarde-service illisibles pour le moment.');
     return summary;
   }
+  summary.expectedPools = observedAll.length;
   // Homonymes départagés par la nation ou le club affiché à côté du nom.
   const inRoster = (name, club) => Boolean(entryFor(c.podiumRoster, name, club));
   // Tireur engagé sur place, présent en poule mais pas (encore) dans la liste publiée : ajouté aux engagés.
@@ -275,6 +287,11 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
       summary.warnings.push(e.status ? e.message : 'Une poule n’a pas pu être importée. Réessayez.');
     }
   }
+  summary.coverageComplete = summary.checked === summary.expectedPools;
+  if (!summary.coverageComplete)
+    summary.warnings.push(
+      `Import incomplet : ${summary.checked}/${summary.expectedPools} poules officielles vérifiées sur ce tour.`,
+    );
   return summary;
 }
 
@@ -458,7 +475,16 @@ async function control(db, c, config, actorId, claim, client) {
       rosterWarnings.push(`Liste des engagés : ${error.message} Identités déjà vérifiées conservées.`);
     }
   }
-  const empty = { checked: 0, locks: 0, finalized: 0, changed: 0, pointsUpdated: 0, warnings: [] };
+  const empty = {
+    checked: 0,
+    locks: 0,
+    finalized: 0,
+    changed: 0,
+    pointsUpdated: 0,
+    warnings: [],
+    expectedPools: 0,
+    coverageComplete: true,
+  };
   let summary = {
     createdIds: [],
     created: 0,
@@ -493,13 +519,16 @@ async function control(db, c, config, actorId, claim, client) {
           prev: day,
         });
         day = s.day;
-        for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated']) poolSummary[k] += s[k];
+        poolSummary.coverageComplete &&= s.coverageComplete;
+        for (const k of ['checked', 'locks', 'finalized', 'changed', 'pointsUpdated', 'expectedPools'])
+          poolSummary[k] += s[k];
         poolSummary.warnings.push(...s.warnings);
         if (s.notes) poolSummary.notes = [...(poolSummary.notes || []), ...s.notes];
         if (s.recomposed) poolSummary.recomposed = [...(poolSummary.recomposed || []), ...s.recomposed];
         if (s.outs) poolSummary.outs = [...(poolSummary.outs || []), ...s.outs];
       } catch (error) {
         if (!error.status) throw error;
+        poolSummary.coverageComplete = false;
         poolSummary.warnings.push(`Tour ${i + 1} de poules : ${error.message}`);
       }
     }

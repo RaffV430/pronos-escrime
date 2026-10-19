@@ -188,4 +188,19 @@ test('engarde-service : tournoi créé vide, puis engagés, poules, tableau et p
   summary = await run();
   assert.equal(summary.created, 0);
   assert.equal(summary.results, 0);
+  // Un podium confirmé ne doit pas masquer une page de poules devenue illisible.
+  const poolPage = stage.pools;
+  const predictionsBefore = await prisma.poolPrediction.findMany({ where: { userId: player.id } });
+  stage.pools = '<p>Publication momentanément illisible</p>';
+  summary = await run();
+  assert.equal(summary.pools.coverageComplete, false);
+  assert.equal((await prisma.ftlSyncState.findUnique({ where: { competitionId: id } })).status, 'ATTENTION');
+  assert.deepEqual(await prisma.poolPrediction.findMany({ where: { userId: player.id } }), predictionsBefore);
+  stage.pools = poolPage;
+  summary = await run();
+  assert.equal(summary.pools.coverageComplete, true);
+  assert.equal(summary.pools.expectedPools, 4);
+  assert.equal(summary.pools.checked, 4);
+  assert.equal((await prisma.ftlSyncState.findUnique({ where: { competitionId: id } })).status, 'COMPLETE');
+  assert.deepEqual(await prisma.poolPrediction.findMany({ where: { userId: player.id } }), predictionsBefore);
 });

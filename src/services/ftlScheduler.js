@@ -43,7 +43,9 @@ async function finish(db, competitionId, token, summary, error = null, now = new
   if (state?.leaseToken !== token) return;
   // Épreuve terminée (podium officiel confirmé) : clôturée même si un avertissement persiste (ex. une poule
   // déjà finalisée que la source affiche désormais incohérente) ; seuls les vrais conflits de match la retiennent.
-  const complete = Boolean(summary?.podium && !summary?.conflicts?.length);
+  const complete = Boolean(
+    summary?.podium && !summary?.conflicts?.length && summary?.pools?.coverageComplete !== false,
+  );
   const issues = !complete && (summary?.warnings?.length || summary?.conflicts?.length);
   const failures = error ? state.failures + 1 : 0;
   // Rythme lent (15 min) jusqu'au début des poules (heure FencingTimeLive, heure locale du lieu) ;
