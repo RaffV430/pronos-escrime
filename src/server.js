@@ -16,7 +16,11 @@ const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet());
+// Diagnostic opt-in : placé avant compression pour compter les octets effectivement encodés.
+if (process.env.BANDWIDTH_DIAGNOSTICS === 'true')
+  app.use(require('./lib/bandwidthDiagnostics').bandwidthDiagnostics().middleware);
 // Réponses compressées (gzip) : 5 à 10 fois moins de données à télécharger, décisif en salle mal couverte.
+app.use(require('./middleware/preserveSseEncoding').preserveSseEncoding);
 app.use(require('compression')({ threshold: 1024 }));
 app.use(
   cors({

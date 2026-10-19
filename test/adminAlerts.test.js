@@ -8,7 +8,7 @@ test('badge counts all pending clubs and unresolved active event failures, then 
       { competitionId: 11, status: 'ATTENTION' },
     ];
   const db = {
-    auditLog: { findMany: async () => [] },
+    auditLog: { groupBy: async () => [], findMany: async () => [] },
     appSetting: { findMany: async () => [] },
     tournament: { findMany: async () => [] },
     clubRegistrationRequest: {

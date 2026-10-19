@@ -13,6 +13,7 @@ function fixture() {
       {
         id: 10,
         name: 'Fleuret hommes',
+        ftlEventId: 'TEST-H',
         matches: [{ id: 1, isFinished: false, resultType: null }],
         pools: [],
         matchRounds: [],
@@ -20,6 +21,7 @@ function fixture() {
       {
         id: 11,
         name: 'Fleuret dames',
+        ftlEventId: 'TEST-D',
         matches: [{ id: 2, isFinished: true, resultType: 'NORMAL' }],
         pools: [],
         matchRounds: [],
@@ -39,6 +41,13 @@ function fixture() {
     },
     ftlSyncState: {
       findMany: async () => states,
+      findUnique: async ({ where }) => states.find((s) => s.competitionId === where.competitionId),
+      upsert: async ({ where, create, update }) => {
+        const state = states.find((s) => s.competitionId === where.competitionId);
+        if (state) return Object.assign(state, update);
+        states.push(create);
+        return create;
+      },
       updateMany: async ({ where, data }) => {
         const hit = states.filter(
           (s) => where.competitionId.in.includes(s.competitionId) && s.status !== where.NOT?.status,
@@ -107,6 +116,6 @@ test('admin archives a whole tournament: hidden, FTL follow-up stopped, logged; 
   assert.equal((await call('/tournaments/4/unarchive', 'POST')).status, 200);
   assert.equal(f.tournament.archivedAt, null);
   assert.ok(f.states[0].nextAutomaticAt instanceof Date, 'unfinished event followed again');
-  assert.equal(f.states[1].nextAutomaticAt, null, 'finished event left alone');
+  assert.ok(f.states[1].nextAutomaticAt instanceof Date, 'stale COMPLETE state cannot block an unfinished event');
   assert.equal((await call('/tournaments/99/archive')).status, 404);
 });

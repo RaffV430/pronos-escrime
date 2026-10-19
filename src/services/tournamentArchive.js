@@ -188,7 +188,84 @@ async function archiveNow(db, t, now, { source, events }) {
     return true;
   });
 }
+// Une nouvelle catégorie peut être publiée après la clôture des premières épreuves.
+// Seul un archivage automatique peut être repris sans décision administrative.
+async function recoverAddedEvents(db, now = new Date()) {
+  const archived = await db.tournament.findMany({
+    where: { archivedAt: { not: null }, competitions: { some: { ftlEventId: { not: null } } } },
+    select: { id: true, archivedAt: true, competitions: { select: { id: true, createdAt: true } } },
+    orderBy: { id: 'asc' },
+  });
+  const recovered = [];
+  for (const t of archived) {
+    if (!t.archivedAt || !t.competitions.some((c) => c.createdAt > t.archivedAt)) continue;
+    const result = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Tournament" WHERE id=${t.id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM "Competition" WHERE "tournamentId"=${t.id} ORDER BY id FOR UPDATE`;
+      const fresh = await tx.tournament.findUnique({ where: { id: t.id }, include });
+      if (!fresh?.archivedAt) return false;
+      const last = await tx.auditLog.findFirst({
+        where: {
+          targetType: 'Tournament',
+          targetId: t.id,
+          action: {
+            in: ['Tournoi archivé après vérification officielle', 'Tournoi archivé manuellement', 'Tournoi désarchivé'],
+          },
+        },
+        orderBy: { id: 'desc' },
+      });
+      if (
+        last?.action !== 'Tournoi archivé après vérification officielle' ||
+        +new Date(last.after?.checkedAt) !== +fresh.archivedAt ||
+        last.after?.sourceUrl !== fresh.ftlSourceUrl
+      )
+        return false;
+      const added = fresh.competitions.filter((c) => c.createdAt > fresh.archivedAt && !eventComplete(c));
+      const configured = [];
+      for (const c of added) {
+        const cfg = await configuration(tx, c.id);
+        if (
+          !cfg ||
+          cfg.provider !== 'engarde' ||
+          fresh.ftlSourceUrl !== `https://engarde-service.com/tournament/${cfg.org}/${cfg.tournamentSlug}` ||
+          c.ftlEventId !== `ENGARDE:${cfg.org}/${cfg.tournamentSlug}/${cfg.compe}`
+        )
+          continue;
+        configured.push(c.id);
+      }
+      if (!configured.length) return false;
+      const previousArchivedAt = fresh.archivedAt.toISOString();
+      await tx.tournament.update({ where: { id: t.id }, data: { archivedAt: null, completionNextCheckAt: null } });
+      await resumeIncomplete(tx, fresh.competitions, now);
+      await tx.auditLog.create({
+        data: {
+          actorId: 0,
+          action: 'Tournoi repris après ajout d’épreuves',
+          targetType: 'Tournament',
+          targetId: t.id,
+          after: { competitionIds: configured, previousArchivedAt },
+        },
+      });
+      return true;
+    });
+    if (result) recovered.push(t.id);
+  }
+  return recovered;
+}
+async function resumeIncomplete(tx, competitions, now) {
+  for (const c of competitions) {
+    if (eventComplete(c) || (!c.ftlEventId && !c.rosterSourceUrl)) continue;
+    const state = await tx.ftlSyncState.findUnique({ where: { competitionId: c.id } });
+    if (state?.status === 'RUNNING' || state?.leaseUntil > now) continue;
+    await tx.ftlSyncState.upsert({
+      where: { competitionId: c.id },
+      create: { competitionId: c.id, status: 'SCHEDULED', nextAutomaticAt: now },
+      update: { nextAutomaticAt: now, ...(state?.status === 'COMPLETE' ? { status: 'SCHEDULED' } : {}) },
+    });
+  }
+}
 async function archiveCompleted(db, { clientFactory = createClient, now = new Date() } = {}) {
+  await recoverAddedEvents(db, now);
   const tournaments = await db.tournament.findMany({
       where: { archivedAt: null, OR: [{ completionNextCheckAt: null }, { completionNextCheckAt: { lte: now } }] },
       include,
@@ -273,20 +350,15 @@ async function archiveManually(db, tournamentId, actorId, now = new Date()) {
 async function unarchive(db, tournamentId, actorId, now = new Date()) {
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Tournament" WHERE id=${tournamentId} FOR UPDATE`;
-    const t = await tx.tournament.findUnique({ where: { id: tournamentId }, include: { competitions: true } });
+    const t = await tx.tournament.findUnique({ where: { id: tournamentId }, include });
     if (!t) throw Object.assign(new Error('Tournoi introuvable.'), { status: 404 });
     if (!t.archivedAt) throw Object.assign(new Error('Ce tournoi n’est pas archivé.'), { status: 409 });
-    const ids = t.competitions.map((c) => c.id);
     await tx.tournament.update({
       where: { id: tournamentId },
       data: { archivedAt: null, completionNextCheckAt: null },
     });
-    // Reprend le suivi automatique des épreuves qui n'étaient pas terminées.
-    if (ids.length)
-      await tx.ftlSyncState.updateMany({
-        where: { competitionId: { in: ids }, NOT: { status: 'COMPLETE' } },
-        data: { nextAutomaticAt: now },
-      });
+    // Crée aussi le suivi des épreuves ajoutées pendant l'archivage.
+    await resumeIncomplete(tx, t.competitions, now);
     await tx.auditLog.create({
       data: { actorId, action: 'Tournoi désarchivé', targetType: 'Tournament', targetId: tournamentId },
     });
@@ -297,3 +369,5 @@ async function unarchive(db, tournamentId, actorId, now = new Date()) {
 module.exports.archiveStatus = archiveStatus;
 module.exports.archiveManually = archiveManually;
 module.exports.unarchive = unarchive;
+
+module.exports.recoverAddedEvents = recoverAddedEvents;
