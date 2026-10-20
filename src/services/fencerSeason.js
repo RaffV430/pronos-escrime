@@ -60,6 +60,7 @@ async function fencerSeason(db, userId, favoriteId, season = null) {
       podiumFormat: true,
       podiumRoster: true,
       officialPodium: true,
+      podiumResolvedAt: true,
       tournament: { select: { id: true, name: true } },
     },
     orderBy: { createdAt: 'desc' },
@@ -117,10 +118,19 @@ async function fencerSeason(db, userId, favoriteId, season = null) {
       const own = matches.filter((m) => m.competitionId === c.id && (same(m.player1, name) || same(m.player2, name)));
       const ownPools = pools.filter((p) => p.competitionId === c.id && p.fencers.some((f) => same(f.name, name)));
       const { data } = competitionEntry(c, name, own, ownPools);
-      return { ...data, season: seasonOf(data.date) };
+      // Épreuve terminée (podium officiel) sans poule ni match importés : engagé, détail indisponible.
+      const finished = Boolean(c.podiumResolvedAt || c.officialPodium?.gold);
+      return { ...data, season: seasonOf(data.date), finished };
     })
     // Épreuves à venir (inscrit, rien de disputé) : pas encore dans le bilan.
-    .filter((e) => e.pools.some((p) => p.wins !== null || p.bouts.length) || e.tableau.length || e.result)
+    .filter(
+      (e) =>
+        e.pools.some((p) => p.wins !== null || p.bouts.length) ||
+        e.tableau.length ||
+        e.result ||
+        (e.detailMissing && e.finished),
+    )
+    .map(({ finished, ...e }) => e)
     .sort((a, b) => b.date.localeCompare(a.date));
   const seasons = [...new Set(entries.map((e) => e.season))].sort().reverse();
   const chosen = season === 'all' ? 'all' : season || seasons[0] || null;

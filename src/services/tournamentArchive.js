@@ -347,15 +347,18 @@ async function archiveManually(db, tournamentId, actorId, now = new Date()) {
   });
 }
 
+const UNARCHIVE_GRACE_MS = 6 * 3600000;
 async function unarchive(db, tournamentId, actorId, now = new Date()) {
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Tournament" WHERE id=${tournamentId} FOR UPDATE`;
     const t = await tx.tournament.findUnique({ where: { id: tournamentId }, include });
     if (!t) throw Object.assign(new Error('Tournoi introuvable.'), { status: 404 });
     if (!t.archivedAt) throw Object.assign(new Error('Ce tournoi n’est pas archivé.'), { status: 409 });
+    // Désarchivage manuel (rattrapage d'une épreuve, contrôles manuels) : l'archivage automatique attend
+    // 6 h, sinon un tournoi déjà complet était réarchivé quelques secondes plus tard (Samsun, 20/10/2026).
     await tx.tournament.update({
       where: { id: tournamentId },
-      data: { archivedAt: null, completionNextCheckAt: null },
+      data: { archivedAt: null, completionNextCheckAt: new Date(+now + UNARCHIVE_GRACE_MS) },
     });
     // Crée aussi le suivi des épreuves ajoutées pendant l'archivage.
     await resumeIncomplete(tx, t.competitions, now);
@@ -369,5 +372,6 @@ async function unarchive(db, tournamentId, actorId, now = new Date()) {
 module.exports.archiveStatus = archiveStatus;
 module.exports.archiveManually = archiveManually;
 module.exports.unarchive = unarchive;
+module.exports.UNARCHIVE_GRACE_MS = UNARCHIVE_GRACE_MS;
 
 module.exports.recoverAddedEvents = recoverAddedEvents;

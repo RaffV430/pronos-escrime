@@ -159,3 +159,44 @@ test('two spellings linked by the administration form one fencer history', async
     [3],
   );
 });
+
+test('épreuve terminée sans poule ni match importés (Samsun) : gardée ; épreuve à venir : écartée', async () => {
+  const base = fakeDb();
+  const competitions = await base.competition.findMany();
+  const roster = competitions[0].podiumRoster;
+  const db = {
+    ...base,
+    competition: {
+      findMany: async () => [
+        ...competitions,
+        // Terminée (podium officiel), seulement la liste des engagés connue.
+        {
+          id: 7,
+          name: 'Fleuret juniors',
+          createdAt: new Date('2026-09-25'),
+          podiumFormat: 'INDIVIDUAL',
+          podiumRoster: roster,
+          officialPodium: { gold: 'b' },
+          podiumResolvedAt: new Date('2026-09-26'),
+          tournament: { id: 7, name: 'Samsun' },
+        },
+        // À venir : inscrite, rien de disputé.
+        {
+          id: 8,
+          name: 'M20 dames',
+          createdAt: new Date('2026-10-15'),
+          podiumFormat: 'INDIVIDUAL',
+          podiumRoster: roster,
+          officialPodium: {},
+          tournament: { id: 8, name: 'Hammamet' },
+        },
+      ],
+    },
+  };
+  const all = await fencerSeason(db, 1, 5, 'all');
+  const ids = all.competitions.map((c) => c.competitionId);
+  assert.ok(ids.includes(7), 'Samsun absent');
+  assert.ok(!ids.includes(8), 'épreuve à venir affichée');
+  assert.equal(all.competitions.find((c) => c.competitionId === 7).detailMissing, true);
+  assert.equal('finished' in all.competitions[0], false);
+});
