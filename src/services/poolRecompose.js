@@ -6,10 +6,15 @@ const { failure } = require('./ftlClient');
 
 const ACTION = 'Poules recomposées';
 const URGENT_WINDOW = 3 * 3600000;
+// Tireur de poule : nom, et club quand il est connu des deux côtés (homonymes de clubs différents).
+const key = (name, club) => `${norm(name)}|${norm(club || '')}`;
+const fencerKey = (f, r) => key(f.name, f.club && r.club ? f.club : '');
+const rowKey = (f, r) => key(r.name, f.club && r.club ? r.club : '');
 const sameOrder = (pool, observed) =>
   pool.fencers.length === observed.rows.length &&
   pool.fencers.every(
-    (f, i) => f.position === observed.rows[i].position && norm(f.name) === norm(observed.rows[i].name),
+    (f, i) =>
+      f.position === observed.rows[i].position && fencerKey(f, observed.rows[i]) === rowKey(f, observed.rows[i]),
   );
 const sameFencers = (pool, observed) =>
   pool.fencers.length === observed.rows.length &&
@@ -95,7 +100,9 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
         for (const f of pool.fencers)
           await tx.poolFencer.update({ where: { id: f.id }, data: { position: -f.position } });
         for (const r of observed.rows) {
-          const f = pool.fencers.find((x) => norm(x.name) === norm(r.name));
+          const f =
+            pool.fencers.find((x) => fencerKey(x, r) === rowKey(x, r) && x.club && r.club) ||
+            pool.fencers.find((x) => norm(x.name) === norm(r.name));
           await tx.poolFencer.update({ where: { id: f.id }, data: { position: r.position, name: r.name } });
         }
         await tx.pool.update({ where: { id: pool.id }, data: { sourceCheckedAt: now } });

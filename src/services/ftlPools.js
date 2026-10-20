@@ -192,7 +192,9 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
   if (sameOrder) pairs = current.fencers.map((f, i) => [f, observed.rows[i]]);
   else if (kept.length < current.fencers.length && kept.length === observed.rows.length)
     pairs = kept.map((f) => {
-      const hits = observed.rows.filter((r) => norm(r.name) === norm(f.name));
+      // Homonymes : départagés par le club quand il est connu (engarde).
+      const named = observed.rows.filter((r) => norm(r.name) === norm(f.name));
+      const hits = named.length > 1 && f.club ? named.filter((r) => norm(r.club || '') === norm(f.club)) : named;
       if (hits.length !== 1) throw differs();
       return [f, hits[0]];
     });
