@@ -13,8 +13,15 @@ const COMPETITION = new RegExp(
   'i',
 );
 
+// Entités HTML restées échappées sur certaines pages (« Chlo&#279; » pour « Chloė » dans la liste des engagés).
+const entities = (s) =>
+  s
+    .replace(/&#(\d{1,7});/g, (m, n) => (Number(n) <= 0x10ffff ? String.fromCodePoint(Number(n)) : m))
+    .replace(/&#x([0-9a-f]{1,6});/gi, (m, n) =>
+      parseInt(n, 16) <= 0x10ffff ? String.fromCodePoint(parseInt(n, 16)) : m,
+    );
 const clean = (s) =>
-  String(s ?? '')
+  entities(String(s ?? ''))
     .normalize('NFC')
     .replace(/\u00a0/g, ' ')
     .replace(/''/g, "'") // apostrophe doublée sur certaines pages (« Nicolo'' », « s''actualise »)
@@ -396,7 +403,9 @@ function parsePool($, table, number, header) {
       if (a.win === b.win) fail(`Scores réciproques incohérents dans la poule ${number}.`);
       const [w, l] = a.win ? [a, b] : [b, a];
       const given = w.touches ?? 5;
-      if (given <= l.touches) fail(`Scores réciproques incohérents dans la poule ${number}.`);
+      // Égalité à la fin du temps (épée) : victoire à la priorité, même score des deux côtés (« V3 » / « 3 »).
+      if (given < l.touches || (given === l.touches && w.touches === null))
+        fail(`Scores réciproques incohérents dans la poule ${number}.`);
       for (const [k, res, own, other] of [
         [i, a, a.win ? given : a.touches, a.win ? b.touches : given],
         [j, b, b.win ? given : b.touches, b.win ? a.touches : given],
