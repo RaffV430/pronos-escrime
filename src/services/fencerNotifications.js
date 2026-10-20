@@ -1,9 +1,26 @@
 const { resolve } = require('./fencerFollows');
+const low = (s) =>
+  String(s || '')
+    .trim()
+    .toLowerCase();
+// Noms des tireurs suivis dans une épreuve. Homonymes : liste à part (`clubs`), reconnus par nom + club.
 function matchedNames(favorites, competition) {
-  return resolve(favorites, competition).matchNames;
+  const { matchNames, clubNames = [] } = resolve(favorites, competition);
+  return withClubs([...matchNames], clubNames);
 }
+function withClubs(names, clubNames = []) {
+  Object.defineProperty(names, 'clubs', { value: clubNames, enumerable: false });
+  return names;
+}
+// Tireur suivi : nom sans homonyme, ou nom + club d'un homonyme suivi.
+function isMine(names, name, club) {
+  if (!names || !name) return false;
+  if (names.includes(name)) return true;
+  return Boolean(club && (names.clubs || []).some((x) => low(x.name) === low(name) && low(x.club) === low(club)));
+}
+const hasAny = (names) => Boolean(names && (names.length || names.clubs?.length));
 function concerned(match, names) {
-  return names.includes(match.player1) || names.includes(match.player2);
+  return isMine(names, match.player1, match.club1) || isMine(names, match.player2, match.club2);
 }
 async function namesFor(db, sub, competition) {
   const favorites = await db.followedFencer.findMany({ where: { userId: sub.userId } });
@@ -49,4 +66,4 @@ async function queueEnrollments(tx, sub, context) {
     });
   }
 }
-module.exports = { matchedNames, concerned, namesFor, queueEnrollments };
+module.exports = { matchedNames, concerned, namesFor, queueEnrollments, isMine, hasAny };

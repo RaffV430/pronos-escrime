@@ -1,4 +1,4 @@
-const { namesFor, concerned, queueEnrollments } = require('./fencerNotifications');
+const { namesFor, concerned, queueEnrollments, isMine, hasAny } = require('./fencerNotifications');
 const { reportError } = require('../lib/report');
 const { roundLabel, matchNotificationText } = require('./notificationText');
 const webpush = require('web-push');
@@ -413,7 +413,7 @@ async function queueSpecial(db, id, context = null) {
           // Épreuve commencée il y a plus de 3 jours (réimport d'une épreuve passée) : aucune alerte.
           if (!eventIsCurrent(await require('./eventStart').eventStartFor(tx, x.competition.id))) continue;
           const names = await namesFor(tx, sub, x.competition);
-          if (!names.length) continue;
+          if (!hasAny(names)) continue;
           const queue = async (kind, key, ids) =>
             tx.pushDelivery.upsert({
               where: {
@@ -447,7 +447,7 @@ async function queueSpecial(db, id, context = null) {
             )
               await queue('FENCER_RESULT', `match-${m.id}`, [m.id]);
           for (const pool of x.pools || []) {
-            if (!pool.isFinal || !pool.fencers.some((f) => names.includes(f.name) && Number.isInteger(f.wins)))
+            if (!pool.isFinal || !pool.fencers.some((f) => isMine(names, f.name, f.club) && Number.isInteger(f.wins)))
               continue;
             if (!playedRecently(pool.startsAt)) continue;
             const last = Math.max(
@@ -700,7 +700,10 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
       return cancel();
     const competition = await db.competition.findUnique({ where: { id: c.id }, select: { podiumRoster: true } });
     const entry = (competition?.podiumRoster || []).find((e) => e.id === m[2]);
-    if (preferences(sub.preferences || {}).fencersOnly && !(await namesFor(db, sub, c)).includes(entry?.name))
+    if (
+      preferences(sub.preferences || {}).fencersOnly &&
+      !isMine(await namesFor(db, sub, c), entry?.name, entry?.country)
+    )
       return cancel();
     const { podiumOutNotification, REASONS } = require('./podiumAlerts');
     try {
@@ -728,7 +731,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
   // des noms ; les bilans personnels (tour, poules, récap) ne dépendent pas des tireurs suivis.
   const scoped = prefs.fencersOnly && ['AVAILABLE', 'REMINDER', 'REOPENED', 'POOLREMINDER', 'POOLS'].includes(kind);
   const names = scoped || ['FENCER_RESULT', 'FENCER_POOL'].includes(kind) ? await namesFor(db, sub, c) : null;
-  if (names && !names.length) return cancel();
+  if (names && !hasAny(names)) return cancel();
   // Une recomposition annoncée pendant les heures calmes attend leur fin plutôt que d'être perdue.
   // Poules modifiées juste avant leur début (France) : notification prioritaire, sans attendre ni filtre.
   const urgentPools = kind === 'POOLS' && String(round || '').startsWith('pools-urgent-');
@@ -761,7 +764,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
       where: { competitionId: c.id, ...(delivery.matchIds.length ? { id: { in: delivery.matchIds } } : {}) },
       include: { fencers: true },
     });
-    if (!pools.some((pool) => pool.fencers.some((f) => names.includes(f.name)))) return cancel();
+    if (!pools.some((pool) => pool.fencers.some((f) => isMine(names, f.name, f.club)))) return cancel();
   }
   let content, ttl;
   if (kind === 'FENCER_ENTRY') {
@@ -867,7 +870,9 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     // Mode « uniquement Mes tireurs » : seulement les poules où figure un tireur suivi.
     const missing = pools.filter(
       (p) =>
-        reminders.isOpen(p, Date.now()) && !done.has(p.id) && (!names || p.fencers.some((f) => names.includes(f.name))),
+        reminders.isOpen(p, Date.now()) &&
+        !done.has(p.id) &&
+        (!names || p.fencers.some((f) => isMine(names, f.name, f.club))),
     );
     if (!missing.length) return cancel();
     ttl = Math.max(1, Math.min(900, Math.floor((Math.min(...missing.map(reminders.deadline)) - Date.now()) / 1000)));
@@ -948,7 +953,9 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     if (Date.now() - delivery.createdAt.getTime() > 3600000) return cancel();
     const pool = await db.pool.findUnique({ where: { id: delivery.matchIds[0] }, include: { fencers: true } });
     const own =
-      pool?.isFinal && names ? pool.fencers.filter((f) => names.includes(f.name) && Number.isInteger(f.wins)) : [];
+      pool?.isFinal && names
+        ? pool.fencers.filter((f) => isMine(names, f.name, f.club) && Number.isInteger(f.wins))
+        : [];
     if (!own.length) return cancel();
     const { fencerPoolText } = require('./notificationText');
     const texts = own.map((f) => fencerPoolText(c, pool, f));
@@ -984,7 +991,7 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
         where: { id: { in: delivery.matchIds }, competitionId: c.id, isLocked: false, isFinal: false },
         select: { name: true, startsAt: true, fencers: { select: { name: true } } },
       });
-      const pools = names ? all.filter((p) => p.fencers.some((f) => names.includes(f.name))) : all;
+      const pools = names ? all.filter((p) => p.fencers.some((f) => isMine(names, f.name, f.club))) : all;
       if (delivery.matchIds.length && !pools.length) return cancel();
       ttl = 3600;
       content = {
