@@ -6,6 +6,7 @@ const { failure } = require('./ftlClient');
 
 const ACTION = 'Poules recomposées';
 const URGENT_WINDOW = 3 * 3600000;
+const PAST_WINDOW = 6 * 3600000;
 const sameOrder = (pool, observed) =>
   pool.fencers.length === observed.rows.length &&
   pool.fencers.every(
@@ -157,8 +158,13 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
       const audit = await tx.auditLog.create({
         data: { actorId: 0, action: ACTION, targetType: 'Competition', targetId: c.id, after: summary },
       });
+      // Poules toutes commencées depuis plus de 6 h (rattrapage après coup) : plus rien à pronostiquer.
+      const times = [...plan.changed.map((x) => x.observed), ...plan.added]
+        .map((o) => (o.startsAt ? new Date(o.startsAt).getTime() : null))
+        .filter((t) => t !== null);
+      const past = times.length > 0 && times.every((t) => t < now.getTime() - PAST_WINDOW);
       // Une notification par abonnement qui suit l'épreuve, seulement si des poules sont à refaire.
-      if (notified.length || plan.removed.length) {
+      if ((notified.length || plan.removed.length) && !past) {
         const subs = await require('./pushNotifications').followers(tx, c);
         for (const s of subs)
           await tx.pushDelivery.create({

@@ -12,13 +12,22 @@ const positiveId = (value, label = 'Identifiant invalide.') => {
 const predictedWinner = (p) =>
   p.predictedScore1 > p.predictedScore2 ? 1 : p.predictedScore2 > p.predictedScore1 ? 2 : 0;
 
+// engarde-service : chaque engagé a son propre numéro de série et son club, lus avec le nom. Même nom,
+// clubs tous connus et différents : homonymes (deux tireurs présents), poules et matchs départagés par le
+// club. Ce n'est pas une inscription en double, rien à trancher.
+const homonyms = (group) => {
+  const clubs = group.map((e) => norm(e.country || ''));
+  return clubs.every(Boolean) && new Set(clubs).size === clubs.length;
+};
+
 // Inscriptions portant le même nom dans la liste des engagés d'une épreuve.
 async function duplicates(db, competitionId) {
   const c = await db.competition.findUnique({
     where: { id: positiveId(competitionId, 'Épreuve invalide.') },
-    select: { id: true, name: true, podiumRoster: true },
+    select: { id: true, name: true, podiumRoster: true, rosterSourceUrl: true, resultsSourceUrl: true },
   });
   if (!c) throw failure('Épreuve introuvable.', 404);
+  const engarde = /engarde-service\.com/i.test(`${c.rosterSourceUrl || ''} ${c.resultsSourceUrl || ''}`);
   const groups = new Map();
   for (const e of c.podiumRoster || []) {
     const k = norm(e.name);
@@ -27,7 +36,7 @@ async function duplicates(db, competitionId) {
   return {
     competition: { id: c.id, name: c.name },
     duplicates: [...groups.values()]
-      .filter((g) => g.length > 1)
+      .filter((g) => g.length > 1 && !(engarde && homonyms(g)))
       .map((g) => ({
         name: g[0].name,
         entries: g.map((e) => ({

@@ -552,6 +552,8 @@ function bracketOf(title) {
   return roundOf(title);
 }
 
+const seedKey = (name, club) => `${name}\u0000${club || ''}`;
+
 // Matchs d'une grille. Chaque tour occupe une colonne de noms, sous son titre et jusqu'au titre suivant
 // de la même colonne ; un match est une paire de noms consécutifs de cette zone ; son vainqueur, son
 // score et son horaire se trouvent entre les deux lignes, le vainqueur dans la colonne de noms suivante.
@@ -588,24 +590,35 @@ function tableauMatches(grid, { allowPartial = false } = {}) {
       const bare = c.text.replace(/\s+[A-Z]{3}$/, '');
       if (bare !== c.text && firstColumn.has(bare)) c.text = bare;
     }
-  const clubs = new Map(); // nom → club (colonne d'entrée)
-  for (const c of cells.filter((c) => c.role === 'fencer')) {
+  // Club de chaque case : celui affiché à côté (colonne d'entrée), sinon celui du tireur qualifié au tour
+  // précédent (homonymes de clubs différents : deux tireurs distincts), sinon celui du nom s'il est unique.
+  const cellClub = new Map();
+  const byName = new Map(); // nom → clubs vus
+  for (const c of cells.filter((c) => c.role === 'fencer' && c.text)) {
     const club = grid[c.row].find((x) => x.col === c.col + 1 && x.role === 'club');
-    if (club && c.text) clubs.set(c.text, club.text);
+    if (!club?.text) continue;
+    cellClub.set(c, club.text);
+    byName.set(c.text, new Set([...(byName.get(c.text) || []), club.text]));
   }
+  const clubOf = (c) => {
+    if (cellClub.has(c)) return cellClub.get(c);
+    const seen = byName.get(c.text);
+    return seen?.size === 1 ? [...seen][0] : null;
+  };
   // Têtes de série de la colonne d'entrée du tableau principal, après normalisation des nations.
   // Les positions des tableaux de classement et de la petite finale ne sont pas des classements d'entrée.
-  const places = new Map();
+  const places = new Map(); // seedKey(nom, club) → place
   if (main.length)
     for (const c of fencersIn(entry, entry.col).filter((c) => c.text)) {
       const place = Number(grid[c.row].find((x) => x.col === c.col - 1 && x.role === 'place')?.text);
-      if (Number.isSafeInteger(place) && place > 0) places.set(c.text, place);
+      if (Number.isSafeInteger(place) && place > 0) places.set(seedKey(c.text, clubOf(c)), place);
     }
   const matches = [];
   const byes = [];
   const rounds = [];
   const issues = [];
-  for (const zone of kept) {
+  // De gauche à droite : le club d'un qualifié vient du match du tour précédent.
+  for (const zone of [...kept].sort((x, y) => x.col - y.col || x.row - y.row)) {
     const { round, col } = zone;
     const entrants = fencersIn(zone, col);
     if (entrants.length % 2) {
@@ -624,12 +637,22 @@ function tableauMatches(grid, { allowPartial = false } = {}) {
       const position = i / 2 + 1;
       if (!a.text || !b.text) {
         const alone = a.text ? a : b.text ? b : null;
-        if (alone && zone === entry)
-          byes.push({ round, pos: position, name: alone.text, club: clubs.get(alone.text) || null });
+        if (alone && zone === entry) byes.push({ round, pos: position, name: alone.text, club: clubOf(alone) });
         continue; // exemption : pas de match ni de score
       }
       real++;
       const winnerCell = cells.find((c) => c.col === next && c.role === 'fencer' && between(c));
+      const [club1, club2] = [clubOf(a), clubOf(b)];
+      // Qualifié sans club affiché : celui de son match (homonymes départagés).
+      if (winnerCell?.text && !cellClub.has(winnerCell)) {
+        const from =
+          winnerCell.text === a.text && (winnerCell.text !== b.text || club1 === club2)
+            ? club1
+            : winnerCell.text === b.text && winnerCell.text !== a.text
+              ? club2
+              : null;
+        if (from) cellClub.set(winnerCell, from);
+      }
       const scoreCell = cells.find((c) => c.col === next && c.role === 'score' && between(c));
       const timeCell = cells.find((c) => c.role === 'time' && c.col === col && c.row > a.row && c.row < b.row);
       const { time, strip } = timeAndStrip(timeCell?.text || '');
@@ -661,8 +684,8 @@ function tableauMatches(grid, { allowPartial = false } = {}) {
           round,
           player1: a.text,
           player2: b.text,
-          club1: clubs.get(a.text) || null,
-          club2: clubs.get(b.text) || null,
+          club1,
+          club2,
           time,
           strip,
           winner: isFinished ? winner : null,
@@ -682,8 +705,8 @@ function tableauMatches(grid, { allowPartial = false } = {}) {
           round,
           player1: a.text,
           player2: b.text,
-          club1: clubs.get(a.text),
-          club2: clubs.get(b.text),
+          club1,
+          club2,
           time,
           strip,
           winner: confirmedWinner,
@@ -734,7 +757,13 @@ function parseTableaus(pages, options = {}) {
   // Le plus grand tableau publié fait référence ; les pages suivantes peuvent renuméroter les qualifiés.
   const seeds = new Map();
   for (const { places } of pageSeeds.sort((a, b) => b.size - a.size))
-    for (const [name, place] of places) if (!seeds.has(name)) seeds.set(name, place);
+    for (const [key, place] of places) if (!seeds.has(key)) seeds.set(key, place);
+  // Club inconnu : la tête de série du nom seulement s'il n'y a pas d'homonyme.
+  const seedOf = (name, club) => {
+    if (seeds.has(seedKey(name, club))) return seeds.get(seedKey(name, club));
+    const same = [...seeds].filter(([k]) => k.split('\u0000')[0] === name);
+    return !club && same.length === 1 ? same[0][1] : null;
+  };
   // Tours principaux du plus grand à la finale ; le match pour la 3e place suit les demi-finales.
   const ordered = [...rounds.values()].filter((r) => r.round !== 'Bronze').sort((a, b) => b.size - a.size);
   ordered.forEach((r, i) => (r.previousRound = i ? ordered[i - 1].round : null));
@@ -742,8 +771,8 @@ function parseTableaus(pages, options = {}) {
   if (bronze) ordered.push({ ...bronze, previousRound: 'T4' });
   const matches = [...byKey.values()].map((m) => ({
     ...m,
-    seed1: seeds.get(m.player1) ?? null,
-    seed2: seeds.get(m.player2) ?? null,
+    seed1: seedOf(m.player1, m.club1),
+    seed2: seedOf(m.player2, m.club2),
   }));
   return {
     matches,
