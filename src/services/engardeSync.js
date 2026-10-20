@@ -86,8 +86,11 @@ async function addLateEntrants(db, c, rows) {
   const current = c.podiumRoster || [];
   const withClubs = current.some((e) => e.country);
   const missing = [];
+  // Même nom, autre club : un autre tireur (homonyme), ajouté lui aussi.
+  const same = (e, r) =>
+    norm(e.name) === norm(r.name) && (!withClubs || !e.country || norm(e.country) === norm(r.club || ''));
   for (const r of rows)
-    if (!current.some((e) => norm(e.name) === norm(r.name)) && !missing.some((e) => norm(e.name) === norm(r.name)))
+    if (!current.some((e) => same(e, r)) && !missing.some((e) => same(e, r)))
       missing.push({
         id: E.entryId(r.name, withClubs ? r.club || '' : ''),
         name: r.name,
@@ -599,4 +602,14 @@ async function control(db, c, config, actorId, claim, client) {
   return { c, poolSummary, summary };
 }
 
-module.exports = { nextDay, dayOf, startsAt, control, refreshRoster, observeTableau, manifest, syncPools };
+module.exports = {
+  nextDay,
+  dayOf,
+  startsAt,
+  control,
+  refreshRoster,
+  observeTableau,
+  manifest,
+  syncPools,
+  addLateEntrants,
+};

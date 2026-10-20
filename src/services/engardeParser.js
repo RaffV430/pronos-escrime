@@ -220,7 +220,14 @@ function parseRoster(html) {
     .map((_, th) => norm($(th).text()))
     .get();
   const col = (label) => headers.findIndex((h) => h === label);
-  const [rank, last, first, club, nation] = [col('r.i.'), col('nom'), col('prénom'), col('club'), col('nation')];
+  const [rank, last, first, club, nation, serial] = [
+    col('r.i.'),
+    col('nom'),
+    col('prénom'),
+    col('club'),
+    col('nation'),
+    col('série'),
+  ];
   // Sans colonne « Prénom » : liste des équipes (equipes.htm).
   const teams = first < 0;
   if (last < 0) fail('Colonnes des engagés non reconnues.');
@@ -241,6 +248,7 @@ function parseRoster(html) {
       const seed = rank >= 0 ? Number(clean($(cells[rank]).text())) : NaN;
       return {
         id: entryId(name, clubName),
+        serial: serial >= 0 ? clean($(cells[serial]).text()) : '',
         name,
         country: clubName || nationName,
         active: true,
@@ -250,8 +258,23 @@ function parseRoster(html) {
     })
     .filter((e) => e.name);
   if (!entries.length) fail('Aucun engagé publié.');
-  if (new Set(entries.map((e) => e.id)).size !== entries.length) fail('Engagés en double.');
-  return entries;
+  // Même nom et même club, numéros de série différents : deux engagés distincts. L'identifiant du second
+  // inclut son numéro de série.
+  // Le premier garde l'identifiant habituel (pronostics déjà enregistrés).
+  const seen = new Map(); // identifiant → numéros de série
+  const out = entries.map(({ serial, ...e }) => {
+    const serials = seen.get(e.id);
+    if (!serials) {
+      seen.set(e.id, new Set([serial]));
+      return e;
+    }
+    // Même numéro de série (ou aucun) : vraie inscription en double, refusée plus bas.
+    if (!serial || serials.has(serial)) return e;
+    serials.add(serial);
+    return { ...e, id: entryId(e.name, `${e.country}#${serial}`) };
+  });
+  if (new Set(out.map((e) => e.id)).size !== out.length) fail('Engagés en double.');
+  return out;
 }
 
 // « 12:30 - Piste 1 » ou « 14:15 Piste 1 Arbitre: … » : heure locale du lieu et piste.
@@ -376,7 +399,8 @@ function parsePool($, table, number, header) {
     };
   });
   if (rows.filter((r) => !r.absent).length < 2) fail(`Pas assez de tireurs présents dans la poule ${number}.`);
-  if (new Set(rows.map((r) => norm(r.name))).size !== n) fail('Noms ambigus dans la poule.');
+  // Homonymes dans la même poule : départagés par le club affiché à côté du nom.
+  if (new Set(rows.map((r) => `${norm(r.name)}|${norm(r.club)}`)).size !== n) fail('Noms ambigus dans la poule.');
   const values = rows.map(() => ({ wins: 0, losses: 0, indicator: 0, touches: 0, received: 0, hasResult: false }));
   const evidence = new Set();
   let complete = true,
