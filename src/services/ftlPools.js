@@ -106,7 +106,8 @@ function parsePools(html) {
         }
         const [, va, sa] = parse(a),
           [, vb, sb] = parse(b);
-        if (va === vb || +sa === +sb || (va === 'V') !== Number(sa) > Number(sb))
+        // Égalité à la fin du temps (épée) : victoire à la priorité avec le même score (« V3 » / « D3 »).
+        if (va === vb || (va === 'V' ? +sa < +sb : +sb < +sa))
           throw failure(`Scores réciproques incohérents dans la poule ${number}.`);
         for (const [k, v, given, received] of [
           [i, va, +sa, +sb],
