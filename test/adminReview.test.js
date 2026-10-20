@@ -152,3 +152,28 @@ test('an official sheet without the set-aside fencer still updates the others', 
     /Composition officielle différente/,
   );
 });
+
+test('engarde : homonymes de clubs différents (deux tireurs présents) ne sont pas des inscriptions en double', async () => {
+  const competition = {
+    id: 28,
+    name: 'Épée Hommes senior',
+    rosterSourceUrl: 'https://engarde-service.com/competition/era/jde-2026/ehs/tireurs.htm',
+    podiumRoster: [
+      { id: 'a', name: 'ROBERT Julien', country: 'DECINES TE', entryRanking: 61 },
+      { id: 'b', name: 'ROBERT Julien', country: 'PERPIGNAN RO', entryRanking: 206 },
+      { id: 'c', name: 'DUPONT Paul', country: 'LYON', entryRanking: 3 },
+      { id: 'd', name: 'DUPONT Paul', country: 'LYON', entryRanking: 4 },
+    ],
+  };
+  const db = { competition: { findUnique: async () => competition } };
+  assert.deepEqual(
+    (await review.duplicates(db, 28)).duplicates.map((d) => d.name),
+    ['DUPONT Paul'],
+  );
+  // Ailleurs (FencingTimeLive) : les homonymes ne sont pas départagés par le club, la liste reste affichée.
+  competition.rosterSourceUrl = 'https://www.fencingtimelive.com/events/competitors/ABC';
+  assert.deepEqual(
+    (await review.duplicates(db, 28)).duplicates.map((d) => d.name),
+    ['ROBERT Julien', 'DUPONT Paul'],
+  );
+});

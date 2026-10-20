@@ -157,8 +157,11 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
       const audit = await tx.auditLog.create({
         data: { actorId: 0, action: ACTION, targetType: 'Competition', targetId: c.id, after: summary },
       });
+      // Rattrapage après coup : poules déjà entièrement tirées sur la source, plus rien à pronostiquer.
+      const redone = [...plan.changed.map((x) => x.observed), ...plan.added];
+      const past = redone.length > 0 && !plan.removed.length && redone.every((o) => o.complete);
       // Une notification par abonnement qui suit l'épreuve, seulement si des poules sont à refaire.
-      if (notified.length || plan.removed.length) {
+      if ((notified.length || plan.removed.length) && !past) {
         const subs = await require('./pushNotifications').followers(tx, c);
         for (const s of subs)
           await tx.pushDelivery.create({

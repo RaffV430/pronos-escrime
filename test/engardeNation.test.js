@@ -60,3 +60,16 @@ test('engarde : piste « Podium », exclusion au tableau, heure de publication',
   );
   assert.equal(at.toISOString(), '2026-10-04T09:21:00.000Z');
 });
+
+test('engarde : deux homonymes de clubs différents restent deux tireurs (club et tête de série propres)', () => {
+  // Journées de l'épée 2026 : deux « ROBERT Julien » (Décines, Perpignan), numéros de série différents.
+  const twins = html.replaceAll('VALIERE Lise', 'MARTIN Lea').replaceAll('BERTHEMY Noémie', 'MARTIN Lea');
+  assert.notEqual(twins, html);
+  const byKey = new Map(E.parseTableaus([twins]).matches.map((m) => [m.sourceKey, m]));
+  const side = (key, n) => [byKey.get(key)[`player${n}`], byKey.get(key)[`club${n}`], byKey.get(key)[`seed${n}`]];
+  assert.deepEqual(side('T16:2', 1), ['MARTIN Lea', 'PARIS CEP', 9]);
+  assert.deepEqual(side('T16:3', 2), ['MARTIN Lea', 'COMBS VILLE', 12]);
+  // Tour suivant : club absent de la colonne des qualifiés, repris du match gagné.
+  assert.deepEqual(side('T8:1', 2), ['MARTIN Lea', 'PARIS CEP', 9]);
+  assert.deepEqual(side('T8:2', 1), ['MARTIN Lea', 'COMBS VILLE', 12]);
+});
