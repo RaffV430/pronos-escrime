@@ -75,6 +75,9 @@ async function fencerSeason(db, userId, favoriteId, season = null) {
     const link = r.links.find((l) => l.favoriteId === favoriteId);
     const entry = link && (c.podiumRoster || []).find((e) => String(e.id) === link.entryId);
     if (entry && r.matchNames.includes(entry.name)) linked.push({ c, name: entry.name });
+    // Homonyme d'un autre club dans l'épreuve : reconnu par son club (poules et matchs l'enregistrent).
+    else if (entry && (r.clubNames || []).some((x) => x.name === entry.name && x.club === entry.country))
+      linked.push({ c, name: entry.name, club: entry.country });
   }
   if (!linked.length)
     return {
@@ -114,10 +117,13 @@ async function fencerSeason(db, userId, favoriteId, season = null) {
   ]);
   const same = (a, b) => normalize(a) === normalize(b);
   const entries = linked
-    .map(({ c, name }) => {
-      const own = matches.filter((m) => m.competitionId === c.id && (same(m.player1, name) || same(m.player2, name)));
-      const ownPools = pools.filter((p) => p.competitionId === c.id && p.fencers.some((f) => same(f.name, name)));
-      const { data } = competitionEntry(c, name, own, ownPools);
+    .map(({ c, name, club = null }) => {
+      const mine = (n, k) => same(n, name) && (!club || same(k, club));
+      const own = matches.filter(
+        (m) => m.competitionId === c.id && (mine(m.player1, m.club1) || mine(m.player2, m.club2)),
+      );
+      const ownPools = pools.filter((p) => p.competitionId === c.id && p.fencers.some((f) => mine(f.name, f.club)));
+      const { data } = competitionEntry(c, name, own, ownPools, club);
       // Épreuve terminée (podium officiel) sans poule ni match importés : engagé, détail indisponible.
       const finished = Boolean(c.podiumResolvedAt || c.officialPodium?.gold);
       return { ...data, season: seasonOf(data.date), finished };

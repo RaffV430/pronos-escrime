@@ -48,8 +48,16 @@ function matchNotificationText(
     staggered: new Set(valid).size > 1,
   };
   const action = kind === 'REMINDER' ? 'à compléter' : 'à pronostiquer';
-  if (fencers?.length) {
-    const mine = matches.flatMap((m) => [m.player1, m.player2].filter((n) => fencers.includes(n)));
+  if (require('./fencerNotifications').hasAny(fencers)) {
+    const { isMine } = require('./fencerNotifications');
+    const mine = matches.flatMap((m) =>
+      [
+        [m.player1, m.club1],
+        [m.player2, m.club2],
+      ]
+        .filter(([n, club]) => isMine(fencers, n, club))
+        .map(([n]) => n),
+    );
     const body =
       matches.length === 1
         ? `${matches[0].player1} – ${matches[0].player2} · ${roundLabel(round)} ${action}`
@@ -79,8 +87,10 @@ function fencerResultText(competition, m, fencers) {
         ? `abandon de ${l}`
         : `${Math.max(m.score1, m.score2)}–${Math.min(m.score1, m.score2)}`;
   const versus = isWalkover(m.resultType) ? `(${score})` : `(${score} contre ${l})`;
-  const mineWon = fencers.includes(w),
-    mineLost = fencers.includes(l);
+  const { isMine } = require('./fencerNotifications');
+  const [wc, lc] = winner === 1 ? [m.club1, m.club2] : [m.club2, m.club1];
+  const mineWon = isMine(fencers, w, wc),
+    mineLost = isMine(fencers, l, lc);
   let body;
   if (mineWon && m.round === 'T2') body = `🏆 ${w} remporte l’épreuve (${score} en finale contre ${l})`;
   else if (mineWon && m.round === 'Bronze') body = `🥉 ${w} prend le bronze ${versus}`;

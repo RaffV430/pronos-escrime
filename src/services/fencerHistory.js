@@ -33,7 +33,14 @@ async function history(db, userId, favoriteId) {
     const link = linked.links.find((l) => l.favoriteId === favoriteId);
     if (!link) continue;
     const entry = competition.podiumRoster.find((e) => String(e.id) === link.entryId);
-    if (!linked.matchNames.includes(entry.name)) continue; // Homonyms have no name-only history.
+    // Homonyme d'un autre club : reconnu par son club, enregistré avec ses poules et ses matchs.
+    const club = linked.matchNames.includes(entry.name)
+      ? null
+      : (linked.clubNames || []).some((x) => x.name === entry.name && x.club === entry.country)
+        ? entry.country
+        : undefined;
+    if (club === undefined) continue; // Homonyms without a known club have no name-only history.
+    const mine = (name, k) => normalize(name) === normalize(entry.name) && (!club || normalize(k) === normalize(club));
     const [allMatches, allPools] = await Promise.all([
       // Seulement les rencontres et les poules de ce tireur (filtrées par la base, plus tout le tableau).
       db.match.findMany({
@@ -57,6 +64,8 @@ async function history(db, userId, favoriteId) {
           startsAt: true,
           strip: true,
           sourceCheckedAt: true,
+          club1: true,
+          club2: true,
         },
         orderBy: { id: 'asc' },
       }),
@@ -69,12 +78,8 @@ async function history(db, userId, favoriteId) {
         orderBy: { id: 'asc' },
       }),
     ]);
-    const matches = allMatches.filter((m) =>
-      [m.player1, m.player2].some((name) => normalize(name) === normalize(entry.name)),
-    );
-    const pools = allPools.filter(
-      (p) => p.fencers.filter((f) => normalize(f.name) === normalize(entry.name)).length === 1,
-    );
+    const matches = allMatches.filter((m) => mine(m.player1, m.club1) || mine(m.player2, m.club2));
+    const pools = allPools.filter((p) => p.fencers.filter((f) => mine(f.name, f.club)).length === 1);
     if (!matches.some((m) => m.isFinished) && !pools.some((p) => p.fencers.some((f) => f.wins != null))) continue; // Future entries are not the last competed event.
     const rank =
       competition.officialPodium?.finalConfirmed && competition.resultsVerifiedAt

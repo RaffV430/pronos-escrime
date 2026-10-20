@@ -62,7 +62,17 @@ function resolve(favorites, competition, { includeMatchNames = true } = {}) {
         roster.filter((other) => normalize(other.name) === normalize(e.name)).length === 1,
     )
     .map((e) => e.name);
-  return { links, ambiguousIds, matchNames };
+  // Homonymes d'une même épreuve (engarde) : le tireur suivi est reconnu par son nom et son club, enregistré
+  // avec chaque poule et chaque match. Jamais par le nom seul.
+  const clubNames = (includeMatchNames ? roster : [])
+    .filter((e) => {
+      if (!links.some((l) => l.entryId === String(e.id)) || matchNames.includes(e.name)) return false;
+      const club = normalize(e.country || '');
+      const same = roster.filter((other) => normalize(other.name) === normalize(e.name));
+      return club && same.filter((other) => normalize(other.country || '') === club).length === 1;
+    })
+    .map((e) => ({ name: e.name, club: e.country }));
+  return { links, ambiguousIds, matchNames, clubNames };
 }
 async function list(db, userId, competitionId) {
   let favorites = await db.followedFencer.findMany({ where: { userId }, orderBy: { id: 'asc' } });
@@ -74,11 +84,11 @@ async function list(db, userId, competitionId) {
   if (competition?.podiumFormat === 'TEAM') {
     // Épreuve par équipes : les matchs portent le nom des équipes suivies (à la main ou par un membre suivi).
     const { teams, names } = await require('./teamFollows').forCompetition(db, userId, competition, favorites);
-    return { favorites, links: [], ambiguousIds: [], matchNames: names, teams };
+    return { favorites, links: [], ambiguousIds: [], matchNames: names, clubNames: [], teams };
   }
   return {
     favorites,
-    ...(competition ? resolve(favorites, competition) : { links: [], ambiguousIds: [], matchNames: [] }),
+    ...(competition ? resolve(favorites, competition) : { links: [], ambiguousIds: [], matchNames: [], clubNames: [] }),
   };
 }
 function selections(competition) {
