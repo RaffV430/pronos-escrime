@@ -48,6 +48,9 @@ model Match {
   player2       String
   seed1         Int?
   seed2         Int?
+  // Clubs affichés au tableau (engarde) : départagent deux homonymes d'une même épreuve.
+  club1         String?
+  club2         String?
   score1        Int?
   score2        Int?
   isFinished    Boolean      @default(false)
@@ -209,6 +212,8 @@ model PoolFencer {
   indicator     Int?
   firstResultAt DateTime?
   countryCode   String?
+  // Club affiché à côté du nom (engarde) : départage deux homonymes d'une même épreuve.
+  club          String?
   ranking       Int?
   status        String?
   predictions   PoolPrediction[]
