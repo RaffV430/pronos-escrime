@@ -479,7 +479,12 @@ router.get('/competitions/:competitionId/pools', async (req, res) => {
 router.get('/fencer', async (req, res) => {
   try {
     res.set('Cache-Control', 'public, max-age=300');
-    res.json(await require('../services/fencerProfile').fencerProfile(db, req.query.name));
+    res.json(
+      await require('../services/fencerProfile').fencerProfile(db, req.query.name, {
+        club: typeof req.query.club === 'string' ? req.query.club : null,
+        matchId: req.query.matchId ? Number(req.query.matchId) : null,
+      }),
+    );
   } catch (error) {
     if (error.status) return res.status(error.status).json({ error: error.message });
     reportError(error, 'fiche tireur publique');

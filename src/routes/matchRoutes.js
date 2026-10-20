@@ -175,7 +175,12 @@ router.delete(
 // Fiche d'un tireur (parcours dans les épreuves suivies) : déclarée avant /:id pour ne pas être prise pour un match.
 router.get('/fencer', authMiddleware, async (req, res) => {
   try {
-    res.json(await require('../services/fencerProfile').fencerProfile(prisma, req.query.name));
+    res.json(
+      await require('../services/fencerProfile').fencerProfile(prisma, req.query.name, {
+        club: typeof req.query.club === 'string' ? req.query.club : null,
+        matchId: req.query.matchId ? Number(req.query.matchId) : null,
+      }),
+    );
   } catch (error) {
     if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Erreur fiche tireur:', error);

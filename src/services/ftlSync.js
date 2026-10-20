@@ -573,6 +573,8 @@ async function applyObservation(tx, c, observation, actorId, leaseToken = null) 
       ...(o.strip ? { strip: o.strip } : {}),
       ...(o.seed1 ? { seed1: o.seed1 } : {}),
       ...(o.seed2 ? { seed2: o.seed2 } : {}),
+      ...(o.club1 ? { club1: o.club1 } : {}),
+      ...(o.club2 ? { club2: o.club2 } : {}),
     };
     if (o.pointsPending) {
       Object.assign(data, { isLocked: true, manualUnlock: false });

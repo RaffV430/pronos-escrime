@@ -257,12 +257,22 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
               lockMode: 'FIRST_RESULT',
               sourceUrl: url,
               sourcePoolNumber: observed.number,
-              fencers: { create: observed.rows.map((r) => ({ name: r.name, position: r.position })) },
+              fencers: {
+                create: observed.rows.map((r) => ({ name: r.name, position: r.position, club: r.club || null })),
+              },
             },
             include: { fencers: { orderBy: { position: 'asc' } } },
           });
         });
         pools.push(snapshot);
+      }
+      // Club de chaque tireur (poules importées avant qu'il ne soit enregistré) : même place, même nom.
+      for (const r of observed.rows) {
+        const f = snapshot.fencers.find((x) => x.position === r.position && norm(x.name) === norm(r.name));
+        if (f && r.club && f.club !== r.club) {
+          await db.poolFencer.update({ where: { id: f.id }, data: { club: r.club } });
+          f.club = r.club;
+        }
       }
       const result = await db.$transaction(
         async (tx) => {
@@ -376,6 +386,8 @@ async function observeTableau(c, config, pages, client, prev = null) {
         player2: m.player2,
         seed1: m.seed1,
         seed2: m.seed2,
+        club1: m.club1 || null,
+        club2: m.club2 || null,
         startsAt:
           pages.phase === 'main' && !schedule.phaseDay(config, m.round)
             ? null

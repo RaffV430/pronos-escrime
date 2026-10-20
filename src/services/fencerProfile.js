@@ -33,9 +33,9 @@ function bout(bouts, i, j) {
 }
 
 // Ligne d'un tireur dans une poule : bilan, place dans la poule et chaque assaut.
-function poolLine(pool, name) {
+function poolLine(pool, name, club = null) {
   const fencers = [...pool.fencers].sort((a, b) => a.position - b.position);
-  const i = fencers.findIndex((f) => same(f.name, name));
+  const i = fencers.findIndex((f) => same(f.name, name) && (!club || same(f.club, club)));
   if (i < 0) return null;
   const me = fencers[i];
   const ranked = fencers
@@ -62,7 +62,7 @@ function poolLine(pool, name) {
 }
 
 // Place finale : podium officiel s'il y figure, sinon le tour de sa dernière défaite en tableau.
-function finalPlace(competition, name, tableau) {
+function finalPlace(competition, name, tableau, club = null) {
   const roster = Array.isArray(competition.podiumRoster) ? competition.podiumRoster : [];
   const official = competition.officialPodium || {};
   const entry = (key) => roster.find((e) => e.id === official[key]);
@@ -72,13 +72,14 @@ function finalPlace(competition, name, tableau) {
     ['bronze1', 3],
     ['bronze2', 3],
   ])
-    if (entry(key) && same(entry(key).name, name)) return { place, label: place === 1 ? 'Vainqueur' : `${place}e` };
+    if (entry(key) && same(entry(key).name, name) && (!club || same(entry(key).country, club)))
+      return { place, label: place === 1 ? 'Vainqueur' : `${place}e` };
   const lost = tableau
     .filter((m) => !m.won && m.round !== 'Bronze')
     .sort((a, b) => roundSize(a.round) - roundSize(b.round));
   if (lost.length) return { place: null, label: `Éliminé en ${lost[0].round}`, round: lost[0].round };
   // Classement final officiel (toutes les places), quand le tableau n'est pas connu de l'application.
-  const mine = roster.filter((e) => same(e.name, name)).map((e) => String(e.id));
+  const mine = roster.filter((e) => same(e.name, name) && (!club || same(e.country, club))).map((e) => String(e.id));
   const ranked = (official.classification || []).find((r) => mine.includes(String(r.entryId)));
   const rank = Number(ranked?.rank);
   if (Number.isSafeInteger(rank) && rank > 0) return { place: rank, label: rank === 1 ? 'Vainqueur' : `${rank}e` };
@@ -86,7 +87,7 @@ function finalPlace(competition, name, tableau) {
 }
 
 // Parcours d'un tireur (nom tel qu'inscrit) dans une épreuve : poules, tableau, place finale et date.
-function competitionEntry(c, name, matches, pools) {
+function competitionEntry(c, name, matches, pools, club = null) {
   let country = null;
   const tableau = matches
     .map((m) => {
@@ -96,7 +97,7 @@ function competitionEntry(c, name, matches, pools) {
     })
     .sort((a, b) => roundSize(b.round) - roundSize(a.round));
   const lines = pools
-    .map((p) => poolLine(p, name))
+    .map((p) => poolLine(p, name, club))
     .filter(Boolean)
     .sort((a, b) => String(a.pool).localeCompare(String(b.pool), 'fr', { numeric: true }));
   country ||= olympicCodeFor(c.podiumRoster, name) || null;
@@ -112,7 +113,7 @@ function competitionEntry(c, name, matches, pools) {
       tournamentId: c.tournament?.id || null,
       tournament: c.tournament?.name || null,
       date,
-      result: finalPlace(c, name, tableau),
+      result: finalPlace(c, name, tableau, club),
       pools: lines,
       tableau,
       // Engagé connu par la liste officielle seulement : poules et tableau non importés dans l'application.
@@ -121,9 +122,22 @@ function competitionEntry(c, name, matches, pools) {
   };
 }
 
-async function fencerProfile(db, rawName) {
+// Homonymes d'une même épreuve : même nom, clubs différents dans la liste des engagés (engarde). Les poules
+// et les matchs enregistrent alors le club de chacun ; la fiche est séparée par club, jamais fusionnée.
+const clubsIn = (c, anyName) => [
+  ...new Map(
+    (Array.isArray(c.podiumRoster) ? c.podiumRoster : [])
+      .filter((e) => anyName(e.name) && String(e.country || '').trim())
+      .map((e) => [String(e.country).trim().toLowerCase(), String(e.country).trim()]),
+  ).values(),
+];
+const sideClub = (m, anyName) => (anyName(m.player1) ? m.club1 : anyName(m.player2) ? m.club2 : null);
+
+async function fencerProfile(db, rawName, { club: rawClub = null, matchId = null } = {}) {
   const name = String(rawName || '').trim();
   if (name.length < 2 || name.length > 120) throw failure('Nom de tireur invalide.', 400);
+  let club = String(rawClub || '').trim() || null;
+  if (club && club.length > 80) throw failure('Club invalide.', 400);
   // Autres orthographes du même tireur reliées par l'administration.
   const names = await require('./fencerAliases').expand(db, name);
   const anyName = (n) => names.some((x) => same(x, n));
@@ -202,7 +216,37 @@ async function fencerProfile(db, rawName) {
     return true;
   });
   for (const c of keptExtra) for (const code of rosterCountry(c)) if (code) countries.add(code);
-  const shown = competitions.filter((c) => core.includes(c.id) || keptExtra.includes(c));
+  let shown = competitions.filter((c) => core.includes(c.id) || keptExtra.includes(c));
+  const split = shown.filter((c) => clubsIn(c, anyName).length > 1);
+  // Ouverte depuis un match : le club du tireur dans ce match.
+  if (split.length && !club && Number.isSafeInteger(Number(matchId))) {
+    const m = matches.find((x) => x.id === Number(matchId));
+    club = (m && sideClub(m, anyName)) || null;
+  }
+  if (split.length && !club) {
+    // Plusieurs tireurs : choix du club avant d'afficher un parcours.
+    const choices = new Map();
+    for (const c of shown)
+      for (const k of clubsIn(c, anyName)) {
+        const key = k.toLowerCase();
+        choices.set(key, { club: k, competitions: (choices.get(key)?.competitions || 0) + 1 });
+      }
+    return {
+      name,
+      country: null,
+      homonyms: [...choices.values()].sort((a, b) => a.club.localeCompare(b.club, 'fr')),
+      summary: { competitions: 0, poolWins: 0, poolLosses: 0, tableauWins: 0, tableauLosses: 0 },
+      competitions: [],
+    };
+  }
+  // Orthographe officielle du club (liste des engagés).
+  if (club) club = shown.flatMap((c) => clubsIn(c, anyName)).find((k) => same(k, club)) || club;
+  // Club choisi : épreuves où ce tireur figure avec ce club (ou sans club connu, sans homonyme).
+  if (club)
+    shown = shown.filter((c) => {
+      const clubs = clubsIn(c, anyName);
+      return !clubs.length || clubs.some((k) => same(k, club));
+    });
   if (countries.size > 1)
     throw failure(
       'Plusieurs tireurs portent ce nom avec des nationalités différentes. Historique non fusionné ; vérification administrateur nécessaire.',
@@ -210,8 +254,17 @@ async function fencerProfile(db, rawName) {
     );
   let country = null;
   const entries = shown.map((c) => {
-    const own = matches.filter((m) => m.competitionId === c.id);
-    const ownPools = poolRows.filter((r) => r.pool.competitionId === c.id).map((r) => r.pool);
+    const homonyms = club && clubsIn(c, anyName).length > 1;
+    // Épreuve avec homonymes : seulement les poules et matchs enregistrés avec ce club.
+    const own = matches.filter((m) => m.competitionId === c.id && (!homonyms || same(sideClub(m, anyName), club)));
+    const ownPools = poolRows
+      .filter(
+        (r) =>
+          r.pool.competitionId === c.id &&
+          (!homonyms || r.pool.fencers.some((f) => anyName(f.name) && same(f.club, club))),
+      )
+      .map((r) => r.pool)
+      .filter((p, i, all) => all.findIndex((x) => x.id === p.id) === i);
     // Orthographe utilisée dans cette épreuve.
     const local =
       names.find(
@@ -220,7 +273,7 @@ async function fencerProfile(db, rawName) {
           ownPools.some((p) => p.fencers.some((f) => same(f.name, n))) ||
           (c.podiumRoster || []).some((e) => same(e.name, n)),
       ) || name;
-    const entry = competitionEntry(c, local, own, ownPools);
+    const entry = competitionEntry(c, local, own, ownPools, homonyms ? club : null);
     country ||= entry.country;
     return entry.data;
   });
@@ -233,7 +286,8 @@ async function fencerProfile(db, rawName) {
         ? matches[0].player1
         : matches[0].player2
       : poolRows[0]?.pool.fencers.find((f) => anyName(f.name))?.name || name,
-    country,
+    country: club || country,
+    ...(club && split.length ? { club, homonymsSplit: true } : {}),
     summary: {
       competitions: entries.length,
       poolWins: poolBouts.filter((b) => b.won).length,

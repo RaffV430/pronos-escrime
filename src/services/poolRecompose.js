@@ -110,7 +110,9 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
           data: {
             recomposedAt: now,
             sourceCheckedAt: now,
-            fencers: { create: observed.rows.map((r) => ({ name: r.name, position: r.position })) },
+            fencers: {
+              create: observed.rows.map((r) => ({ name: r.name, position: r.position, club: r.club || null })),
+            },
           },
         });
         notified.push(pool.id);
@@ -134,7 +136,9 @@ async function applyRecomposition(db, c, url, plan, config, now = new Date()) {
             sourcePoolNumber: observed.number,
             sourceCheckedAt: now,
             recomposedAt: now,
-            fencers: { create: observed.rows.map((r) => ({ name: r.name, position: r.position })) },
+            fencers: {
+              create: observed.rows.map((r) => ({ name: r.name, position: r.position, club: r.club || null })),
+            },
           },
         });
         notified.push(created.id);
