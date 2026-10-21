@@ -10,6 +10,9 @@ const DAY = 86400000;
 const LINKED = 'Calendrier : tournoi relié';
 const WATCHED = 'Calendrier : surveillance';
 const AHEAD = 60; // jours : on cherche les tournois qui commencent dans les deux mois
+// Écart toléré entre les dates du calendrier FFE et celles publiées par les sites officiels (Hammamet 2026 :
+// calendrier 24–25 octobre, épreuves cadets publiées le 22). Ville, arme, catégorie et sexe restent vérifiés.
+const MARGIN = 3 * DAY;
 const ACTOR_ACTION = 'Calendrier : ajout automatique';
 const passes = new WeakMap();
 
@@ -57,12 +60,12 @@ function sameCity(calendarCity, sourceCity) {
   return [a, ...(ALIASES[a] || [])].some((name) => name === b || b.startsWith(name) || name.startsWith(b));
 }
 const day = (iso) => Date.parse(`${String(iso).slice(0, 10)}T00:00:00Z`);
-// Le tournoi officiel recouvre les dates du calendrier (un jour de marge de chaque côté).
+// Le tournoi officiel recouvre les dates du calendrier (trois jours de marge de chaque côté).
 function sameDates(entry, from, to = from) {
   const start = day(from),
     end = day(to || from);
   if (!Number.isFinite(start)) return false;
-  return start <= day(entry.end) + DAY && end >= day(entry.start) - DAY;
+  return start <= day(entry.end) + MARGIN && end >= day(entry.start) - MARGIN;
 }
 
 // Arme, hommes / dames, catégorie et format d'une épreuve d'après son intitulé officiel.
@@ -119,7 +122,7 @@ function wanted(entry, officialName) {
 
 // Entrées à surveiller : pas encore terminées, commençant dans les deux mois.
 function due(now = Date.now()) {
-  return events().filter((e) => day(e.end) + DAY >= now && day(e.start) - AHEAD * DAY <= now);
+  return events().filter((e) => day(e.end) + MARGIN >= now && day(e.start) - AHEAD * DAY <= now);
 }
 
 // Tournois candidats sur les deux sites officiels.

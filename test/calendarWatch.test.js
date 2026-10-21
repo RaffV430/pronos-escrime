@@ -429,3 +429,18 @@ test('ajouts tardifs : même source relue au passage suivant, autre plateforme s
   assert.equal(second.added[0].tournamentId, 7);
   assert.ok(second.problems.some((p) => p.includes('Source conservée')));
 });
+
+test('dates : 3 jours d’écart tolérés entre calendrier FFE et site officiel (Hammamet 2026), pas davantage', () => {
+  // Calendrier FFE : 24–25 octobre ; FencingTimeLive : cadets le 22 octobre.
+  const hammamet = entry({ id: 'h', city: 'Hammamet', start: '2026-10-24', end: '2026-10-25', categories: ['M17'] });
+  const ftl = (start) => [{ id: 'c'.repeat(32), name: 'World Cup Hammamet', location: 'Hammamet, TUN', start }];
+  assert.equal(C.candidates(hammamet, { ftl: ftl('2026-10-22T00:00:00.000Z'), engarde: [] }).length, 1);
+  assert.equal(C.candidates(hammamet, { ftl: ftl('2026-10-28T00:00:00.000Z'), engarde: [] }).length, 1);
+  assert.equal(C.candidates(hammamet, { ftl: ftl('2026-10-19T00:00:00.000Z'), engarde: [] }).length, 0);
+  assert.equal(C.candidates(hammamet, { ftl: ftl('2026-10-30T00:00:00.000Z'), engarde: [] }).length, 0);
+  // Calendrier corrigé : épreuve cadets de Hammamet le 22 octobre.
+  const fixed = C.events().find((e) => e.id === '2026-10-24-hammamet-m17-ind');
+  assert.deepEqual([fixed.start, fixed.end], ['2026-10-22', '2026-10-23']);
+  // Toujours surveillée la veille du 22 et jusqu'à 3 jours après la fin prévue.
+  assert.ok(C.due(Date.parse('2026-10-21T17:00:00Z')).some((e) => e.id === fixed.id));
+});
