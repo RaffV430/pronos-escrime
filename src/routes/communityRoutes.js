@@ -262,7 +262,12 @@ async function duel(userId, opponentId, competition, scopes = ['ALL', 'ALL']) {
   const [pools, podiums] = await Promise.all([
     db.pool.findMany({
       where: { isFinal: true, ...finished },
-      select: { id: true, name: true, competition: { select: { name: true } }, fencers: { select: { id: true } } },
+      select: {
+        id: true,
+        name: true,
+        competition: { select: { id: true, name: true } },
+        fencers: { select: { id: true } },
+      },
       orderBy: [{ startsAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
     }),
     db.competition

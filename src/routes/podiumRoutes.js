@@ -255,6 +255,27 @@ router.post('/', authMiddleware, async (req, res) => {
 });
 
 // ---------------------------------------------------------
+// 6 bis. GET : Onglet « Podium » des Classements (pronostics de chacun, une fois les podiums clos)
+// ---------------------------------------------------------
+router.get('/overview', authMiddleware, async (req, res) => {
+  try {
+    const tournamentId = req.query.tournamentId ? Number(req.query.tournamentId) : null;
+    if (tournamentId !== null && (!Number.isSafeInteger(tournamentId) || tournamentId < 1))
+      return res.status(400).json({ error: 'Tournoi invalide.' });
+    const me = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { isAdmin: true } });
+    res.json(
+      await require('../services/podiumOverview').podiumOverview(prisma, req.user.userId, {
+        tournamentId,
+        isAdmin: Boolean(me?.isAdmin),
+      }),
+    );
+  } catch (error) {
+    reportError(error, 'podium');
+    res.status(500).json({ error: 'Podiums indisponibles.' });
+  }
+});
+
+// ---------------------------------------------------------
 // 7. GET : Récupérer son propre pronostic (TOUJOURS À LA FIN)
 // ---------------------------------------------------------
 router.get('/:competitionId', authMiddleware, async (req, res) => {

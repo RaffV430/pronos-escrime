@@ -123,6 +123,8 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
     const { id } = require('../services/poolRules');
     const filter = {};
     for (const k of ['competitionId', 'tournamentId']) if (req.query[k]) filter[k] = id(req.query[k]);
+    // Tour d'une épreuve : « pools », « podium », « T64 »… (ignoré s'il n'est pas reconnu).
+    if (filter.competitionId && typeof req.query.round === 'string') filter.round = req.query.round.slice(0, 12);
     res.json(await require('../services/standings').standings(prisma, filter));
   } catch (e) {
     reportError(e, 'match');

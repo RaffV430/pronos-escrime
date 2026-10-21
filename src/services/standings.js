@@ -15,30 +15,53 @@ async function sumByUser(model, where, fields) {
   }
   return totals;
 }
-async function computeStandings(db, { competitionId, tournamentId } = {}) {
+// Tour d'une épreuve (classement « où s'est fait l'écart ») : « pools », « podium » ou un tour de tableau
+// (« T64 », « J1:T64 », « Bronze »). Seuls les points de ce tour comptent ; ajustements exclus.
+const ROUND = /^(pools|podium|(J1:)?T\d{1,4}|Bronze)$/;
+const validRound = (round) => (round && ROUND.test(round) ? round : null);
+async function computeStandings(db, { competitionId, tournamentId, round: rawRound } = {}) {
+  const round = competitionId ? validRound(rawRound) : null;
+  const only = (part) => !round || round === part || (part === 'tableau' && !['pools', 'podium'].includes(round));
   const general = !competitionId && !tournamentId;
   const comp = competitionId ? { id: competitionId } : tournamentId ? { tournamentId } : {};
   const ids = general ? null : (await db.competition.findMany({ where: comp, select: { id: true } })).map((c) => c.id);
   const inScope = (where) => (general ? {} : where);
+  const none = new Map();
+  const matchRound = round && only('tableau') ? { round } : {};
   const [users, podiums, matches, pools, adjustments, challenges] = await Promise.all([
     db.user.findMany({ select: { id: true, name: true } }),
-    sumByUser(db.podiumPrediction, inScope({ competitionId: { in: ids } }), ['pointsEarned']),
-    sumByUser(db.prediction, inScope({ match: { competitionId: { in: ids } } }), ['pointsEarned', 'bonusPoints']),
-    sumByUser(db.poolPrediction, inScope({ fencer: { pool: { competitionId: { in: ids } } } }), ['pointsEarned']),
-    sumByUser(
-      db.pointAdjustment,
-      competitionId
-        ? { competitionId }
-        : tournamentId
-          ? { OR: [{ tournamentId }, { competitionId: { in: ids } }] }
-          : {},
-      ['points'],
-    ),
-    db.challenge.findMany({ include: { picks: true } }),
+    only('podium') ? sumByUser(db.podiumPrediction, inScope({ competitionId: { in: ids } }), ['pointsEarned']) : none,
+    only('tableau')
+      ? sumByUser(db.prediction, inScope({ match: { competitionId: { in: ids }, ...matchRound } }), [
+          'pointsEarned',
+          'bonusPoints',
+        ])
+      : none,
+    only('pools')
+      ? sumByUser(db.poolPrediction, inScope({ fencer: { pool: { competitionId: { in: ids } } } }), ['pointsEarned'])
+      : none,
+    round
+      ? none
+      : sumByUser(
+          db.pointAdjustment,
+          competitionId
+            ? { competitionId }
+            : tournamentId
+              ? { OR: [{ tournamentId }, { competitionId: { in: ids } }] }
+              : {},
+          ['points'],
+        ),
+    only('tableau') ? db.challenge.findMany({ include: { picks: true } }) : [],
   ]);
-  const challengeMatches = await db.match.findMany({
-    where: { id: { in: challenges.map((c) => c.matchId) }, ...(general ? {} : { competitionId: { in: ids } }) },
-  });
+  const challengeMatches = challenges.length
+    ? await db.match.findMany({
+        where: {
+          id: { in: challenges.map((c) => c.matchId) },
+          ...(general ? {} : { competitionId: { in: ids } }),
+          ...matchRound,
+        },
+      })
+    : [];
   const rows = new Map(
     users.map((u) => [
       u.id,
@@ -66,6 +89,7 @@ async function computeStandings(db, { competitionId, tournamentId } = {}) {
     }
   for (const c of challenges) {
     const m = challengeMatches.find((m) => m.id === c.matchId);
+    if (round && !m) continue; // défi d'un autre tour
     for (const p of c.picks) {
       const row = rows.get(p.userId);
       if (row) row.challengePoints += challengePoints(p, m, c.bonus);
@@ -92,7 +116,11 @@ function invalidateStandings() {
 function standings(db, filter = {}) {
   let cache = caches.get(db);
   if (!cache) caches.set(db, (cache = new Map()));
-  const key = JSON.stringify([filter.competitionId || null, filter.tournamentId || null]);
+  const key = JSON.stringify([
+    filter.competitionId || null,
+    filter.tournamentId || null,
+    (filter.competitionId && validRound(filter.round)) || null,
+  ]);
   const hit = cache.get(key);
   if (hit && hit.generation === generation && Date.now() - hit.at < TTL) return hit.promise;
   const promise = computeStandings(db, filter);
