@@ -25,6 +25,7 @@ function poolRows(pools, mine, theirs) {
       {
         kind: 'pool',
         poolId: pool.id,
+        competitionId: pool.competition?.id ?? null,
         name: pool.name,
         competition: pool.competition?.name || null,
         round: null,
@@ -74,6 +75,7 @@ function buildDuel(matches, mine, theirs, extra = {}) {
       return {
         kind: 'match',
         matchId: m.id,
+        competitionId: m.competitionId ?? null,
         name: `${m.player1} / ${m.player2}`,
         competition: m.competition?.name || null,
         round: m.round || null,
