@@ -132,6 +132,6 @@ test('tableau byes are read from the official tableau', () => {
     ),
   ].map((name) => ({ name }));
   const { byes } = parseTable(html, { date: '2026-09-27', roster, maxScore: 15, requireComplete: false });
-  assert.deepEqual(byes[0], { round: 'T256', pos: 1, name: 'WANG Yiran' });
+  assert.deepEqual(byes[0], { round: 'T256', pos: 1, name: 'WANG Yiran', seed: 1, country: 'CHN' });
   assert.ok(byes.every((b) => b.round === 'T256' && Number.isInteger(b.pos) && b.name));
 });

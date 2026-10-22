@@ -111,8 +111,24 @@ function parseTable(
           if (score) throw failure('Résultat publié sans deux adversaires connus.');
           // Exempt : un seul tireur face à « - BYE - » ; il est qualifié d'office pour le tour suivant.
           const alone = [a, b].filter((s) => s.name && s.name !== '- BYE -');
-          if (!bronze && alone.length === 1 && [a, b].some((s) => s.name === '- BYE -'))
-            byes.push({ round, pos: i / 2 + 1, name: findEntry(alone[0].name).name });
+          if (!bronze && alone.length === 1 && [a, b].some((s) => s.name === '- BYE -')) {
+            const entry = findEntry(alone[0].name);
+            const td = cell(alone[0].index, c);
+            const rawCountry = clean(td.find('.tcaff').text()) || entry.country || '';
+            const country = require('./matchCountries').countryFor(
+              [{ name: entry.name, country: rawCountry }],
+              entry.name,
+            )
+              ? rawCountry.toUpperCase()
+              : null;
+            byes.push({
+              round,
+              pos: i / 2 + 1,
+              name: entry.name,
+              ...(seeds.get(norm(entry.name)) ? { seed: seeds.get(norm(entry.name)) } : {}),
+              ...(country ? { country } : {}),
+            });
+          }
           continue;
         }
         const player1 = findEntry(a.name).name,
