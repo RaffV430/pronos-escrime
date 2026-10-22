@@ -215,3 +215,43 @@ test('HTTP individual locks reject creation, edits and deletion while another fe
   pool.isLocked = true;
   assert.equal((await request('/1/fencers/20/prediction', 'PUT', pick)).status, 409);
 });
+
+test('six active fencers and two medical withdrawals: new predictions use five bouts and preserve other records', async (t) => {
+  const { db, pool, predictions } = fixture();
+  pool.fencers = Array.from({ length: 8 }, (_, i) => ({
+    id: 10 + i,
+    position: i + 1,
+    name: `Synthetic ${i}`,
+    status: i >= 6 ? 'MEDICAL' : null,
+  }));
+  const existing = { id: 90, userId: 2, fencerId: 10, wins: 7, losses: 0, indicator: 20, pointsEarned: 12 };
+  const withdrawn = { id: 91, userId: 1, fencerId: 16, wins: 3, losses: 4, indicator: null, pointsEarned: 0 };
+  predictions.push(existing, withdrawn);
+  const before = structuredClone(predictions);
+  const app = express();
+  app.use(express.json());
+  require.cache[require.resolve('../src/lib/prisma')] = { exports: db };
+  app.use('/pools', createPoolRouter(db));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const put = (fencerId, data) =>
+    fetch(`http://127.0.0.1:${server.address().port}/pools/1/fencers/${fencerId}/prediction`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${jwt.sign({ userId: 1, sv: 0 }, process.env.JWT_SECRET)}`,
+      },
+      body: JSON.stringify(data),
+    });
+  assert.equal((await put(10, { wins: 5, losses: 0, indicator: null })).status, 200);
+  assert.equal((await put(11, { wins: 6, losses: 1, indicator: null })).status, 400);
+  assert.equal((await put(16, { wins: 0, losses: 5, indicator: null })).status, 409);
+  assert.deepEqual(predictions.slice(0, 2), before);
+  assert.equal(predictions.at(-1).wins, 5);
+  assert.equal(predictions.at(-1).losses, 0);
+  assert.equal(pool.fencers.length, 8);
+});
