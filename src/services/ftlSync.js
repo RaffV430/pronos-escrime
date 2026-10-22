@@ -1003,6 +1003,11 @@ async function syncCompetition(db, competitionId, actorId, client = createClient
     } else {
       await client.login();
       try {
+        config = await require('./ftlOfficialTime').refresh(db, c, config, actorId, client);
+      } catch (e) {
+        discoveryWarning = e.status ? e.message : 'Horaire officiel non vérifiable pour le moment.';
+      }
+      try {
         config = await require('./officialFormat').refresh(db, c, config, actorId, client);
       } catch (e) {
         discoveryWarning = e.status ? e.message : 'Formule officielle non vérifiable pour le moment.';

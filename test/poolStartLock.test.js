@@ -109,3 +109,91 @@ test('tirage provisoire (engarde, avant l’appel) : poule visible mais fermée'
   assert.equal(R.closed(pool, new Date('2026-10-03T12:00:00Z')), true);
   assert.equal(R.followsSource(pool), true);
 });
+
+test('report après clôture : actualise le début affiché sans rouvrir les pronostics ni écrire les points', async () => {
+  const { applyPool } = require('../src/services/ftlPools');
+  const pool = {
+    id: 5,
+    competitionId: 1,
+    sourceUrl: 'u',
+    sourcePoolNumber: 1,
+    lockMode: R.START_LOCK,
+    isLocked: false,
+    isFinal: false,
+    closesAt: start,
+    startsAt: start,
+    fencers: [
+      { id: 1, name: 'A', position: 1 },
+      { id: 2, name: 'B', position: 2 },
+    ],
+  };
+  const later = new Date('2026-10-04T08:00:00Z');
+  let saved;
+  const tx = {
+    $queryRaw: async () => [],
+    pool: {
+      findUnique: async () => pool,
+      update: async ({ data }) => {
+        saved = data;
+      },
+    },
+    poolFencer: { updateMany: async () => ({ count: 0 }) },
+    poolPrediction: { findMany: async () => [] },
+  };
+  const rows = pool.fencers.map((f) => ({ name: f.name, position: f.position, firstResult: false, hasResult: false }));
+  const now = new Date('2026-10-04T07:10:00Z');
+  await applyPool(tx, pool, { complete: false, ambiguous: false, rows, startsAt: later, closeAtStart: true }, now);
+  assert.equal(saved.closesAt, undefined, 'ancienne limite conservée');
+  assert.equal(saved.lockMode, undefined);
+  assert.equal(saved.startsAt.getTime(), later.getTime());
+  assert.equal(R.closed({ ...pool, ...saved }, now), true);
+  assert.equal(R.fencerClosed({ ...pool, ...saved }, pool.fencers[0], now), true);
+});
+
+test('report avant clôture : suit la nouvelle heure, premier résultat toujours bloquant', async () => {
+  const { applyPool } = require('../src/services/ftlPools');
+  const pool = {
+    id: 5,
+    competitionId: 1,
+    sourceUrl: 'u',
+    sourcePoolNumber: 1,
+    lockMode: R.START_LOCK,
+    isLocked: false,
+    isFinal: false,
+    closesAt: start,
+    startsAt: start,
+    fencers: [
+      { id: 1, name: 'A', position: 1, firstResultAt: new Date('2026-10-04T06:00Z') },
+      { id: 2, name: 'B', position: 2 },
+    ],
+  };
+  let saved;
+  const tx = {
+    $queryRaw: async () => [],
+    pool: {
+      findUnique: async () => pool,
+      update: async ({ data }) => {
+        saved = data;
+      },
+    },
+    poolFencer: { updateMany: async () => ({ count: 0 }) },
+    poolPrediction: { findMany: async () => [] },
+  };
+  const now = new Date('2026-10-04T06:30Z'),
+    later = new Date('2026-10-04T08:00Z');
+  await applyPool(
+    tx,
+    pool,
+    {
+      complete: false,
+      ambiguous: false,
+      rows: pool.fencers.map((f) => ({ name: f.name, position: f.position, firstResult: false, hasResult: false })),
+      startsAt: later,
+      closeAtStart: true,
+    },
+    now,
+  );
+  assert.equal(saved.closesAt.getTime(), later.getTime());
+  assert.equal(R.closed({ ...pool, ...saved }, now), false);
+  assert.equal(R.fencerClosed({ ...pool, ...saved }, pool.fencers[0], now), true);
+});

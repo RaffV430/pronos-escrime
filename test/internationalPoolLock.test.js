@@ -10,7 +10,8 @@ for (const [timezone, expected] of [
   ['Asia/Tokyo', '2026-10-22T00:00:00.000Z'],
   ['Europe/Paris', '2026-10-22T07:00:00.000Z'],
 ]) {
-  test(`FTL: poule sans résultat fermée à 09:00 locale (${timezone}), choix et points conservés`, async () => {
+  test(`FTL: poule sans résultat fermée à 09:00 locale (${timezone}), choix et points conservés`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: Date.parse(expected) - 7200000 });
     const config = {
       tournament: 'Synthetic Open',
       event: 'Synthetic Foil',
@@ -79,6 +80,16 @@ for (const [timezone, expected] of [
     time = '10:00 AM';
     assert.deepEqual((await syncPools(db, c, config, null, client)).warnings, []);
     assert.equal(pool.closesAt.getTime(), Date.parse(expected) + 3600000);
+    t.mock.timers.setTime(Date.parse(expected) + 3600001);
+    time = '11:00 AM';
+    assert.deepEqual((await syncPools(db, c, config, null, client)).warnings, []);
+    assert.equal(
+      pool.closesAt.getTime(),
+      Date.parse(expected) + 3600000,
+      'report après fermeture : pas de réouverture',
+    );
+    assert.equal(pool.startsAt.getTime(), Date.parse(expected) + 7200000, 'horaire affiché mis à jour');
+    assert.equal(rules.closed(pool), true);
     assert.deepEqual(predictions, before);
     assert.deepEqual(pool.fencers, fencers);
   });
