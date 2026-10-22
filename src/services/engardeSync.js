@@ -230,7 +230,7 @@ async function syncPools(db, c, config, url, client, leaseToken, { provisional =
     try {
       if (observed.error) throw failure(observed.error);
       observed.startsAt = startsAt(config, observed.time, day.offset);
-      observed.closeAtStart = config.timezone === 'Europe/Paris';
+      observed.closeAtStart = Boolean(observed.startsAt);
       observed.provisional = provisional;
       if (observed.rows.some((r) => !r.absent && !inRoster(r.name, r.club)))
         throw failure(`${label(observed.number)} : tireur absent ou ambigu dans les engagés.`);

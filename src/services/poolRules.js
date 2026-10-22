@@ -29,8 +29,8 @@ function validatePrediction(value, size, { optionalIndicator = false } = {}) {
   return { wins, losses, indicator };
 }
 // Poules suivies sur la source officielle : clôture tireur par tireur au premier résultat publié.
-// Épreuves en France : la poule se ferme aussi à son heure de début annoncée (engarde ne publie une
-// poule qu'une fois terminée) ; closesAt suit alors l'heure annoncée, y compris quand elle change.
+// Une heure officielle vérifiable ferme aussi la poule, dans le fuseau du lieu.
+// closesAt suit cette heure lorsqu’elle change, quel que soit le pays.
 const START_LOCK = 'START_OR_FIRST_RESULT';
 // Tirage provisoire (engarde, avant l'appel) : poule visible mais fermée aux pronostics.
 const PROVISIONAL = 'PROVISIONAL';
