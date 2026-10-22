@@ -1,4 +1,4 @@
-// Épreuves en France : une poule suivie se ferme à son heure de début annoncée, le premier résultat
+// Tous les pays : une poule suivie se ferme à son heure de début annoncée, le premier résultat
 // restant une sécurité ; l'heure de clôture suit l'heure officielle quand elle change.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -7,7 +7,7 @@ const { poolsNotification } = require('../src/services/poolRecompose');
 
 const start = new Date('2026-10-04T07:00:00Z'); // 9 h à Paris
 
-test('mode de clôture : heure de début en France, premier résultat sinon', () => {
+test('mode de clôture : heure vérifiable, premier résultat sans heure', () => {
   assert.deepEqual(R.sourceLock(start, true, new Date(0)), { lockMode: R.START_LOCK, closesAt: start });
   assert.equal(R.sourceLock(start, false, new Date(0)).lockMode, 'FIRST_RESULT');
   assert.equal(R.sourceLock(null, true, new Date(0)).lockMode, 'FIRST_RESULT', 'sans heure : premier résultat');
@@ -47,7 +47,7 @@ test('notification prioritaire : poules et heure de début', () => {
   );
 });
 
-test('applyPool : la poule suit l’heure officielle (France)', async () => {
+test('applyPool : la poule suit l’heure officielle', async () => {
   const { applyPool } = require('../src/services/ftlPools');
   const pool = {
     id: 5,
@@ -90,7 +90,7 @@ test('applyPool : la poule suit l’heure officielle (France)', async () => {
     { complete: false, ambiguous: false, rows, startsAt: start, closeAtStart: false },
     new Date(),
   );
-  assert.equal(saved.lockMode, undefined, 'hors de France : rien ne change');
+  assert.equal(saved.lockMode, undefined, 'sans verrouillage horaire demandé : rien ne change');
 });
 
 test('tirage provisoire (engarde, avant l’appel) : poule visible mais fermée', () => {

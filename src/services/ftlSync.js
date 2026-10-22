@@ -846,7 +846,7 @@ async function syncPools(db, c, config, actorId, client, leaseToken = null) {
           } catch {
             observed.startsAt = null;
           }
-          observed.closeAtStart = Boolean(context.date) && config.timezone === 'Europe/Paris';
+          observed.closeAtStart = Boolean(observed.startsAt);
           for (const row of observed.rows)
             if (namedEntries(c.podiumRoster, row.name).length !== 1)
               throw failure('Composition de poule absente ou ambiguë dans les engagés.');

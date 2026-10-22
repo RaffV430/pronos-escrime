@@ -252,7 +252,7 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
       })
     ).count;
   // A missing reciprocal score does not refresh source freshness, but certain first-result locks persist.
-  // Clôture à l'heure annoncée (épreuves en France) : suit l'heure officielle tant que la poule est ouverte.
+  // Clôture à l'heure annoncée (tous les fuseaux) : suit l'heure officielle tant que la poule est ouverte.
   const lock =
     observed.closeAtStart !== undefined && followsSource(current) && !current.isFinal
       ? sourceLock(
