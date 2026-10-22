@@ -262,6 +262,11 @@ async function applyPool(tx, snapshot, observed, checkedAt) {
           observed.provisional,
         )
       : null;
+  // A later official time cannot reopen an already elapsed deadline.
+  if (lock && current.lockMode === 'START_OR_FIRST_RESULT' && new Date(current.closesAt) <= checkedAt) {
+    lock.lockMode = current.lockMode;
+    lock.closesAt = current.closesAt;
+  }
   const bouts =
     Array.isArray(observed.bouts) && observed.bouts.length === current.fencers.length ? observed.bouts : null;
   await tx.pool.update({

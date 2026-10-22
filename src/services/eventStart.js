@@ -49,7 +49,10 @@ async function eventStartFor(db, competitionId) {
       select: { id: true, rosterSourceUrl: true },
     });
     if (!competition) return null;
-    return eventStart(await require('./ftlScheduler').configFor(db, competition));
+    const config = await require('./ftlScheduler').configFor(db, competition);
+    const current = eventStart(config);
+    const preserved = Date.parse(config?.predictionStartAt);
+    return Number.isFinite(preserved) ? (current === null ? preserved : Math.min(current, preserved)) : current;
   } catch {
     return null;
   }
