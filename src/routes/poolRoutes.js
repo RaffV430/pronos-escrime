@@ -188,7 +188,7 @@ function createPoolRouter(db = prisma, { sourceCheck = require('../services/pool
             409,
           );
         const data = {
-          ...validatePrediction(req.body, pool.fencers.length, { optionalIndicator: true }),
+          ...validatePrediction(req.body, pool.fencers.filter((f) => !f.status).length, { optionalIndicator: true }),
           savedAt: new Date(),
         };
         return tx.poolPrediction.upsert({
