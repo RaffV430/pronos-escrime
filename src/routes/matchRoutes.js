@@ -13,6 +13,17 @@ const { rescore } = require('../services/rescore');
 const { applyOutsiderBonus, crowdIsOutsider } = require('../services/outsider');
 const { reportError } = require('../lib/report');
 
+router.get('/tableau/:competitionId', authMiddleware, async (req, res) => {
+  try {
+    const state = await require('../services/tableauState').tableauState(prisma, Number(req.params.competitionId));
+    if (!state) return res.status(404).json({ error: 'Épreuve introuvable.' });
+    res.set('Cache-Control', 'no-store').json(state);
+  } catch (error) {
+    reportError(error, 'état du tableau');
+    res.status(500).json({ error: 'Tableau temporairement indisponible.' });
+  }
+});
+
 router.get('/freshness/:competitionId', authMiddleware, async (req, res) => {
   const competitionId = Number(req.params.competitionId);
   if (!Number.isSafeInteger(competitionId) || competitionId < 1)
