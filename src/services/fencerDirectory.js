@@ -13,7 +13,7 @@ function directory(competitions, favorites, club, profiles = []) {
     for (const entry of Array.isArray(c.podiumRoster) ? c.podiumRoster : []) {
       if (entry?.id == null || !entry.name) continue;
       const key = entry.affiliationId
-        ? `profile:${entry.affiliationId}`
+        ? `profile:${entry.participationGroupId || entry.affiliationId}`
         : selectable.get(String(entry.id))?.identityKey;
       if (!key) continue;
       if (!groups.has(key))
@@ -21,6 +21,7 @@ function directory(competitions, favorites, club, profiles = []) {
           ...entry,
           ...identity(entry),
           ...(entry.currentClub ? { club: entry.currentClub } : {}),
+          affiliationId: entry.participationGroupId || entry.affiliationId,
           key,
           competitionId: c.id,
           events: [],
@@ -32,18 +33,23 @@ function directory(competitions, favorites, club, profiles = []) {
       row.favoriteId ||= links.find((l) => l.entryId === String(entry.id))?.favoriteId || null;
     }
   }
-  for (const p of profiles) {
-    const key = `profile:${p.id}`;
+  const participation = require('./fencerParticipationGroups').groups(profiles);
+  for (const p of [...profiles].sort((a, b) => a.id - b.id)) {
+    const canonical = participation.get(p.id) || p.id;
+    const key = `profile:${canonical}`;
     const row = groups.get(key) || { id: null, competitionId: null, events: [], favoriteId: null };
     groups.set(key, {
       ...row,
       key,
-      affiliationId: p.id,
+      affiliationId: canonical,
       name: p.name,
       country: p.country,
       club: p.club,
-      ageCategory: require('./fencerAgeCategory').verifiedCategory(p),
-      favoriteId: row.favoriteId || favorites.find((f) => f.affiliationId === p.id)?.id || null,
+      ageCategory: row.ageCategory || require('./fencerAgeCategory').verifiedCategory(p),
+      favoriteId:
+        row.favoriteId ||
+        favorites.find((f) => (participation.get(f.affiliationId) || f.affiliationId) === canonical)?.id ||
+        null,
     });
   }
   const rows = [...groups.values()];
@@ -83,11 +89,13 @@ async function search(db, userId, { tournamentId, competitionId, query, clubOnly
   const selectedClub = clubId ? clubs.find((c) => c.id === clubId) : club;
   if (clubId && !selectedClub) throw failure('Club introuvable.', 404);
   const term = normalize(query);
-  const decorated = await require('./fencerAffiliations').decorate(db, competitions, favorites);
+  const decorated = await require('./fencerAffiliations').decorate(db, competitions, favorites, {
+    groupAllEntries: true,
+  });
   const profiles =
     !tournamentId && db.fencerAffiliation
       ? await db.fencerAffiliation.findMany({
-          select: { id: true, name: true, country: true, club: true, birthYear: true, federationVerified: true },
+          select: require('./fencerParticipationGroups').select,
         })
       : [];
   const rows = directory(decorated.competitions, decorated.favorites, selectedClub, profiles).filter(

@@ -32,6 +32,12 @@ function compatible(favorite, entry, competitionId) {
     (!favorite.country || !candidate.country || favorite.country === candidate.country)
   )
     return true;
+  if (
+    favorite.participationGroupId &&
+    favorite.participationGroupId === entry.participationGroupId &&
+    (!favorite.country || !candidate.country || favorite.country === candidate.country)
+  )
+    return true;
   if (favorite.affiliationId && !favorite.originCompetitionId) return false;
   for (const field of ['country', 'club'])
     if (favorite[field] && candidate[field] && normalize(favorite[field]) !== normalize(candidate[field])) return false;
@@ -136,12 +142,16 @@ async function save(tx, userId, data) {
       where: { competitionId_entryId: { competitionId: data.originCompetitionId, entryId: data.originEntryId } },
     });
     if (link) {
-      data.affiliationId = link.affiliationId;
+      const profile = await tx.fencerAffiliation.findUnique({ where: { id: link.affiliationId } });
+      const group = profile
+        ? await require('./fencerParticipationGroups').equivalent(tx, profile)
+        : { canonical: link.affiliationId, ids: [link.affiliationId] };
+      data.affiliationId = group.canonical;
       const favorites = await tx.followedFencer.findMany({ where: { userId } });
-      const origins = await tx.fencerAffiliationEntry.findMany({ where: { affiliationId: link.affiliationId } });
+      const origins = await tx.fencerAffiliationEntry.findMany({ where: { affiliationId: { in: group.ids } } });
       const previous = favorites.find(
         (f) =>
-          f.affiliationId === link.affiliationId ||
+          group.ids.includes(f.affiliationId) ||
           origins.some((o) => o.competitionId === f.originCompetitionId && o.entryId === f.originEntryId),
       );
       if (previous) return previous;
@@ -159,17 +169,18 @@ async function followProfile(db, userId, affiliationId) {
   return locked(db, userId, async (tx) => {
     const p = await tx.fencerAffiliation.findUnique({ where: { id: affiliationId } });
     if (!p) throw failure('Tireur introuvable.', 404);
+    const group = await require('./fencerParticipationGroups').equivalent(tx, p);
     const favorites = await tx.followedFencer.findMany({ where: { userId } });
-    const origins = await tx.fencerAffiliationEntry.findMany({ where: { affiliationId } });
+    const origins = await tx.fencerAffiliationEntry.findMany({ where: { affiliationId: { in: group.ids } } });
     const previous = favorites.find(
       (f) =>
-        f.affiliationId === affiliationId ||
+        group.ids.includes(f.affiliationId) ||
         origins.some((o) => o.competitionId === f.originCompetitionId && o.entryId === f.originEntryId),
     );
     if (previous) return previous;
     return save(tx, userId, {
-      identityKey: 'profile:' + affiliationId,
-      affiliationId,
+      identityKey: 'profile:' + group.canonical,
+      affiliationId: group.canonical,
       name: p.name,
       country: p.country,
       club: p.club,
