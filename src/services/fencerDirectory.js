@@ -89,7 +89,9 @@ async function search(db, userId, { tournamentId, competitionId, query, clubOnly
   const selectedClub = clubId ? clubs.find((c) => c.id === clubId) : club;
   if (clubId && !selectedClub) throw failure('Club introuvable.', 404);
   const term = normalize(query);
-  const decorated = await require('./fencerAffiliations').decorate(db, competitions, favorites);
+  const decorated = await require('./fencerAffiliations').decorate(db, competitions, favorites, {
+    groupAllEntries: true,
+  });
   const profiles =
     !tournamentId && db.fencerAffiliation
       ? await db.fencerAffiliation.findMany({

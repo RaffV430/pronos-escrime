@@ -278,7 +278,7 @@ async function manual(db, id, input, actorId) {
     return p;
   });
 }
-async function decorate(db, competitions, favorites = []) {
+async function decorate(db, competitions, favorites = [], { groupAllEntries = false } = {}) {
   if (!db.fencerAffiliationEntry) return { competitions, favorites };
   const ids = [
     ...new Set(
@@ -297,8 +297,12 @@ async function decorate(db, competitions, favorites = []) {
     : [];
   const participation = await require('./fencerParticipationGroups').load(
     db,
-    [...competitions.flatMap((c) => entriesOf(c).map((e) => e.name)), ...favorites.map((f) => f.name)],
-    [...profiles.map((p) => p.id), ...links.map((l) => l.affiliationId)],
+    [
+      ...(groupAllEntries ? competitions.flatMap((c) => entriesOf(c).map((e) => e.name)) : []),
+      ...favorites.map((f) => f.name),
+      ...profiles.map((p) => p.name),
+    ],
+    profiles.map((p) => p.id),
   );
   const byId = new Map(profiles.map((p) => [p.id, p]));
   const extra = (id, entryId, affiliationId) => {
