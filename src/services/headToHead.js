@@ -12,7 +12,11 @@ const played = [
   { NOT: [{ player1: '' }, { player2: '' }] },
 ];
 // Les liens existants du référentiel distinguent identité et représentation (club/pays).
-const affiliationSelect = { entryId: true, affiliationId: true, affiliation: { select: { country: true } } };
+const affiliationSelect = {
+  entryId: true,
+  affiliationId: true,
+  affiliation: { select: { country: true, federationVerified: true } },
+};
 function identityOf(competition, name) {
   const rows = (competition?.podiumRoster || []).filter(
     (e) =>
@@ -32,12 +36,16 @@ function identityOf(competition, name) {
     ambiguous: !!(published && linked && published !== linked),
     country: published || linked,
     affiliationId: link?.affiliationId || null,
+    verified: link?.affiliation?.federationVerified === true,
   };
 }
 function compatibleIdentity(current, historical) {
   if (current.ambiguous || historical.ambiguous) return false;
   if (current.country && historical.country && current.country !== historical.country) return false;
-  if (current.affiliationId && historical.affiliationId) return current.affiliationId === historical.affiliationId;
+  if (current.affiliationId && current.affiliationId === historical.affiliationId) return true;
+  // Les profils non vérifiés peuvent être créés par inscription : leurs IDs différents
+  // ne prouvent pas un homonyme. Deux identités fédérales vérifiées restent distinctes.
+  if (current.verified && historical.verified && current.affiliationId !== historical.affiliationId) return false;
   return !current.country || historical.country === current.country;
 }
 

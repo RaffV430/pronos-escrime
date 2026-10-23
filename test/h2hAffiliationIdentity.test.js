@@ -11,7 +11,9 @@ const competition = (country, affiliationId = 10, extra = {}) => ({
     { id: 'a', name, country },
     { id: 'b', name: opponent, country: 'ITA' },
   ],
-  affiliationEntries: affiliationId ? [{ entryId: 'a', affiliationId, affiliation: { country: 'FRA' } }] : [],
+  affiliationEntries: affiliationId
+    ? [{ entryId: 'a', affiliationId, affiliation: { country: 'FRA', federationVerified: true } }]
+    : [],
   ...extra,
 });
 const bout = (id, comp, reverse = false) => ({
@@ -110,4 +112,19 @@ test('a history read failure is propagated rather than presenting a partial succ
     throw new Error('lecture indisponible');
   };
   await assert.rejects(headToHead(db, 999), /lecture indisponible/);
+});
+
+test('separate provisional profiles do not split a same-country international history', async () => {
+  const provisional = (id) =>
+    competition('RUS', id, {
+      affiliationEntries: [
+        { entryId: 'a', affiliationId: id, affiliation: { country: 'RUS', federationVerified: false } },
+      ],
+    });
+  const rows = [bout(5, provisional(20)), bout(4, provisional(30))];
+  const result = await headToHead(database(provisional(10), rows), 999);
+  assert.deepEqual(
+    result.form.player1.map((m) => m.matchId),
+    [5, 4],
+  );
 });
