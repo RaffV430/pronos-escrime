@@ -192,6 +192,7 @@ router.get('/fencer', authMiddleware, async (req, res) => {
       await require('../services/fencerProfile').fencerProfile(prisma, req.query.name, {
         club: typeof req.query.club === 'string' ? req.query.club : null,
         matchId: req.query.matchId ? Number(req.query.matchId) : null,
+        affiliationId: req.query.affiliationId !== undefined ? Number(req.query.affiliationId) : null,
       }),
     );
   } catch (error) {

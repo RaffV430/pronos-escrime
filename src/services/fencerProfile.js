@@ -133,7 +133,7 @@ const clubsIn = (c, anyName) => [
 ];
 const sideClub = (m, anyName) => (anyName(m.player1) ? m.club1 : anyName(m.player2) ? m.club2 : null);
 
-async function fencerProfile(db, rawName, { club: rawClub = null, matchId = null } = {}) {
+async function fencerProfile(db, rawName, { club: rawClub = null, matchId = null, affiliationId = null } = {}) {
   const name = String(rawName || '').trim();
   if (name.length < 2 || name.length > 120) throw failure('Nom de tireur invalide.', 400);
   let club = String(rawClub || '').trim() || null;
@@ -141,9 +141,25 @@ async function fencerProfile(db, rawName, { club: rawClub = null, matchId = null
   // Autres orthographes du même tireur reliées par l'administration.
   const names = await require('./fencerAliases').expand(db, name);
   const anyName = (n) => names.some((x) => same(x, n));
+  let scopedIds = null;
+  if (affiliationId !== null) {
+    if (!Number.isSafeInteger(affiliationId) || affiliationId <= 0) throw failure('Identité de tireur invalide.', 400);
+    const profile = await db.fencerAffiliation.findUnique({ where: { id: affiliationId } });
+    if (!profile || !anyName(profile.name)) throw failure('Identité de tireur introuvable.', 404);
+    const group = await require('./fencerParticipationGroups').equivalent(db, profile);
+    scopedIds = [
+      ...new Set(
+        group.profiles
+          .filter((p) => group.ids.includes(p.id))
+          .flatMap((p) => (p.entries || []).map((e) => e.competitionId)),
+      ),
+    ];
+  }
+
   const [matches, poolRows] = await Promise.all([
     db.match.findMany({
       where: {
+        ...(scopedIds ? { competitionId: { in: scopedIds } } : {}),
         isFinished: true,
         pointsPending: false,
         OR: names.flatMap((n) => [{ player1: eq(n) }, { player2: eq(n) }]),
@@ -155,7 +171,10 @@ async function fencerProfile(db, rawName, { club: rawClub = null, matchId = null
       orderBy: [{ startsAt: { sort: 'asc', nulls: 'last' } }, { id: 'asc' }],
     }),
     db.poolFencer.findMany({
-      where: { OR: names.map((n) => ({ name: eq(n) })) },
+      where: {
+        OR: names.map((n) => ({ name: eq(n) })),
+        ...(scopedIds ? { pool: { competitionId: { in: scopedIds } } } : {}),
+      },
       select: {
         pool: {
           include: {
@@ -178,7 +197,7 @@ async function fencerProfile(db, rawName, { club: rawClub = null, matchId = null
             WHERE lower(trim(e->>'name')) = ANY(${lowered}::text[]))`
       ).map((r) => Number(r.id))
     : [];
-  const ids = [...new Set([...core, ...registered])];
+  const ids = [...new Set([...core, ...registered])].filter((id) => !scopedIds || scopedIds.includes(id));
   const competitions = await db.competition.findMany({
     where: { id: { in: ids } },
     select: {
@@ -190,6 +209,11 @@ async function fencerProfile(db, rawName, { club: rawClub = null, matchId = null
       tournament: { select: { id: true, name: true } },
     },
   });
+  if (scopedIds && competitions.some((c) => (c.podiumRoster || []).filter((e) => anyName(e.name)).length > 1))
+    throw failure(
+      'Plusieurs engagés portent ce nom dans une même épreuve. Parcours non fusionné ; vérification nécessaire.',
+      409,
+    );
   const { countryFor } = require('./matchCountries');
   const rosterCountry = (c) =>
     (c.podiumRoster || []).filter((e) => anyName(e.name)).map((e) => countryFor([e], e.name));

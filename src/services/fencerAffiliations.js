@@ -295,12 +295,18 @@ async function decorate(db, competitions, favorites = []) {
         where: { id: { in: favorites.map((f) => f.affiliationId).filter(Number.isInteger) } },
       })
     : [];
+  const participation = await require('./fencerParticipationGroups').load(
+    db,
+    [...competitions.flatMap((c) => entriesOf(c).map((e) => e.name)), ...favorites.map((f) => f.name)],
+    [...profiles.map((p) => p.id), ...links.map((l) => l.affiliationId)],
+  );
   const byId = new Map(profiles.map((p) => [p.id, p]));
   const extra = (id, entryId, affiliationId) => {
     const p = byId.get(affiliationId) || map.get(`${id}:${entryId}`);
     return p
       ? {
           affiliationId: p.id,
+          participationGroupId: participation.groups.get(p.id) || p.id,
           currentClub: p.club,
           affiliationSource: p.sourceUrl,
           ageCategory: require('./fencerAgeCategory').verifiedCategory(p),
