@@ -206,9 +206,10 @@ function payload(c, matches, id) {
       .join(',')}`,
   };
 }
-// Priorité « high » pour ce qui est urgent (clôture proche, réouverture, alerte administrateur) :
+// Priorité « high » pour les alertes urgentes et les résultats de matchs des tireurs suivis :
 // en « normal », iOS peut retarder la livraison jusqu'au réveil de l'appareil.
-const URGENT = new Set(['AVAILABLE', 'REMINDER', 'POOLREMINDER', 'REOPENED', 'POOLS', 'MATCHES']);
+// Les bilans de poule et récapitulatifs restent en priorité normale.
+const URGENT = new Set(['AVAILABLE', 'REMINDER', 'POOLREMINDER', 'REOPENED', 'POOLS', 'MATCHES', 'FENCER_RESULT']);
 async function send(subscription, content, ttl, urgency = 'normal') {
   return webpush.sendNotification(
     { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
