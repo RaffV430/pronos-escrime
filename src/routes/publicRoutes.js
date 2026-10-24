@@ -339,6 +339,7 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
   const delta = req.query.delta === '1';
   const { LIVE_WIRE, encodeLiveWire } = require('../services/liveWire');
   const packedWire = req.query.wire === LIVE_WIRE;
+  const metrics = require('../lib/liveMetrics').liveMetrics.begin(res, { delta, packedWire });
   const { liveDelta } = require('../services/liveDelta');
   const output = require('../services/liveStreamOutput').liveStreamOutput(res, () => {
     if (again && !closed && !timer) {
@@ -372,6 +373,7 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
         again = true;
         return;
       }
+      metrics.message(body, wireBody);
       last = body;
       if (delta) previous = diff.next;
     } catch (error) {
@@ -392,6 +394,7 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
     clearTimeout(timer);
     clearInterval(ping);
     output.close();
+    metrics.close();
     unsubscribe();
   };
   req.once('close', close);
