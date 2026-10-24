@@ -19,6 +19,8 @@ app.use(helmet());
 // Diagnostic opt-in : placé avant compression pour compter les octets effectivement encodés.
 if (process.env.BANDWIDTH_DIAGNOSTICS === 'true')
   app.use(require('./lib/bandwidthDiagnostics').bandwidthDiagnostics().middleware);
+// Mesure anonyme opt-in, avant compression : compte le corps encodé à l’origine.
+app.use(require('./lib/liveMetrics').liveMetrics.middleware);
 // Réponses compressées (gzip) : 5 à 10 fois moins de données à télécharger, décisif en salle mal couverte.
 app.use(require('./middleware/preserveSseEncoding').preserveSseEncoding);
 app.use(require('compression')({ threshold: 1024 }));
@@ -166,6 +168,7 @@ async function start() {
       stopClubMail(),
       stopLive(),
     ]);
+    require('./lib/liveMetrics').liveMetrics.stop();
     await prisma.$disconnect().catch(() => {});
     process.exit(0);
   };
@@ -177,6 +180,7 @@ async function start() {
 if (require.main === module)
   start().catch(async (error) => {
     console.error('Démarrage annulé :', error.message);
+    require('./lib/liveMetrics').liveMetrics.stop();
     await prisma.$disconnect().catch(() => {});
     process.exit(1);
   });
