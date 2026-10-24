@@ -209,7 +209,17 @@ function payload(c, matches, id) {
 // Priorité « high » pour les alertes urgentes et les résultats de matchs des tireurs suivis :
 // en « normal », iOS peut retarder la livraison jusqu'au réveil de l'appareil.
 // Les bilans de poule et récapitulatifs restent en priorité normale.
-const URGENT = new Set(['AVAILABLE', 'REMINDER', 'POOLREMINDER', 'REOPENED', 'POOLS', 'MATCHES', 'FENCER_RESULT']);
+const URGENT = new Set([
+  'AVAILABLE',
+  'REMINDER',
+  'POOLREMINDER',
+  'REOPENED',
+  'POOLS',
+  'MATCHES',
+  'FENCER_RESULT',
+  'FENCER_MATCH_SCHEDULE',
+  'FENCER_POOL_SCHEDULE',
+]);
 async function send(subscription, content, ttl, urgency = 'normal') {
   return webpush.sendNotification(
     { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
@@ -335,7 +345,8 @@ async function notificationContext(db, now = Date.now()) {
             lockMode: true,
             closesAt: true,
             startsAt: true,
-            fencers: { select: { firstResultAt: true, name: true, wins: true } },
+            strip: true,
+            fencers: { select: { firstResultAt: true, name: true, club: true, wins: true } },
           },
         })
       : [],
@@ -400,6 +411,12 @@ async function queueSpecial(db, id, context = null) {
       if (!sub?.enabled) return;
       const p = preferences(sub.preferences || {});
       await queueEnrollments(tx, sub, shared);
+      if (p.fencerSchedule && !isQuiet(p))
+        await require('./fencerScheduleNotifications').queueSchedules(
+          tx,
+          sub,
+          shared.filter((x) => follows(sub, x.competition)),
+        );
       const fencerResults = p.fencerResults;
       if (
         (!p.newMatches && !p.reminders && !p.roundResults && !p.poolResults && !p.recap && !fencerResults) ||
@@ -731,7 +748,10 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
   // « Uniquement Mes tireurs » limite les alertes de pronostic ; les résultats de Mes tireurs ont besoin
   // des noms ; les bilans personnels (tour, poules, récap) ne dépendent pas des tireurs suivis.
   const scoped = prefs.fencersOnly && ['AVAILABLE', 'REMINDER', 'REOPENED', 'POOLREMINDER', 'POOLS'].includes(kind);
-  const names = scoped || ['FENCER_RESULT', 'FENCER_POOL'].includes(kind) ? await namesFor(db, sub, c) : null;
+  const names =
+    scoped || ['FENCER_RESULT', 'FENCER_POOL', 'FENCER_MATCH_SCHEDULE', 'FENCER_POOL_SCHEDULE'].includes(kind)
+      ? await namesFor(db, sub, c)
+      : null;
   if (names && !hasAny(names)) return cancel();
   // Une recomposition annoncée pendant les heures calmes attend leur fin plutôt que d'être perdue.
   // Poules modifiées juste avant leur début (France) : notification prioritaire, sans attendre ni filtre.
@@ -757,7 +777,8 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
     (kind === 'POOLRESULTS' && !prefs.poolResults) ||
     (kind === 'RECAP' && !prefs.recap && !prefs.roundResults && !prefs.poolResults) ||
     (kind === 'REOPENED' && !prefs.newMatches) ||
-    (['FENCER_RESULT', 'FENCER_POOL'].includes(kind) && !prefs.fencerResults)
+    (['FENCER_RESULT', 'FENCER_POOL'].includes(kind) && !prefs.fencerResults) ||
+    (['FENCER_MATCH_SCHEDULE', 'FENCER_POOL_SCHEDULE'].includes(kind) && !prefs.fencerSchedule)
   )
     return cancel();
   if (prefs.fencersOnly && ['POOLREMINDER', 'POOLS'].includes(kind)) {
@@ -938,6 +959,31 @@ async function deliverSpecial(db, delivery, sub, c, matches, sender) {
       body: poolResultsText(points, rows.length),
       tag: `pronos-${id}`,
       url: `/?tournament=${c.tournamentId}&event=${c.id}&view=mine`,
+    };
+  } else if (['FENCER_MATCH_SCHEDULE', 'FENCER_POOL_SCHEDULE'].includes(kind)) {
+    const { upcomingMatch, upcomingPool, scheduleText } = require('./fencerScheduleNotifications');
+    const pool = kind === 'FENCER_POOL_SCHEDULE';
+    const row = pool
+      ? await db.pool.findUnique({ where: { id: delivery.matchIds[0] }, include: { fencers: true } })
+      : await db.match.findUnique({ where: { id: delivery.matchIds[0] } });
+    if (
+      !row ||
+      row.competitionId !== c.id ||
+      !names ||
+      Date.now() - delivery.createdAt.getTime() > 86400000 ||
+      (pool
+        ? !upcomingPool(row) || !row.fencers.some((f) => isMine(names, f.name, f.club))
+        : !upcomingMatch(row) || !concerned(row, names))
+    )
+      return cancel();
+    ttl = Math.max(
+      1,
+      Math.min(3600, row.startsAt ? Math.floor((new Date(row.startsAt).getTime() - Date.now()) / 1000) : 3600),
+    );
+    content = {
+      ...scheduleText(c, row, names, prefs.timezone, pool),
+      tag: `pronos-${id}`,
+      url: `/direct/${c.tournamentId}/${c.id}`,
     };
   } else if (kind === 'FENCER_RESULT') {
     // Résultat d'un match d'un de mes tireurs, publié dans l'heure.

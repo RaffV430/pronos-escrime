@@ -5,6 +5,7 @@ const defaults = {
   followAll: true,
   fencersOnly: false,
   fencerEntries: false,
+  fencerSchedule: false,
   newMatches: true,
   reminders: true,
   roundResults: false,
@@ -41,6 +42,7 @@ function preferences(input = {}) {
   for (const k of [
     'fencersOnly',
     'fencerEntries',
+    'fencerSchedule',
     'followAll',
     'newMatches',
     'reminders',
