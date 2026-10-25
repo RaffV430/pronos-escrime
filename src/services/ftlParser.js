@@ -194,7 +194,17 @@ function parseTable(
               .filter(Boolean),
           ),
         ];
+        const relayLinks = [
+          ...new Set(
+            scoreCell
+              .find('a[href]')
+              .toArray()
+              .map((e) => $(e).attr('href'))
+              .filter((href) => /\/teammatches\/details\//i.test(href)),
+          ),
+        ];
         out.push({
+          ...(relayLinks.length === 1 ? { relayDetailsUrl: relayLinks[0] } : {}),
           sourceKey: `${label}:${i / 2 + 1}`,
           round,
           player1,
