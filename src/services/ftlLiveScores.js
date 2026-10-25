@@ -1,6 +1,7 @@
 // Scores en direct des pistes FencingTimeLive (flux temps réel « /livescores », sans connexion au compte).
 // Affichage seulement : les points restent calculés sur le résultat final confirmé par l'import officiel.
 const { EventEmitter } = require('node:events');
+const { mergeTeamHistory } = require('./teamRelayHistory');
 const { ORIGIN } = require('./ftlClient');
 const { norm } = require('./ftlParser');
 const { countryFor } = require('./matchCountries');
@@ -136,6 +137,8 @@ function retainedHistory(match) {
         ...t,
         score1: t.score2,
         score2: t.score1,
+        fencer1Name: t.fencer2Name,
+        fencer2Name: t.fencer1Name,
         by: t.by === 1 ? 2 : t.by === 2 ? 1 : t.by,
       }))
     : saved.history;
@@ -227,7 +230,40 @@ function matchLive(matches, states, now = Date.now()) {
     if (clockStarted) rememberLive(m, s.at);
     const started = Boolean(liveDetectedAt(m));
     const [p1, p2] = swap ? [s.right, s.left] : [s.left, s.right];
-    const history = oriented(bouts.get(boutKey(s))?.touches || [], swap);
+    const segment = oriented(bouts.get(boutKey(s))?.touches || [], swap);
+    const saved = finishedHistory.get(m.id);
+    const sameTeams = saved && fold(saved.player1) === a && fold(saved.player2) === b;
+    const reversedTeams = saved && fold(saved.player1) === b && fold(saved.player2) === a;
+    const previous = sameTeams
+      ? saved.history
+      : reversedTeams
+        ? saved.history.map((t) => ({
+            ...t,
+            score1: t.score2,
+            score2: t.score1,
+            fencer1Name: t.fencer2Name,
+            fencer2Name: t.fencer1Name,
+            by: t.by === 1 ? 2 : t.by === 2 ? 1 : t.by,
+          }))
+        : [];
+    const history = team
+      ? !started
+        ? []
+        : mergeTeamHistory(
+            previous,
+            segment,
+            {
+              score1: p1.score,
+              score2: p2.score,
+              period: s.period,
+              fencer1Name: p1.name,
+              fencer2Name: p2.name,
+              clock: s.clock,
+              at: new Date(s.at).toISOString(),
+            },
+            MAX_TOUCHES,
+          )
+      : segment;
     if (history.length) finishedHistory.set(m.id, { player1: m.player1, player2: m.player2, history });
     out.push({
       matchId: m.id,
