@@ -334,3 +334,53 @@ test('une horloge absente ou initialisée à zéro sans touche ne prouve pas un 
     assert.equal(live.matchLive([match], [state], at)[0].started, false);
   }
 });
+
+test('team history retains earlier relays, names and corrections without changing the official match', () => {
+  const at = Date.now(),
+    guids = new Set([GUID]);
+  const match = {
+    id: 1991,
+    player1: 'SYNTH TEAM A',
+    player2: 'SYNTH TEAM B',
+    player1Country: 'FRA',
+    player2Country: 'ITA',
+    podiumFormat: 'TEAM',
+    strip: 'relay-history',
+    isFinished: false,
+  };
+  const snapshot = structuredClone(match);
+  const send = (l, r, n, period, left = 'SYNTH A', right = 'SYNTH B') =>
+    live.record(
+      msg('relay-history', left, right, l, r, {
+        PeriodNum: period,
+        Left: { Name: left, Country: 'FRA', Score: l },
+        Right: { Name: right, Country: 'ITA', Score: r },
+      }),
+      at + n,
+      guids,
+    );
+  let state = send(3, 2, 1, 1);
+  live.matchLive([match], [state], at + 1);
+  state = send(4, 2, 2, 1);
+  live.matchLive([match], [state], at + 2);
+  state = send(4, 2, 3, 2, 'SYNTH C', 'SYNTH D');
+  live.matchLive([match], [state], at + 3);
+  state = send(4, 3, 4, 2, 'SYNTH C', 'SYNTH D');
+  const result = live.matchLive([match], [state], at + 4)[0];
+  assert.deepEqual(
+    result.history.map((x) => x.by),
+    ['start', 1, 'relay', 2],
+  );
+  assert.equal(result.history[1].fencer1Name, 'SYNTH A');
+  assert.equal(result.history.at(-1).fencer1Name, 'SYNTH C');
+  assert.deepEqual(match, snapshot);
+  const done = live.matchLive([{ ...match, isFinished: true, score1: 4, score2: 3 }], [], at + 5)[0];
+  assert.deepEqual(done.history, result.history);
+  const reversed = live.matchLive(
+    [{ ...match, isFinished: true, player1: match.player2, player2: match.player1, score1: 3, score2: 4 }],
+    [],
+    at + 6,
+  )[0];
+  assert.equal(reversed.history.at(-1).fencer1Name, 'SYNTH D');
+  assert.equal(reversed.history.at(-1).by, 1);
+});
