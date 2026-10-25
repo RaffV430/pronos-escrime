@@ -360,7 +360,9 @@ router.get('/competitions/:competitionId/live/stream', async (req, res) => {
     }
     sending = true;
     try {
-      const rows = await live.liveFor(db, competitionId);
+      const rows = await (req.query.teams === '1'
+        ? live.teamOverviewFor(db, competitionId)
+        : live.liveFor(db, competitionId));
       if (closed) return;
       const diff = delta ? liveDelta(previous, rows) : null;
       if (delta && !diff.message) return;

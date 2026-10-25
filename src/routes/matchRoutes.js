@@ -205,7 +205,12 @@ router.get('/fencer', authMiddleware, async (req, res) => {
 // Scores en direct (pistes FencingTimeLive) des rencontres non terminées d'une épreuve : affichage seulement.
 router.get('/live/:competitionId', authMiddleware, async (req, res) => {
   try {
-    res.json(await require('../services/ftlLiveScores').liveFor(prisma, Number(req.params.competitionId)));
+    const live = require('../services/ftlLiveScores');
+    res.json(
+      await (req.query.teams === '1'
+        ? live.teamOverviewFor(prisma, Number(req.params.competitionId))
+        : live.liveFor(prisma, Number(req.params.competitionId))),
+    );
   } catch (error) {
     reportError(error, 'scores en direct');
     res.status(500).json({ error: 'Scores en direct indisponibles.' });
