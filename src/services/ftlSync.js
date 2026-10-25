@@ -253,6 +253,9 @@ async function observeSingle(c, existing, client, configured = null, loggedIn = 
     issues,
     checkedAt: new Date(),
   };
+  await require('./officialRelayScores')
+    .refresh(c, observation, client)
+    .catch(() => {});
   return isPreliminary ? require('./ftlTableauPhases').preliminary(observation) : observation;
 }
 function planMatches(existing, observation, { allowPartial = false } = {}) {

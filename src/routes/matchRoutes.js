@@ -107,6 +107,7 @@ router.get('/', authMiddleware, async (req, res) => {
     res.json(
       timed.map(({ match, isClosed }) => ({
         ...withCountries(match),
+        officialRelays: require('../services/officialRelayScores').forMatch(match),
         social: social.get(match.id) || { reactions: 0, comments: 0 },
         maxScore: boutMax(match.competition),
         isClosed,

@@ -18,6 +18,7 @@ function publicMatch(m) {
     competitionId: x.competitionId,
     round: x.round,
     sourceKey: x.sourceKey,
+    officialRelays: require('../services/officialRelayScores').forMatch(m),
     player1: x.player1,
     player2: x.player2,
     player1Country: x.player1Country,
