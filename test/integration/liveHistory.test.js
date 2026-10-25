@@ -103,3 +103,63 @@ test(
     assert.equal((await db.match.findUnique({ where: { id: m.id } })).score1, null);
   },
 );
+
+test(
+  'podium spelling alias saves the correct team history without rewriting strip, scores or predictions',
+  { skip },
+  async () => {
+    const guid = 'C'.repeat(32);
+    const t = await db.tournament.create({
+      data: { name: 'SYNTH PODIUM', ftlSourceUrl: 'https://www.fencingtimelive.com/tournaments/eventSchedule/' + guid },
+    });
+    const c = await db.competition.create({
+      data: {
+        name: 'SYNTH TEAM',
+        tournamentId: t.id,
+        podiumFormat: 'TEAM',
+        podiumRoster: [
+          { name: 'SYNTH TEAM A', country: 'ITA' },
+          { name: 'SYNTH TEAM B', country: 'FRA' },
+        ],
+      },
+    });
+    const m = await db.match.create({
+      data: {
+        competitionId: c.id,
+        player1: 'SYNTH TEAM A',
+        player2: 'SYNTH TEAM B',
+        strip: 'podiom',
+        sourceKey: 'T2:1',
+      },
+    });
+    const u = await db.user.create({
+      data: { name: 'SYNTH PODIUM', email: 'podium@example.invalid', password: 'test' },
+    });
+    const p = await db.prediction.create({
+      data: { matchId: m.id, userId: u.id, predictedScore1: 45, predictedScore2: 37, pointsEarned: 4 },
+    });
+    const live = require('../../src/services/ftlLiveScores');
+    const now = 1910000000000;
+    live.record(
+      {
+        TournGuid: guid,
+        StripNum: 'podium',
+        Clock: 26,
+        PeriodNum: 3,
+        Left: { Name: 'SYNTH ALPHA', Country: 'FRA', Score: 9 },
+        Right: { Name: 'SYNTH BETA', Country: 'ITA', Score: 8 },
+      },
+      now,
+      new Set([guid]),
+    );
+    await live.persistLiveLocks(db, c.id, now);
+    const saved = await read(db, m);
+    assert.deepEqual([saved.at(-1).score1, saved.at(-1).score2], [8, 9]);
+    assert.deepEqual(await db.prediction.findUnique({ where: { id: p.id } }), p);
+    const current = await db.match.findUnique({ where: { id: m.id } });
+    assert.equal(current.strip, 'podiom');
+    assert.equal(current.score1, null);
+    assert.equal(current.score2, null);
+    assert.ok(current.liveDetectedAt);
+  },
+);

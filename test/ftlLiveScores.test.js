@@ -428,3 +428,35 @@ test('history storage outage cannot delay prediction locking, and a retry preser
   await live.persistLiveLocks(db, 900901, now + 2);
   assert.equal(writes, 1);
 });
+
+test('podiom final receives podium signal and history without weakening country or ambiguity checks', () => {
+  const now = 1910000000000;
+  const m = {
+    id: 900902,
+    podiumFormat: 'TEAM',
+    strip: 'podiom',
+    player1: 'SYNTH TEAM A',
+    player2: 'SYNTH TEAM B',
+    player1Country: 'ITA',
+    player2Country: 'FRA',
+    isFinished: false,
+  };
+  const snapshot = structuredClone(m);
+  const state = live.record(
+    msg('podium', 'SYNTH ALPHA', 'SYNTH BETA', 9, 8, {
+      PeriodNum: 3,
+      Right: { Name: 'SYNTH BETA', Country: 'ITA', Score: 8 },
+    }),
+    now,
+    new Set([GUID]),
+  );
+  const [row] = live.matchLive([m], [state], now);
+  assert.equal(row.matchId, m.id);
+  assert.equal(row.ftlLeftPlayer, 2);
+  assert.deepEqual([row.score1, row.score2], [8, 9]);
+  assert.equal(row.history.at(-1).score1, 8);
+  assert.deepEqual(m, snapshot);
+  assert.deepEqual(live.matchLive([m, { ...m, id: 900903, strip: 'podium' }], [state], now), []);
+  assert.deepEqual(live.matchLive([{ ...m, player1Country: 'GBR' }], [state], now), []);
+  assert.deepEqual(live.matchLive([{ ...m, strip: 'podium 2' }], [state], now), []);
+});

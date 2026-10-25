@@ -1,3 +1,4 @@
+const { liveStripIdentity } = require('./liveStripIdentity');
 // Scores en direct des pistes FencingTimeLive (flux temps réel « /livescores », sans connexion au compte).
 // Affichage seulement : les points restent calculés sur le résultat final confirmé par l'import officiel.
 const { EventEmitter } = require('node:events');
@@ -193,7 +194,8 @@ function matchLive(matches, states, now = Date.now()) {
         return (
           (fold(x.left.name) === a && fold(x.right.name) === b) || (fold(x.left.name) === b && fold(x.right.name) === a)
         );
-      if (!m.strip || fold(m.strip) !== fold(x.strip) || !c1 || !c2 || c1 === c2) return false;
+      if (!m.strip || liveStripIdentity(m.strip) !== liveStripIdentity(x.strip) || !c1 || !c2 || c1 === c2)
+        return false;
       return (
         (countryFor([{ name: x.left.name, country: x.left.country }], x.left.name) === c1 &&
           countryFor([{ name: x.right.name, country: x.right.country }], x.right.name) === c2) ||
@@ -209,7 +211,7 @@ function matchLive(matches, states, now = Date.now()) {
         (other) =>
           !other.isFinished &&
           other.podiumFormat === 'TEAM' &&
-          fold(other.strip) === fold(m.strip) &&
+          liveStripIdentity(other.strip) === liveStripIdentity(m.strip) &&
           ((other.player1Country === c1 && other.player2Country === c2) ||
             (other.player1Country === c2 && other.player2Country === c1)),
       ).length !== 1
@@ -226,7 +228,9 @@ function matchLive(matches, states, now = Date.now()) {
             (fold(other.player1) === b && fold(other.player2) === a)),
       );
       if (sameFencers.length > 1) {
-        const onStrip = sameFencers.filter((other) => other.strip && fold(other.strip) === fold(s.strip));
+        const onStrip = sameFencers.filter(
+          (other) => other.strip && liveStripIdentity(other.strip) === liveStripIdentity(s.strip),
+        );
         if (onStrip.length !== 1 || onStrip[0].id !== m.id) continue;
       }
     }

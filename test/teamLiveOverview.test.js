@@ -124,3 +124,13 @@ test('tournament overview is bounded to the source tournament, cached and perfor
     live._strips.delete('other:Bleue');
   }
 });
+
+test('podiom alias links the official final; finished and ambiguous finals stay hidden', () => {
+  const final = { ...match, strip: 'podiom', round: 'T2' };
+  const signal = { ...state, strip: 'podium' };
+  const [row] = teamLiveRows([women, men], [final], [signal], now);
+  assert.equal(row.officialMatchId, final.id);
+  assert.equal(row.round, 'T2');
+  assert.deepEqual(teamLiveRows([women, men], [final, { ...final, id: 11, strip: 'podium' }], [signal], now), []);
+  assert.deepEqual(teamLiveRows([women, men], [{ ...final, isFinished: true }], [signal], now), []);
+});

@@ -1,3 +1,4 @@
+const { liveStripIdentity } = require('./liveStripIdentity');
 // Vue de consultation uniquement : aucune création de Match ni attribution de points.
 const { norm } = require('./ftlParser');
 const { countryFor } = require('./matchCountries');
@@ -35,7 +36,7 @@ function teamLiveRows(competitions, matches, states, now = Date.now(), freshMs =
     const related = matches.filter(
       (m) =>
         m.competitionId === c.id &&
-        fold(m.strip) === fold(state.strip) &&
+        liveStripIdentity(m.strip) === liveStripIdentity(state.strip) &&
         ((fold(m.player1) === fold(left.name) && fold(m.player2) === fold(right.name)) ||
           (fold(m.player1) === fold(right.name) && fold(m.player2) === fold(left.name))),
     );
