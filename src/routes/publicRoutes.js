@@ -295,6 +295,18 @@ router.get('/results', async (req, res) => {
     res.status(500).json({ error: 'Résultats indisponibles.' });
   }
 });
+router.get('/matches/:matchId/live-history', async (req, res) => {
+  try {
+    const result = await require('../services/liveHistoryStore').result(db, id(req.params.matchId));
+    if (!result) return res.status(404).json({ error: 'Rencontre introuvable.' });
+    res.set('Cache-Control', 'no-store').json(result);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    reportError(error, 'historique live public');
+    res.status(503).json({ error: 'Historique temporairement indisponible.' });
+  }
+});
+
 router.get('/competitions/:competitionId/matches', async (req, res) => {
   try {
     const competitionId = id(req.params.competitionId);

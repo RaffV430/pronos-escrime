@@ -1,6 +1,10 @@
-// Presentation-only, bounded in-memory history. Never reconstruct unobserved touches.
+// Observed history. Never reconstruct unobserved touches.
 function mergeTeamHistory(previous, segment, current, limit = 150) {
-  const history = previous.map((x) => ({ ...x }));
+  // Discard a pre-bout zero placeholder when the source subsequently identifies an earlier relay.
+  const placeholder = previous.every((e) => e.by === 'start' && e.score1 === 0 && e.score2 === 0);
+  const history = (placeholder && previous[0]?.period > (segment[0]?.period || current.period) ? [] : previous).map(
+    (x) => ({ ...x }),
+  );
   let last = history.at(-1);
   if (last && Date.parse(current.at) < Date.parse(last.at)) return history;
   const cutoff = last ? Date.parse(last.at) : -Infinity;
@@ -22,7 +26,7 @@ function mergeTeamHistory(previous, segment, current, limit = 150) {
     if (last && event.by === 'start' && event.score1 === last.score1 && event.score2 === last.score2) continue;
     const dl = last ? event.score1 - last.score1 : 0,
       dr = last ? event.score2 - last.score2 : 0;
-    const by = last && (dl > 1 || dr > 1) ? 'gap' : event.by;
+    const by = event.by === 'double' || (last && (event.by === 'start' || dl > 1 || dr > 1)) ? 'gap' : event.by;
     add({ ...event, ...metadata, by });
   }
   // A relay can change before the next scoring event arrives.

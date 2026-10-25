@@ -49,3 +49,30 @@ test('an older snapshot cannot roll back a retained score', () => {
   const h = mergeTeamHistory([], [], current);
   assert.deepEqual(mergeTeamHistory(h, [], { ...event(2, 1, 1), ...names }), h);
 });
+
+test('both scores changing is a checkpoint, never proof of a double touch', () => {
+  const h = mergeTeamHistory([event(1, 1, 1, { by: 'start', ...names })], [event(2, 2, 2, { by: 'double' })], {
+    ...event(2, 2, 2),
+    ...names,
+  });
+  assert.equal(h.at(-1).by, 'gap');
+});
+test('a zero placeholder from relay 2 does not precede a real relay 1', () => {
+  const h = mergeTeamHistory([event(0, 0, 1, { by: 'start', period: 2 })], [event(1, 0, 2)], {
+    ...event(1, 0, 2),
+    ...names,
+  });
+  assert.deepEqual(
+    h.map((e) => e.period),
+    [1],
+  );
+});
+
+test('a resumed nonzero source snapshot is a checkpoint, not a hidden new start', () => {
+  const h = mergeTeamHistory([event(5, 2, 1, { by: 'start', ...names })], [event(8, 4, 2, { by: 'start' })], {
+    ...event(8, 4, 2),
+    ...names,
+  });
+  assert.equal(h.at(-1).by, 'gap');
+  assert.equal(h.at(-1).score1, 8);
+});
