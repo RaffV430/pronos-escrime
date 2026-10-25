@@ -10,10 +10,12 @@ const { rememberLive, liveDetectedAt } = require('../lib/liveDetection');
 const FRESH_MS = 3 * 60000; // une piste muette depuis 3 min n'est plus « en cours »
 const REFRESH_MS = 5 * 60000; // relecture des tournois suivis
 const MATCHES_MS = 10000; // rencontres d'une épreuve gardées 10 s entre deux diffusions
-const MAX_TOUCHES = 150;
+const MAX_TOUCHES = 1000;
 const GUID = /\/tournaments\/eventSchedule\/([a-f0-9]{32})$/i;
 const strips = new Map(); // `${guid}:${strip}` → dernier état reçu
 const bouts = new Map(); // `${guid}:${strip}:${noms}` → déroulé touche par touche
+const hydrated = new Map();
+const persisted = new Map();
 const finishedHistory = new Map(); // matchId → identités et déroulé conservés après la fin
 const matchesCache = new Map(); // competitionId → { at, guid, matches }
 const events = new EventEmitter();
@@ -83,7 +85,14 @@ function track(state) {
     bout.last = { l: 0, r: 0 };
     return;
   }
-  const by = nl < l || nr < r ? 'correction' : nl > l && nr > r ? 'double' : nl > l ? 'left' : 'right';
+  const by =
+    nl < l || nr < r
+      ? 'correction'
+      : (nl > l && nr > r) || nl - l > 1 || nr - r > 1
+        ? 'gap'
+        : nl > l
+          ? 'left'
+          : 'right';
   bout.touches.push({ l: nl, r: nr, by, clock: state.clock, period: state.period, at: state.at });
   if (bout.touches.length > MAX_TOUCHES) bout.touches.shift();
   bout.last = { l: nl, r: nr };
@@ -113,7 +122,7 @@ const oriented = (touches, swap) =>
   touches.map((t) => ({
     score1: swap ? t.r : t.l,
     score2: swap ? t.l : t.r,
-    by: { left: swap ? 2 : 1, right: swap ? 1 : 2, double: 'double', start: 'start' }[t.by] || 'correction',
+    by: { left: swap ? 2 : 1, right: swap ? 1 : 2, double: 'gap', gap: 'gap', start: 'start' }[t.by] || 'correction',
     clock: t.clock,
     period: t.period,
     at: new Date(t.at).toISOString(),
@@ -123,6 +132,7 @@ const oriented = (touches, swap) =>
 function retainedHistory(match) {
   const saved = finishedHistory.get(match.id);
   if (!saved?.history?.length) return null;
+  if (saved.sourceUrl !== match.sourceUrl || saved.sourceKey !== match.sourceKey) return null;
   const same = fold(saved.player1) === fold(match.player1) && fold(saved.player2) === fold(match.player2);
   const reversed = fold(saved.player1) === fold(match.player2) && fold(saved.player2) === fold(match.player1);
   if (!same && !reversed)
@@ -232,8 +242,9 @@ function matchLive(matches, states, now = Date.now()) {
     const [p1, p2] = swap ? [s.right, s.left] : [s.left, s.right];
     const segment = oriented(bouts.get(boutKey(s))?.touches || [], swap);
     const saved = finishedHistory.get(m.id);
-    const sameTeams = saved && fold(saved.player1) === a && fold(saved.player2) === b;
-    const reversedTeams = saved && fold(saved.player1) === b && fold(saved.player2) === a;
+    const sameSource = saved && saved.sourceUrl === m.sourceUrl && saved.sourceKey === m.sourceKey;
+    const sameTeams = sameSource && fold(saved.player1) === a && fold(saved.player2) === b;
+    const reversedTeams = sameSource && fold(saved.player1) === b && fold(saved.player2) === a;
     const previous = sameTeams
       ? saved.history
       : reversedTeams
@@ -246,25 +257,31 @@ function matchLive(matches, states, now = Date.now()) {
             by: t.by === 1 ? 2 : t.by === 2 ? 1 : t.by,
           }))
         : [];
-    const history = team
-      ? !started
-        ? []
-        : mergeTeamHistory(
-            previous,
-            segment,
-            {
-              score1: p1.score,
-              score2: p2.score,
-              period: s.period,
-              fencer1Name: p1.name,
-              fencer2Name: p2.name,
-              clock: s.clock,
-              at: new Date(s.at).toISOString(),
-            },
-            MAX_TOUCHES,
-          )
-      : segment;
-    if (history.length) finishedHistory.set(m.id, { player1: m.player1, player2: m.player2, history });
+    const history = !started
+      ? []
+      : mergeTeamHistory(
+          previous,
+          segment,
+          {
+            score1: p1.score,
+            score2: p2.score,
+            period: s.period,
+            fencer1Name: p1.name,
+            fencer2Name: p2.name,
+            clock: s.clock,
+            at: new Date(s.at).toISOString(),
+          },
+          MAX_TOUCHES,
+        );
+    if (!team) for (let i = history.length - 1; i >= 0; i--) if (history[i].by === 'relay') history.splice(i, 1);
+    if (history.length)
+      finishedHistory.set(m.id, {
+        player1: m.player1,
+        player2: m.player2,
+        sourceUrl: m.sourceUrl,
+        sourceKey: m.sourceKey,
+        history,
+      });
     out.push({
       matchId: m.id,
       ftlLeftPlayer: swap ? 2 : 1,
@@ -314,11 +331,55 @@ async function competitionContext(db, competitionId, now = Date.now()) {
           isFinished: true,
           strip: true,
           liveDetectedAt: true,
+          sourceUrl: true,
+          sourceKey: true,
           score1: true,
           score2: true,
         },
       })
     : [];
+  if (db.matchLiveHistory) {
+    const pending = matches.filter(
+      (m) => !m.isFinished && hydrated.get(m.id) !== JSON.stringify([m.player1, m.player2, m.sourceUrl, m.sourceKey]),
+    );
+    const saved = pending.length
+      ? await db.matchLiveHistory.findMany({ where: { matchId: { in: pending.map((m) => m.id) } } }).catch((error) => {
+          console.error('Lecture du fil live indisponible :', error.message);
+          return null;
+        })
+      : [];
+    for (const match of saved === null ? [] : pending) {
+      hydrated.set(match.id, JSON.stringify([match.player1, match.player2, match.sourceUrl, match.sourceKey]));
+      const row = saved.find((r) => r.matchId === match.id);
+      const history = require('./liveHistoryStore').orient(row, match);
+      const memory = finishedHistory.get(match.id);
+      if (history.length)
+        finishedHistory.set(match.id, {
+          player1: match.player1,
+          player2: match.player2,
+          sourceUrl: match.sourceUrl,
+          sourceKey: match.sourceKey,
+          history: require('./liveHistoryStore').combine(
+            history,
+            memory &&
+              memory.sourceUrl === match.sourceUrl &&
+              memory.sourceKey === match.sourceKey &&
+              memory.player1 === match.player1 &&
+              memory.player2 === match.player2
+              ? memory.history
+              : [],
+          ),
+        });
+      else if (
+        !memory ||
+        memory.player1 !== match.player1 ||
+        memory.player2 !== match.player2 ||
+        memory.sourceUrl !== match.sourceUrl ||
+        memory.sourceKey !== match.sourceKey
+      )
+        finishedHistory.delete(match.id);
+    }
+  }
   const enriched = matches.map((match) => ({
     ...match,
     podiumFormat: competition?.podiumFormat,
@@ -380,6 +441,7 @@ async function teamOverviewFor(db, competitionId, now = Date.now()) {
 // Exécuté par le worker, même sans écran ouvert. Les mises à jour conditionnelles prennent
 // le même verrou de ligne PostgreSQL que l’enregistrement d’un pronostic.
 async function persistLiveLocks(db, competitionId, now = Date.now()) {
+  let pending = false;
   const { matches } = await competitionContext(db, competitionId, now);
   await liveFor(db, competitionId, now);
   for (const match of matches) {
@@ -391,6 +453,34 @@ async function persistLiveLocks(db, competitionId, now = Date.now()) {
     });
     if (saved.count) match.liveDetectedAt = new Date(detected);
   }
+  for (const match of matches) {
+    const savedHistory = finishedHistory.get(match.id);
+    const signature = JSON.stringify([
+      match.player1,
+      match.player2,
+      match.sourceUrl,
+      match.sourceKey,
+      savedHistory?.history,
+    ]);
+    if (
+      db.matchLiveHistory &&
+      savedHistory &&
+      savedHistory.player1 === match.player1 &&
+      savedHistory.player2 === match.player2 &&
+      savedHistory.sourceUrl === match.sourceUrl &&
+      savedHistory.sourceKey === match.sourceKey &&
+      persisted.get(match.id) !== signature
+    ) {
+      try {
+        await require('./liveHistoryStore').persist(db, match, savedHistory.history);
+        persisted.set(match.id, signature);
+      } catch (error) {
+        pending = true;
+        console.error('Conservation du fil live indisponible :', error.message);
+      }
+    }
+  }
+  return pending;
 }
 
 // Abonnement d'un écran : appelé à chaque changement sur une piste du tournoi de l'épreuve.
@@ -413,6 +503,7 @@ function startWorker(db, { connect = (url, opts) => require('socket.io-client').
   timer.unref?.();
   socket = connect(`${ORIGIN}/livescores`, { transports: ['websocket'], reconnectionDelayMax: 30000 });
   const running = new Map();
+  const retries = new Set();
   let stopped = false;
   const schedule = (id) => {
     const state = running.get(id);
@@ -423,7 +514,9 @@ function startWorker(db, { connect = (url, opts) => require('socket.io-client').
     const next = { again: false };
     running.set(id, next);
     persistLiveLocks(db, id)
+      .then((pending) => (pending ? retries.add(id) : retries.delete(id)))
       .catch((error) => {
+        retries.add(id);
         console.error('Verrouillage des pronostics live indisponible :', error.message);
       })
       .finally(() => {
@@ -431,6 +524,10 @@ function startWorker(db, { connect = (url, opts) => require('socket.io-client').
         if (next.again && !stopped) schedule(id);
       });
   };
+  const retryTimer = setInterval(() => {
+    for (const id of retries) schedule(id);
+  }, 5000);
+  retryTimer.unref?.();
   socket.on('change', (message) => {
     const state = record(message);
     if (state) for (const id of trackedCompetitions.get(state.guid) || []) schedule(id);
@@ -439,6 +536,7 @@ function startWorker(db, { connect = (url, opts) => require('socket.io-client').
   return () => {
     stopped = true;
     clearInterval(timer);
+    clearInterval(retryTimer);
     socket?.close();
   };
 }

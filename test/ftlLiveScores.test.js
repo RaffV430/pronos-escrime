@@ -62,7 +62,7 @@ test('déroulé touche par touche : point de départ, touches, coup double, ordr
       ['start', 1, 2],
       [2, 1, 3],
       [1, 2, 3],
-      ['double', 3, 4],
+      ['gap', 3, 4],
     ],
   );
 });
@@ -268,7 +268,7 @@ test('un déroulé contradictoire est signalé sans inventer une inversion à pa
   assert.match(bad.historyIssue, /résultat officiel/);
   assert.deepEqual(done, before);
   const [valid] = live.matchLive([{ ...done, score1: 8, score2: 15 }], [], at + 4);
-  assert.equal(valid.history.at(-1).by, 'double');
+  assert.equal(valid.history.at(-1).by, 'gap');
   assert.equal(valid.historyIssue, undefined);
 });
 
@@ -383,4 +383,48 @@ test('team history retains earlier relays, names and corrections without changin
   )[0];
   assert.equal(reversed.history.at(-1).fencer1Name, 'SYNTH D');
   assert.equal(reversed.history.at(-1).by, 1);
+});
+
+test('history storage outage cannot delay prediction locking, and a retry preserves the observations', async () => {
+  const now = 1900000000000;
+  const m = { id: 900901, player1: 'SYNTH RETRY A', player2: 'SYNTH RETRY B', isFinished: false, liveDetectedAt: null };
+  let locked = false,
+    fail = true,
+    writes = 0;
+  const db = {
+    competition: {
+      findUnique: async () => ({
+        tournament: { ftlSourceUrl: `https://www.fencingtimelive.com/tournaments/eventSchedule/${GUID}` },
+      }),
+    },
+    match: {
+      findMany: async () => [m],
+      findUnique: async () => m,
+      updateMany: async () => {
+        locked = true;
+        return { count: 1 };
+      },
+    },
+    matchLiveHistory: {
+      findMany: async () => [],
+      findUnique: async () => null,
+      upsert: async () => {
+        writes++;
+      },
+    },
+    $executeRaw: async () => {},
+    $transaction: async (fn) => {
+      assert.equal(locked, true);
+      if (fail) throw Error('SYNTH outage');
+      return fn(db);
+    },
+  };
+  live.record(msg('SYNTH RETRY', m.player1, m.player2, 1, 0, { PeriodNum: 1 }), now, new Set([GUID]));
+  assert.equal(await live.persistLiveLocks(db, 900901, now), true);
+  assert.equal(locked, true);
+  fail = false;
+  assert.equal(await live.persistLiveLocks(db, 900901, now + 1), false);
+  assert.equal(writes, 1);
+  await live.persistLiveLocks(db, 900901, now + 2);
+  assert.equal(writes, 1);
 });

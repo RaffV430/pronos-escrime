@@ -13,6 +13,17 @@ const { rescore } = require('../services/rescore');
 const { applyOutsiderBonus, crowdIsOutsider } = require('../services/outsider');
 const { reportError } = require('../lib/report');
 
+router.get('/:id/live-history', authMiddleware, async (req, res) => {
+  try {
+    const result = await require('../services/liveHistoryStore').result(prisma, Number(req.params.id));
+    if (!result) return res.status(404).json({ error: 'Rencontre introuvable.' });
+    res.set('Cache-Control', 'no-store').json(result);
+  } catch (error) {
+    reportError(error, 'historique live');
+    res.status(503).json({ error: 'Historique temporairement indisponible.' });
+  }
+});
+
 router.get('/tableau/:competitionId', authMiddleware, async (req, res) => {
   try {
     const state = await require('../services/tableauState').tableauState(prisma, Number(req.params.competitionId));

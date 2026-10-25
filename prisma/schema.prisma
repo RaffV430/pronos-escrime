@@ -54,6 +54,7 @@ model Match {
   score1        Int?
   score2        Int?
   isFinished    Boolean      @default(false)
+  liveHistory   MatchLiveHistory?
   predictions   Prediction[]
   isLocked      Boolean      @default(false)
   liveDetectedAt DateTime?
@@ -552,5 +553,17 @@ model ClubNamePolicy {
   revision Int @default(0)
   terms Json @default("[]")
   rules String @default("Utilisez le nom réel de votre club d’escrime et sa ville. Les noms injurieux, discriminatoires, menaçants, à caractère sexuel, publicitaires ou usurpant une identité sont refusés. Chaque ajout doit être validé par un administrateur. En attendant, vous restez sans club / accompagnant. Vous pouvez demander un réexamen auprès de l’éditeur.")
+  updatedAt DateTime @updatedAt
+}
+
+// Observations live uniquement : ne participent jamais au calcul des points.
+model MatchLiveHistory {
+  matchId Int @id
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  player1 String
+  player2 String
+  sourceUrl String?
+  sourceKey String?
+  history Json
   updatedAt DateTime @updatedAt
 }
