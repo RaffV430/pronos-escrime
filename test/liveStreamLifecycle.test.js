@@ -169,3 +169,37 @@ test('ping bloqué pendant la lecture : instantané et delta repris sans perdre 
     global.setInterval = oldInterval;
   }
 });
+
+test('teams=1 uses the display-only overview through the existing delta stream and unsubscribes normally', async () => {
+  const oldTeam = live.teamOverviewFor,
+    oldFor = live.liveFor,
+    oldSubscribe = live.subscribe;
+  let reads = 0,
+    closed = 0;
+  const frames = [];
+  live.teamOverviewFor = async (_db, id) => {
+    assert.equal(id, 45);
+    reads++;
+    return [{ matchId: 'team-live:45:A', score1: 21, competitionId: 45, fencer1: { name: 'MARTIN Léa' } }];
+  };
+  live.liveFor = async () => assert.fail('not the prediction/live-lock stream');
+  live.subscribe = async () => () => closed++;
+  const req = new EventEmitter();
+  req.params = { competitionId: '45' };
+  req.query = { teams: '1', delta: '1' };
+  const res = response();
+  res.write = (frame) => (frames.push(JSON.parse(frame.slice(6))), true);
+  try {
+    await handler(req, res);
+    await tick();
+    assert.equal(reads, 1);
+    assert.equal(frames[0].matches[0].fencer1.name, 'MARTIN Léa');
+    req.emit('close');
+    assert.equal(closed, 1);
+  } finally {
+    req.emit('close');
+    live.teamOverviewFor = oldTeam;
+    live.liveFor = oldFor;
+    live.subscribe = oldSubscribe;
+  }
+});

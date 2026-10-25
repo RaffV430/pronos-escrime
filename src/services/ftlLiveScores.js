@@ -301,6 +301,46 @@ async function liveFor(db, competitionId, now = Date.now()) {
   return matchLive(matches, states, now);
 }
 
+// Toutes les pistes des épreuves par équipes du même tournoi. Lecture uniquement.
+const teamContexts = new Map();
+async function teamOverviewFor(db, competitionId, now = Date.now()) {
+  let context = teamContexts.get(competitionId);
+  if (!context || now - context.at >= MATCHES_MS) {
+    const selected = await db.competition.findUnique({
+      where: { id: competitionId },
+      select: { tournamentId: true, podiumFormat: true, tournament: { select: { ftlSourceUrl: true } } },
+    });
+    const guid = GUID.exec(selected?.tournament?.ftlSourceUrl || '')?.[1]?.toUpperCase();
+    if (!guid || selected.podiumFormat !== 'TEAM') return [];
+    const competitions = await db.competition.findMany({
+      where: { tournamentId: selected.tournamentId, podiumFormat: 'TEAM' },
+      select: { id: true, tournamentId: true, name: true, podiumFormat: true, podiumRoster: true },
+    });
+    const matches = await db.match.findMany({
+      where: { competitionId: { in: competitions.map((c) => c.id) } },
+      select: {
+        id: true,
+        competitionId: true,
+        player1: true,
+        player2: true,
+        strip: true,
+        round: true,
+        isFinished: true,
+      },
+    });
+    context = { at: now, guid, competitions, matches };
+    teamContexts.set(competitionId, context);
+    if (teamContexts.size > 200) teamContexts.delete(teamContexts.keys().next().value);
+  }
+  return require('./teamLiveOverview').teamLiveRows(
+    context.competitions,
+    context.matches,
+    [...strips.values()].filter((state) => state.guid === context.guid),
+    now,
+    FRESH_MS,
+  );
+}
+
 // Exécuté par le worker, même sans écran ouvert. Les mises à jour conditionnelles prennent
 // le même verrou de ligne PostgreSQL que l’enregistrement d’un pronostic.
 async function persistLiveLocks(db, competitionId, now = Date.now()) {
@@ -371,6 +411,7 @@ module.exports = {
   persistLiveLocks,
   startWorker,
   liveFor,
+  teamOverviewFor,
   subscribe,
   matchLive,
   record,
