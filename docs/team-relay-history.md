@@ -17,4 +17,4 @@ Les segments observés pour une même rencontre reconnue sont maintenant réunis
 - Les corrections sont conservées, les instantanés anciens n’annulent pas les scores récents.
 - Un ancien flux sans noms ne reçoit pas les noms du relais actuel par déduction.
 
-L’interface ouvre le dernier relais observé et permet de déplier les précédents. Les premiers/derniers scores de chaque section sont des scores observés, pas une certification du début ou de la fin officielle du relais. Les matchs individuels conservent leur fil existant.
+L’interface présente les événements sous forme de carrés de couleur par relais, séparés visuellement. Un appui affiche le score et les noms enregistrés ; les manques et corrections ont des marqueurs distincts. Les premiers/derniers scores de chaque section sont des scores observés, pas une certification du début ou de la fin officielle du relais. Les matchs individuels conservent leur fil existant.
