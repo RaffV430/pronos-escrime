@@ -15,9 +15,12 @@ const entry = (extra = {}) => ({
   ...extra,
 });
 
-test('calendrier : 108 rendez-vous validés, Hénin-Beaumont les 17 et 18 octobre', () => {
+test('calendrier : 109 rendez-vous validés, Hénin-Beaumont les 17 et 18 octobre', () => {
   const all = C.events();
-  assert.equal(all.length, 108);
+  assert.equal(all.length, 109);
+  // Oubli de la sélection du 6 octobre, signalé le 26 : cadettes à Aix, même week-end que les juniors.
+  const aix = all.find((e) => e.id === '2026-11-07-aix-en-provence-m17-ind');
+  assert.deepEqual([aix.gender, aix.categories, aix.label], ['F', ['M17'], 'Épreuve internationale 1']);
   const henin = all.find((e) => e.city === 'Hénin-Beaumont');
   assert.deepEqual([henin.start, henin.end, henin.gender], ['2026-10-17', '2026-10-18', 'HD']);
   assert.ok(all.every((e) => ['HD', 'H', 'F'].includes(e.gender) && e.start <= e.end));

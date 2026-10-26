@@ -1,6 +1,6 @@
 {
   "season": "2026-2027",
-  "source": "Calendrier FFE 2026-2027, sélection fleuret du 6 octobre et 60 choix épée validés le 15 octobre 2026.",
+  "source": "Calendrier FFE 2026-2027, sélection fleuret du 6 octobre (+ Aix-en-Provence M17 dames ajouté le 26 octobre) et 60 choix épée validés le 15 octobre 2026.",
   "events": [
     {
       "id": "2026-10-10-etampes-m17-ind",
@@ -88,6 +88,17 @@
       "weapon": "Fleuret",
       "gender": "F",
       "categories": ["M20"],
+      "format": "INDIVIDUAL"
+    },
+    {
+      "id": "2026-11-07-aix-en-provence-m17-ind",
+      "start": "2026-11-07",
+      "end": "2026-11-08",
+      "city": "Aix-en-Provence",
+      "label": "Épreuve internationale 1",
+      "weapon": "Fleuret",
+      "gender": "F",
+      "categories": ["M17"],
       "format": "INDIVIDUAL"
     },
     {
