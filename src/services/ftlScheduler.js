@@ -132,14 +132,21 @@ function windowDelay(config, now = Date.now()) {
   return day - now > 86400000 ? Math.min(86400000, day - now - 86400000) : 0;
 }
 let running = false;
+// Bilan du dernier passage pour le mode veille : contrôle en cours (busy) et prochaine échéance connue (nextAt).
+let plan = { busy: true, nextAt: null };
 async function tick(db, { sync, archive = archiveCompleted, now = new Date() } = {}) {
   if (running) return [];
   running = true;
   const outcomes = [];
+  const upcoming = [];
   try {
     // Seules les épreuves dont le contrôle est dû sont relues (avec leurs matchs) : les autres attendent
     // leur heure sans coûter une lecture complète toutes les 30 s.
     const states = await db.ftlSyncState.findMany();
+    for (const s of states) {
+      const at = s.leaseUntil > now ? s.leaseUntil : s.nextAutomaticAt;
+      if (at) upcoming.push(new Date(at).getTime());
+    }
     const notDue = states
       .filter((s) => s.nextAutomaticAt === null || s.nextAutomaticAt > now || s.leaseUntil > now)
       .map((s) => s.competitionId);
@@ -174,6 +181,7 @@ async function tick(db, { sync, archive = archiveCompleted, now = new Date() } =
       const delay = windowDelay(config, now.getTime());
       if (delay === null) continue;
       if (delay) {
+        upcoming.push(now.getTime() + delay);
         await db.ftlSyncState.upsert({
           where: { competitionId: c.id },
           create: { competitionId: c.id, nextAutomaticAt: new Date(now.getTime() + delay), status: 'SCHEDULED' },
@@ -207,35 +215,74 @@ async function tick(db, { sync, archive = archiveCompleted, now = new Date() } =
     );
     outcomes.push(...results);
     await archive(db, { now });
+    const future = upcoming.filter((t) => t > now.getTime());
+    plan = {
+      busy: due.length > 0 || states.some((s) => s.status === 'RUNNING' || s.leaseUntil > now),
+      nextAt: future.length ? Math.min(...future) : null,
+    };
+    if (due.length) require('../lib/idleClock').wakeAll(); // résultats importés : notifications à préparer
     return outcomes;
   } finally {
     running = false;
   }
+}
+// Délai avant le prochain passage : 5 s pendant un contrôle ; sinon jusqu'à la prochaine échéance connue, au plus
+// le prochain créneau de veille (15 min). Sans mode veille : 5 s comme avant.
+function nextDelay(now = Date.now(), current = plan) {
+  const idle = require('../lib/idleClock');
+  if (!idle.idleEnabled() || current.busy) return 5000;
+  const slot = idle.untilSlot(0, now);
+  return current.nextAt ? Math.min(slot, Math.max(5000, current.nextAt - now)) : slot;
 }
 function startWorker(db) {
   if (!enabled()) {
     console.warn('Suivi FencingTimeLive automatique désactivé (FTL_AUTO_SYNC ≠ true).');
     return () => {};
   }
-  console.log('Suivi FencingTimeLive automatique actif (contrôle des échéances toutes les 5 s).');
-  let current = null;
-  const run = () =>
-    (current = tick(db)
+  console.log('Suivi FencingTimeLive automatique actif (contrôle des échéances toutes les 5 s, veille hors épreuve).');
+  let current = null,
+    timer = null,
+    stopped = false,
+    again = false;
+  const schedule = (delay) => {
+    if (stopped) return;
+    clearTimeout(timer);
+    timer = setTimeout(run, delay);
+    timer.unref?.();
+  };
+  function run() {
+    timer = null;
+    current = tick(db)
       .then(async () => {
-        require('../lib/heartbeat').beat('ftl');
+        require('../lib/heartbeat').beat('ftl', nextDelay());
         await require('./ftlEventDiscovery').watch(db);
       })
       .catch((error) => {
         console.warn('Contrôles automatiques temporairement indisponibles.');
         reportError(error, 'tâche FencingTimeLive');
-      }));
-  const timer = setInterval(run, 5000);
-  timer.unref();
+      })
+      .finally(() => {
+        current = null;
+        if (again) {
+          again = false;
+          schedule(1000);
+        } else schedule(nextDelay());
+      });
+    return current;
+  }
+  // Réveil (action d'administration…) : passage dans la seconde, sans attendre la fin de la veille.
+  const unregister = require('../lib/idleClock').registerWake('ftl', () => {
+    if (stopped) return;
+    if (current) again = true;
+    else schedule(1000);
+  });
   run();
   // Arrêt : plus de nouveau passage ; renvoie le passage en cours pour que l'arrêt l'attende
   // (le verrou de l'épreuve est ainsi libéré proprement avant un redéploiement).
   return () => {
-    clearInterval(timer);
+    stopped = true;
+    clearTimeout(timer);
+    unregister();
     return current;
   };
 }
@@ -247,6 +294,7 @@ module.exports = {
   configFor,
   windowDelay,
   tick,
+  nextDelay,
   startWorker,
   INTERVAL,
   POOLS_INTERVAL,

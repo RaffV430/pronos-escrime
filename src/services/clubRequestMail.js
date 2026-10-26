@@ -82,13 +82,24 @@ function startWorker(db, deps = {}) {
       });
   };
   workers.set(db, tick);
-  const timer = (deps.setInterval || setInterval)(tick, 60000);
-  timer.unref();
+  // Les demandes réveillent la file (wake) ; le minuteur n'est qu'un filet de rattrapage : toutes les minutes
+  // sans mode veille, sinon sur la grille commune de veille (décalée de 30 s) pour laisser la base dormir.
+  const idle = require('../lib/idleClock');
+  const every = deps.every ?? (idle.idleEnabled() ? idle.idlePeriod() : 60000);
+  let timer = null;
+  const start = () => {
+    timer = (deps.setInterval || setInterval)(tick, every);
+    timer.unref?.();
+  };
+  const first = every === 60000 || deps.setInterval ? null : setTimeout(() => (tick(), start()), idle.untilSlot(30000));
+  if (first) first.unref?.();
+  else start();
   tick();
   return () => {
     stopped = true;
     if (workers.get(db) === tick) workers.delete(db);
-    (deps.clearInterval || clearInterval)(timer);
+    if (first) clearTimeout(first);
+    if (timer) (deps.clearInterval || clearInterval)(timer);
     return running;
   };
 }
