@@ -11,6 +11,7 @@ function timerFixture() {
       return { unref() {} };
     },
     clearInterval() {},
+    every: 60000,
     periodic() {
       interval();
     },

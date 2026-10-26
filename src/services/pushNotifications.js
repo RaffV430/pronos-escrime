@@ -1118,6 +1118,35 @@ function active(x, now = Date.now()) {
   if (resolved && now - resolved > 86400000) return false;
   return Boolean(x.matches?.length || x.pools?.length || x.reopened?.length);
 }
+// Mode veille : une épreuve « en jeu » demande le rythme rapide (30 s) — match ou poule qui ferme, commence ou
+// se joue dans les 6 h (ou depuis moins de 12 h), résultat publié depuis moins de 2 h, horaire rouvert.
+const SOON_MS = 6 * 3600e3,
+  RECENT_MS = 12 * 3600e3,
+  RESULT_MS = 2 * 3600e3;
+function inPlay(context, now = Date.now()) {
+  const near = (value) => {
+    const t = value ? Date.parse(value) : NaN;
+    return Number.isFinite(t) && t <= now + SOON_MS && t >= now - RECENT_MS;
+  };
+  const fresh = (value) => {
+    const t = value ? new Date(value).getTime() : NaN;
+    return Number.isFinite(t) && now - t <= RESULT_MS;
+  };
+  return context.some(
+    (x) =>
+      x.reopened?.length ||
+      (x.matches || []).some((m) =>
+        m.isFinished
+          ? fresh(m.resultRegisteredAt)
+          : m.resultType !== 'CANCELLED' && (near(closesAt(m)) || near(m.startsAt)),
+      ) ||
+      (x.pools || []).some((p) =>
+        p.isFinal
+          ? (p.fencers || []).some((f) => fresh(f.firstResultAt))
+          : near(p.closesAt) || near(p.startsAt) || (p.fencers || []).some((f) => fresh(f.firstResultAt)),
+      ),
+  );
+}
 function relevant(sub, live) {
   let p;
   try {
@@ -1129,8 +1158,9 @@ function relevant(sub, live) {
 }
 let legacyRetired = false;
 async function dispatch(db, sender = send) {
-  if (running) return;
+  if (running) return { busy: true };
   running = true;
+  let busy = false;
   try {
     // Ancien format d'alertes : conversion une seule fois par démarrage (jointure coûteuse).
     if (!legacyRetired) {
@@ -1151,12 +1181,14 @@ async function dispatch(db, sender = send) {
     // tireurs) sont examinés : le reste de la semaine, la tâche ne touche presque plus la base.
     const live = context.filter((x) => active(x));
     for (const sub of subs) if (relevant(sub, live)) await queueSpecial(db, sub.id, context);
+    busy = inPlay(context);
     const pending = await db.pushDelivery.findMany({
       where: { status: 'PENDING', nextAttemptAt: { lte: new Date() } },
       select: { id: true },
       orderBy: { createdAt: 'asc' },
       take: 100,
     });
+    if (pending.length) busy = true;
     let index = 0;
     await Promise.all(
       Array.from({ length: 4 }, async () => {
@@ -1171,33 +1203,71 @@ async function dispatch(db, sender = send) {
         }
       }),
     );
+    return { busy };
   } finally {
     running = false;
   }
 }
+// Délai avant le prochain passage : 30 s quand une épreuve est en jeu ou qu'une notification attend, sinon le
+// prochain créneau commun de veille (décalé de 10 s après le suivi FencingTimeLive).
+const nextDispatchDelay = (busy, now = Date.now()) => {
+  const idle = require('../lib/idleClock');
+  return !idle.idleEnabled() || busy ? 30000 : idle.untilSlot(10000, now);
+};
 function startWorker(db) {
   if (!configured()) {
     console.warn('Notifications désactivées : clés VAPID absentes.');
     return () => {};
   }
-  console.log('Notifications actives (envoi toutes les 30 s).');
-  let current = null;
-  const tick = () =>
-    (current = dispatch(db)
-      .then(() => require('../lib/heartbeat').beat('push'))
+  console.log('Notifications actives (envoi toutes les 30 s, veille hors épreuve).');
+  let current = null,
+    timer = null,
+    stopped = false,
+    again = false;
+  const schedule = (delay) => {
+    if (stopped) return;
+    clearTimeout(timer);
+    timer = setTimeout(tick, delay);
+    timer.unref?.();
+  };
+  function tick() {
+    timer = null;
+    let busy = true;
+    current = dispatch(db)
+      .then((result) => {
+        busy = result?.busy !== false;
+        require('../lib/heartbeat').beat('push', nextDispatchDelay(busy));
+      })
       .catch((error) => {
         console.warn('Notifications temporairement indisponibles.');
         reportError(error, 'tâche des notifications');
-      }));
-  const timer = setInterval(tick, 30000);
-  timer.unref();
+      })
+      .finally(() => {
+        current = null;
+        if (again) {
+          again = false;
+          schedule(1000);
+        } else schedule(nextDispatchDelay(busy));
+      });
+    return current;
+  }
+  // Réveil : alerte ou résultat à envoyer, action d'administration.
+  const unregister = require('../lib/idleClock').registerWake('push', () => {
+    if (stopped) return;
+    if (current) again = true;
+    else schedule(1000);
+  });
   tick();
   return () => {
-    clearInterval(timer);
+    stopped = true;
+    clearTimeout(timer);
+    unregister();
     return current;
   };
 }
 module.exports = {
+  inPlay,
+  nextDispatchDelay,
   followers,
   DOMAIN_SWITCH,
   notificationContext,

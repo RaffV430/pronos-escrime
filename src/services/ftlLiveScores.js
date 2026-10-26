@@ -500,15 +500,26 @@ async function subscribe(db, competitionId, onChange) {
 
 function startWorker(db, { connect = (url, opts) => require('socket.io-client').io(url, opts) } = {}) {
   if (process.env.FTL_AUTO_SYNC !== 'true' || process.env.FTL_LIVE_SCORES === 'false') return () => {};
+  let stopped = false;
   let socket = null;
-  const refresh = () => refreshTracked(db).catch(() => {});
-  refresh();
-  const timer = setInterval(refresh, REFRESH_MS);
-  timer.unref?.();
+  // Relecture des tournois suivis : toutes les 5 min, ou sur la grille commune de veille (décalée de 20 s) ;
+  // un import ou un archivage la déclenche aussitôt.
+  const idle = require('../lib/idleClock');
+  let timer = null;
+  const refresh = () => {
+    clearTimeout(timer);
+    refreshTracked(db)
+      .catch(() => {})
+      .finally(() => {
+        if (stopped) return;
+        timer = setTimeout(refresh, idle.idleEnabled() ? idle.untilSlot(20000) : REFRESH_MS);
+        timer.unref?.();
+      });
+  };
+  const unregister = idle.registerWake('live', () => !stopped && refresh());
   socket = connect(`${ORIGIN}/livescores`, { transports: ['websocket'], reconnectionDelayMax: 30000 });
   const running = new Map();
   const retries = new Set();
-  let stopped = false;
   const schedule = (id) => {
     const state = running.get(id);
     if (state) {
@@ -536,10 +547,12 @@ function startWorker(db, { connect = (url, opts) => require('socket.io-client').
     const state = record(message);
     if (state) for (const id of trackedCompetitions.get(state.guid) || []) schedule(id);
   });
+  refresh();
   console.log('Scores en direct FencingTimeLive : écoute des pistes active.');
   return () => {
     stopped = true;
-    clearInterval(timer);
+    clearTimeout(timer);
+    unregister();
     clearInterval(retryTimer);
     socket?.close();
   };

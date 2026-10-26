@@ -56,7 +56,10 @@ app.use((req, res, next) => {
   const standings = require('./services/standings');
   if (standings.changesPoints(req.method, req.path))
     res.on('finish', () => {
-      if (res.statusCode < 400) standings.invalidateStandings();
+      if (res.statusCode >= 400) return;
+      standings.invalidateStandings();
+      // Écriture d'administration (import, correction, archivage…) : les tâches en veille repassent aussitôt.
+      require('./lib/idleClock').wakeAll();
     });
   next();
 });
@@ -93,17 +96,31 @@ app.get('/api/tournaments', authMiddleware, async (req, res) => {
 });
 
 app.get('/', (req, res) => res.json({ message: '🤺 API MPP Escrime opérationnelle !' }));
+// Render appelle /health très souvent : interroger la base à chaque appel l'empêcherait de s'endormir. Une tâche
+// de fond qui vient de passer (elle interroge la base) suffit à la dire joignable ; sinon, une vérification au
+// plus toutes les 20 minutes. /health?deep=1 force la vérification.
+const DB_FRESH_MS = 20 * 60000;
+let lastDbCheck = { at: 0, ok: false };
 app.get('/health', async (req, res) => {
   const workers = require('./services/workerHealth').workerHealth();
   const uptime = Math.round(process.uptime());
   // Juste après le démarrage, aucune tâche n'a encore eu le temps de passer.
   const stale = uptime > 120 && Object.values(workers).some((w) => w.stale);
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: stale ? 'degraded' : 'ok', database: 'connected', workers, uptime });
-  } catch (error) {
-    res.status(503).json({ status: 'degraded', database: 'unavailable', workers, uptime });
+  const { lastBeat } = require('./lib/heartbeat');
+  const recentBeat = Math.max(lastBeat('ftl') || 0, lastBeat('push') || 0);
+  const now = Date.now();
+  const fresh = req.query.deep !== '1' && (now - recentBeat < DB_FRESH_MS || now - lastDbCheck.at < DB_FRESH_MS);
+  if (!fresh) {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      lastDbCheck = { at: now, ok: true };
+    } catch {
+      lastDbCheck = { at: now, ok: false };
+    }
   }
+  const ok = now - recentBeat < DB_FRESH_MS && req.query.deep !== '1' ? true : lastDbCheck.ok;
+  if (!ok) return res.status(503).json({ status: 'degraded', database: 'unavailable', workers, uptime });
+  res.json({ status: stale ? 'degraded' : 'ok', database: 'connected', workers, uptime });
 });
 
 app.use((req, res) => res.status(404).json({ error: 'Route introuvable.' }));
