@@ -72,3 +72,20 @@ test('réveil : une action d’administration réveille les tâches enregistrée
   idle.wakeAll();
   assert.equal(woken, 1);
 });
+
+test('réveil de la base : échecs passagers retentés vite, délai de connexion de 30 s', () => {
+  assert.equal(idle.dbWaking({ code: 'P1001' }), true, 'base injoignable');
+  assert.equal(idle.dbWaking({ code: 'P2028' }), true, 'transaction expirée pendant le réveil');
+  assert.equal(idle.dbWaking({ message: "Can't reach database server at `ep-x`" }), true);
+  assert.equal(idle.dbWaking({ code: 'P2002' }), false, 'vraie erreur de données');
+  assert.equal(idle.dbWaking(new Error('boom')), false);
+  assert.deepEqual([1, 2, 3, 4].map(idle.retryDelay), [15000, 30000, 60000, 60000]);
+  const { databaseUrl } = require('../src/lib/databaseUrl');
+  assert.equal(databaseUrl('postgresql://u@h/db'), 'postgresql://u@h/db?connect_timeout=30');
+  assert.equal(
+    databaseUrl('postgresql://u@h/db?sslmode=require'),
+    'postgresql://u@h/db?sslmode=require&connect_timeout=30',
+  );
+  assert.equal(databaseUrl('postgresql://u@h/db?connect_timeout=10'), 'postgresql://u@h/db?connect_timeout=10');
+  assert.equal(databaseUrl(''), '');
+});
