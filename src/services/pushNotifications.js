@@ -1223,7 +1223,8 @@ function startWorker(db) {
   let current = null,
     timer = null,
     stopped = false,
-    again = false;
+    again = false,
+    failures = 0;
   const schedule = (delay) => {
     if (stopped) return;
     clearTimeout(timer);
@@ -1232,13 +1233,19 @@ function startWorker(db) {
   };
   function tick() {
     timer = null;
-    let busy = true;
+    let busy = true,
+      retry = 0;
     current = dispatch(db)
       .then((result) => {
+        failures = 0;
         busy = result?.busy !== false;
         require('../lib/heartbeat').beat('push', nextDispatchDelay(busy));
       })
       .catch((error) => {
+        const idle = require('../lib/idleClock');
+        retry = idle.dbWaking(error) && failures < idle.WAKE_RETRIES ? idle.retryDelay(++failures) : 0;
+        if (retry) return console.warn(`Base en cours de réveil : nouvel essai dans ${retry / 1000} s.`);
+        failures = 0;
         console.warn('Notifications temporairement indisponibles.');
         reportError(error, 'tâche des notifications');
       })
@@ -1247,7 +1254,7 @@ function startWorker(db) {
         if (again) {
           again = false;
           schedule(1000);
-        } else schedule(nextDispatchDelay(busy));
+        } else schedule(retry || nextDispatchDelay(busy));
       });
     return current;
   }

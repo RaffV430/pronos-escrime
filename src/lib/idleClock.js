@@ -29,4 +29,26 @@ function wakeAll() {
       /* un réveil manqué attend simplement le prochain créneau */
     }
 }
-module.exports = { DEFAULT_IDLE_MS, MIN_IDLE_MS, idleEnabled, idlePeriod, untilSlot, registerWake, wakeAll };
+// Base endormie qui se réveille (Neon met parfois plus de 5 s) : connexion impossible ou coupée, transaction
+// expirée pendant l'attente. Ces échecs passagers sont retentés 15 s, 30 s puis 60 s plus tard au lieu
+// d'attendre le créneau de veille suivant ; on ne les signale qu'après trois échecs de suite.
+const WAKING_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P2024', 'P2028']);
+const dbWaking = (error) =>
+  WAKING_CODES.has(error?.code) ||
+  /Can't reach database server|Server has closed the connection|Transaction already closed/.test(
+    String(error?.message || ''),
+  );
+const WAKE_RETRIES = 3;
+const retryDelay = (failures) => Math.min(60000, 15000 * 2 ** Math.max(0, failures - 1));
+module.exports = {
+  DEFAULT_IDLE_MS,
+  MIN_IDLE_MS,
+  idleEnabled,
+  idlePeriod,
+  untilSlot,
+  registerWake,
+  wakeAll,
+  dbWaking,
+  WAKE_RETRIES,
+  retryDelay,
+};
