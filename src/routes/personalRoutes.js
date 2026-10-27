@@ -383,7 +383,7 @@ router.get('/summary/:tournamentId', async (req, res) => {
     const progress = await require('../services/rankingHistory').rankProgress(db, tournamentId, userId);
     const tournament = await db.tournament.findUnique({
       where: { id: tournamentId },
-      include: { competitions: { select: { id: true, name: true, podiumResolvedAt: true } } },
+      include: { competitions: { select: { id: true, name: true, podiumResolvedAt: true, ftlEventId: true } } },
     });
     if (!tournament && !general) return res.status(404).json({ error: 'Tournoi introuvable.' });
     const scopeCompetitions = general
@@ -406,7 +406,9 @@ router.get('/summary/:tournamentId', async (req, res) => {
         .map((r) => ({ ...r, competition: c.name })),
     );
     const bestRound = perRound.sort((a, b) => b.points - a.points)[0] || null;
-    const complete = !general && scopeCompetitions.length > 0 && scopeCompetitions.every((c) => c.podiumResolvedAt);
+    // Journée qualificative : pas de podium, elle n'empêche pas le bilan du tournoi.
+    const withPodium = scopeCompetitions.filter((c) => !require('../services/qualificationStage').isQualification(c));
+    const complete = !general && withPodium.length > 0 && withPodium.every((c) => c.podiumResolvedAt);
     res.json({
       tournamentName: general
         ? 'Classement général'
