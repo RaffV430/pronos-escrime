@@ -163,3 +163,47 @@ test(
     assert.ok(current.liveDetectedAt);
   },
 );
+
+test(
+  'finished relay reset is filtered on consultation only, with raw history and predictions preserved',
+  { skip },
+  async () => {
+    const t = await db.tournament.create({ data: { name: 'SYNTH FINISHED' } });
+    const c = await db.competition.create({
+      data: { name: 'SYNTH TEAM FINISHED', tournamentId: t.id, podiumFormat: 'TEAM' },
+    });
+    const m = await db.match.create({
+      data: {
+        competitionId: c.id,
+        player1: 'SYNTH END A',
+        player2: 'SYNTH END B',
+        sourceKey: 'T2:1',
+        isFinished: true,
+        score1: 32,
+        score2: 27,
+      },
+    });
+    const u = await db.user.create({
+      data: { name: 'SYNTH END', email: 'finished-history@example.invalid', password: 'test' },
+    });
+    const p = await db.prediction.create({
+      data: { matchId: m.id, userId: u.id, predictedScore1: 45, predictedScore2: 37, pointsEarned: 1 },
+    });
+    const raw = [
+      { score1: 31, score2: 27, period: 9, by: 1 },
+      { score1: 32, score2: 27, period: 9, by: 1 },
+      { score1: 32, score2: 27, period: 1, by: 'relay' },
+      { score1: 5, score2: 3, period: 1, by: 'correction' },
+    ].map((e, i) => ({ ...e, at: new Date(1700000000000 + i).toISOString() }));
+    await persist(db, m, raw);
+    const row = await db.matchLiveHistory.findUnique({ where: { matchId: m.id } });
+    const response = await result(db, m.id);
+    assert.equal(response.podiumFormat, 'TEAM');
+    assert.deepEqual(response.history, raw.slice(0, 2));
+    assert.ok(response.historyNotice);
+    assert.deepEqual(await read(db, m), raw);
+    assert.deepEqual(await db.matchLiveHistory.findUnique({ where: { matchId: m.id } }), row);
+    assert.deepEqual(await db.prediction.findUnique({ where: { id: p.id } }), p);
+    assert.deepEqual(await db.match.findUnique({ where: { id: m.id } }), m);
+  },
+);
