@@ -460,3 +460,33 @@ test('podiom final receives podium signal and history without weakening country 
   assert.deepEqual(live.matchLive([{ ...m, player1Country: 'GBR' }], [state], now), []);
   assert.deepEqual(live.matchLive([{ ...m, strip: 'podium 2' }], [state], now), []);
 });
+
+test('finished stream and HTTP history presentation share the final relay reset rule without purging observations', () => {
+  const now = 1920000000000;
+  const m = {
+    id: 900905,
+    podiumFormat: 'TEAM',
+    strip: 'SYNTH RESET',
+    player1: 'SYNTH TEAM X',
+    player2: 'SYNTH TEAM Y',
+    player1Country: 'FRA',
+    player2Country: 'ITA',
+    isFinished: false,
+  };
+  const message = (score1, score2, period) => ({
+    ...msg(m.strip, 'SYNTH X', 'SYNTH Y', score1, score2),
+    PeriodNum: period,
+    Right: { Name: 'SYNTH Y', Country: 'ITA', Score: score2 },
+  });
+  const end = live.record(message(32, 27, 9), now, new Set([GUID]));
+  live.matchLive([m], [end], now);
+  const reset = live.record(message(5, 3, 1), now + 1000, new Set([GUID]));
+  const [before] = live.matchLive([m], [reset], now + 1000);
+  assert.ok(before.history.length > 1);
+  const [finished] = live.matchLive([{ ...m, isFinished: true, score1: 32, score2: 27 }], [], now + 1001);
+  assert.equal(finished.history.length, 1);
+  assert.equal(finished.history[0].period, 9);
+  assert.ok(finished.historyNotice);
+  const [unconfirmed] = live.matchLive([m], [reset], now + 1002);
+  assert.deepEqual(unconfirmed.history, before.history);
+});

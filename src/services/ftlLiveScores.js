@@ -153,22 +153,14 @@ function retainedHistory(match) {
         by: t.by === 1 ? 2 : t.by === 2 ? 1 : t.by,
       }))
     : saved.history;
-  const last = history.at(-1);
-  // Une diffusion live peut être partielle ou corrigée. Ne jamais déduire une inversion des seuls scores.
-  if (
-    Number.isInteger(match.score1) &&
-    Number.isInteger(match.score2) &&
-    (last.score1 > match.score1 || last.score2 > match.score2)
-  ) {
-    return {
-      matchId: match.id,
-      finished: true,
-      history: [],
-      historyIssue:
-        'Le déroulé live ne correspond pas au résultat officiel ; il est masqué pour éviter une attribution erronée des touches.',
-    };
-  }
-  return { matchId: match.id, finished: true, history };
+  const view = require('./liveHistoryPresentation').presentLiveHistory(match, history);
+  return {
+    matchId: match.id,
+    finished: true,
+    history: view.history,
+    ...(view.historyIssue ? { historyIssue: view.historyIssue } : {}),
+    ...(view.historyNotice ? { historyNotice: view.historyNotice } : {}),
+  };
 }
 
 // Associe les pistes actives aux rencontres non terminées, par les deux noms (ordre indifférent),
@@ -333,6 +325,7 @@ async function competitionContext(db, competitionId, now = Date.now()) {
           player1: true,
           player2: true,
           isFinished: true,
+          pointsPending: true,
           strip: true,
           liveDetectedAt: true,
           sourceUrl: true,

@@ -1,3 +1,4 @@
+const { presentLiveHistory } = require('./liveHistoryPresentation');
 // Durable observations, separate from official scores and predictions.
 const identity = (a, b) => a.sourceUrl === b.sourceUrl && a.sourceKey === b.sourceKey;
 function orient(saved, match) {
@@ -62,20 +63,13 @@ async function result(db, matchId) {
       score2: true,
       isFinished: true,
       resultType: true,
+      pointsPending: true,
+      competition: { select: { podiumFormat: true } },
     },
   });
   if (!match || match.resultType === 'CANCELLED') return null;
   const history = await read(db, match);
-  const last = history.at(-1);
-  const conflict =
-    match.isFinished &&
-    last &&
-    Number.isInteger(match.score1) &&
-    Number.isInteger(match.score2) &&
-    (last.score1 > match.score1 || last.score2 > match.score2);
-  return {
-    history: conflict ? [] : history,
-    historyIssue: conflict ? 'Le déroulé live diffère du résultat officiel ; il est masqué.' : null,
-  };
+  const podiumFormat = match.competition?.podiumFormat || 'INDIVIDUAL';
+  return { ...presentLiveHistory({ ...match, podiumFormat }, history), podiumFormat };
 }
 module.exports = { orient, combine, read, persist, result };
