@@ -142,13 +142,7 @@ async function ftlTournamentFinished(t, configs, client) {
     }
     const id = c.ftlEventId || c.rosterSourceUrl?.split('/').at(-1)?.toUpperCase(),
       e = observed.events.find((e) => e.eventId === id);
-    if (
-      !cfg ||
-      !e ||
-      norm(e.event) !== norm(cfg.event) ||
-      e.date !== cfg.date
-    )
-      return false;
+    if (!cfg || !e || norm(e.event) !== norm(cfg.event) || e.date !== cfg.date) return false;
   }
   return { source, events: observed.events };
 }
