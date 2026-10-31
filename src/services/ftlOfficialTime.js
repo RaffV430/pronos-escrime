@@ -12,6 +12,47 @@ function stamp(value) {
   const at = Date.parse(text + ' UTC');
   return Number.isFinite(at) ? at : null;
 }
+// Le tournoi renommé sur FencingTimeLive (ex. faute corrigée) reste le même : même épreuve, même jour, même
+// calendrier. La configuration et le tournoi suivent le nouveau nom, pour que les contrôles suivants aboutissent.
+async function followRenamedTournament(db, c, config, actorId, $, links, nextStamp) {
+  const tournament = clean($('.desktop.tournName').text());
+  if (
+    !tournament ||
+    norm(tournament) === norm(config.tournament) ||
+    norm($('.desktop.eventName').text()) !== norm(config.event) ||
+    nextStamp === null ||
+    new Date(nextStamp).toISOString().slice(0, 10) !== config.date ||
+    !config.scheduleUrl ||
+    !links.includes(config.scheduleUrl)
+  )
+    return config;
+  const { nameAliases, ...expected } = config;
+  const next = { ...expected, tournament };
+  await db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Competition" WHERE id=${c.id} FOR UPDATE`;
+    if (!isDeepStrictEqual(await configuration(tx, c.id), expected))
+      throw failure('Configuration modifiée pendant le contrôle.', 409);
+    await tx.auditLog.create({
+      data: { actorId, action: 'Configuration FTL validée', targetType: 'Competition', targetId: c.id, after: next },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId,
+        action: 'Nom officiel du tournoi actualisé',
+        targetType: 'Competition',
+        targetId: c.id,
+        before: { tournament: config.tournament },
+        after: { tournament },
+      },
+    });
+    // Un nom choisi par un administrateur n'est pas remplacé.
+    await tx.tournament.updateMany({
+      where: { id: c.tournamentId, name: config.tournament },
+      data: { name: tournament },
+    });
+  });
+  return { ...next, ...(nameAliases ? { nameAliases } : {}) };
+}
 async function refresh(db, c, config, actorId, client, now = Date.now()) {
   if (!/^[a-f0-9]{32}$/i.test(config.eventId || '') || !config.eventTime) return config;
   const id = config.eventId.toUpperCase();
@@ -29,6 +70,7 @@ async function refresh(db, c, config, actorId, client, now = Date.now()) {
     .toArray()
     .map((a) => new URL($(a).attr('href'), ORIGIN).href);
   const rosterUrl = `${ORIGIN}/events/competitors/${id}`;
+  config = await followRenamedTournament(db, c, config, actorId, $, links, nextStamp);
   if (
     norm($('.desktop.tournName').text()) !== norm(config.tournament) ||
     norm($('.desktop.eventName').text()) !== norm(config.event) ||

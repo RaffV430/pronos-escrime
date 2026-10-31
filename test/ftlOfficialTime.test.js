@@ -173,3 +173,50 @@ test('multijours : disparition d’une session refusée sans écriture', async (
   await assert.rejects(refresh(d.db, { id: 42 }, c, 1, d.client));
   assert.equal(d.writes.length, 0);
 });
+
+function renamed({
+  event = config.event,
+  date = 'Thursday, October 22, 2026',
+  scheduleLink = true,
+  stored = config,
+} = {}) {
+  const writes = [],
+    renames = [];
+  const html = `<span class="desktop tournName">Synthetic Cup 2026</span><span class="desktop eventName">${event}</span><span class="desktop eventTime">${date} 1:00 PM</span><a href="/events/competitors/${id}">Fencers</a>${scheduleLink ? `<a href="/tournaments/eventSchedule/${scheduleId}">Schedule</a>` : ''}`;
+  const tx = {
+    $queryRaw: async () => [],
+    auditLog: {
+      findFirst: async ({ where }) => (where.action === 'Configuration FTL validée' ? { after: stored } : null),
+      create: async ({ data }) => writes.push(data),
+    },
+    tournament: { updateMany: async (query) => renames.push(query) },
+  };
+  return {
+    writes,
+    renames,
+    db: { $transaction: async (fn) => fn(tx) },
+    client: { eventPage: async () => ({ url: `${root}/events/competitors/${id}`, html }) },
+  };
+}
+const competition = { id: 9, tournamentId: 14 };
+test('tournoi renommé sur la source : même épreuve et même calendrier, le nouveau nom est suivi', async () => {
+  const d = renamed();
+  const next = await refresh(d.db, competition, config, 0, d.client);
+  assert.equal(next.tournament, 'Synthetic Cup 2026');
+  assert.equal(next.poolSources[0], 'unchanged-pools');
+  assert.equal(d.writes[0].after.tournament, 'Synthetic Cup 2026');
+  assert.equal(d.writes[1].action, 'Nom officiel du tournoi actualisé');
+  assert.deepEqual(d.renames, [{ where: { id: 14, name: 'Synthetic Cup' }, data: { name: 'Synthetic Cup 2026' } }]);
+});
+test('tournoi renommé : autre épreuve, autre jour ou calendrier absent restent refusés', async () => {
+  for (const options of [
+    { event: "Senior Women's Foil" },
+    { date: 'Friday, October 23, 2026' },
+    { scheduleLink: false },
+  ]) {
+    const d = renamed(options);
+    await assert.rejects(refresh(d.db, competition, config, 0, d.client), /Identité ou date officielle/);
+    assert.equal(d.writes.length, 0);
+    assert.equal(d.renames.length, 0);
+  }
+});

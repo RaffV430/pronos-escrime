@@ -26,8 +26,10 @@ function parseRoster(rows) {
     // Club ou nation non renseigné sur la source : accepté (vide), l'identifiant officiel suffit.
     if (r.country !== null && r.country !== undefined && typeof r.country !== 'string')
       throw failure(`Identité d’un engagé non vérifiable : ${who} (club ou nation illisible).`);
-    const rank = r.rank === null || r.rank === undefined || r.rank === '' ? null : Number(r.rank);
-    if (rank !== null && (!Number.isSafeInteger(rank) || rank <= 0)) throw failure('Rang d’engagement non vérifiable.');
+    let rank = r.rank === null || r.rank === undefined || r.rank === '' ? null : Number(r.rank);
+    if (rank !== null && (!Number.isFinite(rank) || rank <= 0)) throw failure('Rang d’engagement non vérifiable.');
+    // Équipes : FencingTimeLive publie un indice de tri décimal (ex. 6.001), pas un rang à afficher.
+    if (!Number.isSafeInteger(rank)) rank = null;
     // Épreuve par équipes : composition publiée (onglet « Teams »), pour le suivi automatique des équipes.
     const members = Array.isArray(r.members)
       ? r.members
