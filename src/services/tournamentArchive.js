@@ -146,7 +146,6 @@ async function ftlTournamentFinished(t, configs, client) {
       !cfg ||
       !e ||
       norm(e.event) !== norm(cfg.event) ||
-      norm(observed.tournament) !== norm(cfg.tournament) ||
       e.date !== cfg.date
     )
       return false;
