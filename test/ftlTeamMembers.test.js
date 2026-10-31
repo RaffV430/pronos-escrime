@@ -60,17 +60,9 @@ test('composition publiée après le paramétrage : ajoutée à la liste enregis
 
 test('rang d’équipe décimal publié par la source : accepté, sans rang affiché', () => {
   const id = 'A'.repeat(32);
-  const [team] = require('../src/services/ftlConfiguration').parseRoster([
-    { id, name: 'FRANCE 1', country: 'FRA', rank: 6.001, status: 'CheckedIn' },
-  ]);
+  const [team] = parseRoster([{ id, name: 'FRANCE 1', country: 'FRA', rank: 6.001, status: 'CheckedIn' }]);
   assert.equal(team.entryRanking, null);
-  const [fencer] = require('../src/services/ftlConfiguration').parseRoster([
-    { id, name: 'BELISSA Simon', country: 'FRA', rank: 12 },
-  ]);
+  const [fencer] = parseRoster([{ id, name: 'BELISSA Simon', country: 'FRA', rank: 12 }]);
   assert.equal(fencer.entryRanking, 12);
-  for (const rank of [-1, 0, 'abc'])
-    assert.throws(
-      () => require('../src/services/ftlConfiguration').parseRoster([{ id, name: 'X', rank }]),
-      /Rang d’engagement/,
-    );
+  for (const rank of [-1, 0, 'abc']) assert.throws(() => parseRoster([{ id, name: 'X', rank }]), /Rang d’engagement/);
 });

@@ -174,7 +174,12 @@ test('multijours : disparition d’une session refusée sans écriture', async (
   assert.equal(d.writes.length, 0);
 });
 
-function renamed({ event = config.event, date = 'Thursday, October 22, 2026', scheduleLink = true, stored = config } = {}) {
+function renamed({
+  event = config.event,
+  date = 'Thursday, October 22, 2026',
+  scheduleLink = true,
+  stored = config,
+} = {}) {
   const writes = [],
     renames = [];
   const html = `<span class="desktop tournName">Synthetic Cup 2026</span><span class="desktop eventName">${event}</span><span class="desktop eventTime">${date} 1:00 PM</span><a href="/events/competitors/${id}">Fencers</a>${scheduleLink ? `<a href="/tournaments/eventSchedule/${scheduleId}">Schedule</a>` : ''}`;
@@ -201,9 +206,7 @@ test('tournoi renommé sur la source : même épreuve et même calendrier, le no
   assert.equal(next.poolSources[0], 'unchanged-pools');
   assert.equal(d.writes[0].after.tournament, 'Synthetic Cup 2026');
   assert.equal(d.writes[1].action, 'Nom officiel du tournoi actualisé');
-  assert.deepEqual(d.renames, [
-    { where: { id: 14, name: 'Synthetic Cup' }, data: { name: 'Synthetic Cup 2026' } },
-  ]);
+  assert.deepEqual(d.renames, [{ where: { id: 14, name: 'Synthetic Cup' }, data: { name: 'Synthetic Cup 2026' } }]);
 });
 test('tournoi renommé : autre épreuve, autre jour ou calendrier absent restent refusés', async () => {
   for (const options of [
