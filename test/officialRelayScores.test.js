@@ -19,6 +19,29 @@ const row = (a, b, ta, tb) =>
 const html = (rows, a = 'TEAM ALPHA', b = 'TEAM BRAVO') =>
   `<table class="tmTable"><thead><tr><th>#</th><th>${a}</th><th>TS</th><th>Score</th><th>Score</th><th>TS</th><th>${b}</th><th>#</th></tr></thead><tbody>${rows}</tbody></table>`;
 const sample = html(row(5, 3, 5, 3) + row(8, 10, 3, 7) + row('', '', '', ''));
+const footer = (a, b) =>
+  `<tr class="tmTableFooter"><td></td><td></td><td></td><td>${a}</td><td>${b}</td><td></td><td></td><td></td></tr>`;
+test('the total row published under a finished team match is ignored', () => {
+  const scores = [
+    [0, 5, 0, 5],
+    [3, 10, 3, 5],
+    [4, 15, 1, 5],
+    [4, 20, 0, 5],
+    [6, 25, 2, 5],
+    [6, 30, 0, 5],
+    [9, 35, 3, 5],
+    [13, 40, 4, 5],
+    [14, 45, 1, 5],
+  ];
+  const nine = scores.map(([a, b, ta, tb]) => row(a, b, ta, tb)).join('');
+  const result = service.parseRelayScores(html(nine + footer('D14', 'V45')), match);
+  assert.deepEqual(
+    result.map((x) => [x.period, x.score1, x.score2]),
+    scores.map(([a, b], i) => [i + 1, a, b]),
+  );
+  assert.equal(service.parseRelayScores(html(row(5, 3, 5, 3) + row('', '', '', '') + footer('', '')), match).length, 1);
+  assert.throws(() => service.parseRelayScores(html(nine + row(14, 45, 0, 0) + footer('D14', 'V45')), match));
+});
 test('official relay totals, pending row and reversed teams are parsed without creating touches', () => {
   const result = service.parseRelayScores(sample, match);
   assert.deepEqual(

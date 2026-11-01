@@ -39,7 +39,8 @@ function parseRelayScores(html, match) {
   const forward = norm(heads[1]) === norm(match.player1) && norm(heads[6]) === norm(match.player2);
   const reverse = norm(heads[1]) === norm(match.player2) && norm(heads[6]) === norm(match.player1);
   if (!forward && !reverse) throw new Error('Équipes du bilan différentes de la rencontre.');
-  const rows = table.find('tbody tr').toArray();
+  // FencingTimeLive adds a total row (e.g. D14 / V45) under the nine relays.
+  const rows = table.find('tbody tr').not('.tmTableFooter').toArray();
   if (rows.length > 9) throw new Error('Nombre de relais inattendu.');
   let previous = [0, 0],
     incomplete = false;
