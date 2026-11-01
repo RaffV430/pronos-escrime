@@ -712,7 +712,8 @@
       "categories": ["SENIOR"],
       "format": "INDIVIDUAL",
       "level": "national",
-      "selectionIds": [6]
+      "selectionIds": [6],
+      "qualificationStages": ["https://engarde-service.com/competition/cerclescrimepam/ehs_2026/qualif"]
     },
     {
       "id": "epee-2026-11-14-berne-7",
