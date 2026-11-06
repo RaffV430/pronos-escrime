@@ -5,6 +5,7 @@ const ORIGIN = 'https://www.fencingtimelive.com';
 function failure(message, status = 502) {
   return Object.assign(new Error(message), { status });
 }
+const clip = (text) => (text.trim().length > 120 ? `${text.trim().slice(0, 120)}…` : text.trim());
 
 // A new isolated session for each manual control. No cookies or credentials leave this module.
 function createClient({
@@ -54,11 +55,16 @@ function createClient({
         'Content-Type': 'application/x-www-form-urlencoded',
         'x-csrf-token': token,
       });
-      if (result.status !== 200)
+      if (result.status !== 200) {
+        // Réponse officielle (ex. 400 « Incorrect username or password ») : distingue un compte refusé
+        // d'un blocage du serveur. Texte court seulement, jamais une page entière.
+        const said =
+          typeof result.data === 'string' && !/</.test(result.data) ? clip(result.data.replace(/\s+/g, ' ')) : '';
         throw failure(
-          'Connexion du compte FencingTimeLive refusée. Vérifiez le mot de passe et la validation de l’e-mail.',
+          `Connexion du compte FencingTimeLive refusée (HTTP ${result.status}${said ? ` : ${said}` : ''}). Vérifiez le mot de passe et la validation de l’e-mail.`,
           503,
         );
+      }
     },
     async get(path) {
       const response = await request(path);

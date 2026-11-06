@@ -185,6 +185,29 @@ test('dedicated client keeps cookies and password server-side and rejects extern
   assert.equal(calls[1].headers['x-csrf-token'], 'test-csrf');
   await assert.rejects(client.get('https://other.example/'), /non autorisée/);
 });
+test('refused FencingTimeLive login reports the official status and short reason only', async () => {
+  const refuse = (status, data) =>
+    createClient({
+      email: 'dedicated@example.com',
+      password: 'test-only',
+      http: {
+        request: async (cfg) =>
+          cfg.url.endsWith('/account/login')
+            ? { status: 200, headers: {}, data: '<meta name="csrf_token" content="test-csrf">' }
+            : { status, headers: {}, data },
+      },
+    });
+  await assert.rejects(refuse(400, 'Incorrect username or password').login(), (e) => {
+    assert.equal(e.status, 503);
+    assert.match(e.message, /\(HTTP 400 : Incorrect username or password\)/);
+    return true;
+  });
+  await assert.rejects(refuse(403, '<html><body>Access denied</body></html>').login(), (e) => {
+    assert.match(e.message, /\(HTTP 403\)/);
+    assert.doesNotMatch(e.message, /html|test-only/);
+    return true;
+  });
+});
 test('podium needs final/bronze proof and exact entry ID plus full name', () => {
   const c = { podiumFormat: 'TEAM', podiumRoster: ['A', 'B', 'C'].map((name) => ({ id: name, name })) };
   const rows = ['A', 'B', 'C'].map((name, i) => ({ id: name, name, place: i + 1 }));
