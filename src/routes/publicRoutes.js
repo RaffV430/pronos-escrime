@@ -56,6 +56,7 @@ async function publicTournament(tournamentId) {
           officialPodium: true,
           podiumResolvedAt: true,
           resultsSourceUrl: true,
+          ftlEventId: true,
         },
         orderBy: { id: 'asc' },
       },
@@ -189,7 +190,12 @@ async function publicList() {
       end: metadata.end || r?.end || null,
       city: metadata.city || r?.city || null,
       countries: metadata.countries.length ? metadata.countries : r?.countries || [],
-      finished: Boolean(r && r.competitions.length === t.competitions.length),
+      // Une journée qualificative n'a pas de podium : elle ne retient pas le tournoi « en cours ».
+      finished: Boolean(
+        r &&
+        r.competitions.length ===
+          t.competitions.filter((c) => !require('../services/qualificationStage').isQualification(c)).length,
+      ),
       competitions: t.competitions.map((c) => {
         const config = configs.get(c.id);
         // Pas de faux minuit : le compte à rebours requiert un horaire configuré.

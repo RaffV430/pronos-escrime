@@ -33,6 +33,8 @@ function availability(competition, config, matches) {
   return { notYetOpen: false };
 }
 async function forCompetition(db, competition) {
+  const stage = require('./qualificationStage');
+  if (stage.isQualification(competition)) return { notYetOpen: true, noPodium: true, reason: stage.REASON };
   const config = await require('./ftlConfiguration').configuration(db, competition.id);
   if (!config?.scheduleSessions?.[1]) return { notYetOpen: false };
   const matches = await db.match.findMany({

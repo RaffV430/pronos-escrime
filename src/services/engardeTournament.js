@@ -203,7 +203,13 @@ async function save(db, input, actorId, client = createEngardeClient(), calendar
         if (c && c.podiumFormat !== event.format) throw new E.EngardeError('Format existant différent.', 409);
         if (!c)
           c = await tx.competition.create({
-            data: { name: event.event, tournamentId: tournament.id, podiumFormat: event.format, ftlEventId: key },
+            data: {
+              // Journée qualificative publiée à part : nom distinct de l'épreuve du lendemain.
+              name: require('./qualificationStage').stageName(event.event, key),
+              tournamentId: tournament.id,
+              podiumFormat: event.format,
+              ftlEventId: key,
+            },
           });
         if (c.ftlEventId !== key) c = await tx.competition.update({ where: { id: c.id }, data: { ftlEventId: key } });
         if (roster && !c.podiumRoster)
